@@ -19,7 +19,7 @@ func ExtractTagPaths(text string) []string {
 		start := i
 		for i < len(runes) {
 			r := runes[i]
-			if unicode.IsSpace(r) || isTagBoundary(r) {
+			if isTagBoundary(r) {
 				break
 			}
 			i++
@@ -64,16 +64,13 @@ func expandPath(path string) []string {
 }
 
 func isTagBoundary(r rune) bool {
-	switch r {
-	case '#',
-		'.', ',', ';', ':', '!', '?',
-		'(', ')', '[', ']', '{', '}',
-		'"', '\'', '`',
-		'，', '。', '；', '：', '！', '？',
-		'（', '）', '【', '】', '《', '》', '、',
-		'“', '”', '‘', '’':
-		return true
-	default:
+	if r == '/' {
 		return false
 	}
+
+	if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+		return true
+	}
+
+	return false
 }
