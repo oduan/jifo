@@ -20,7 +20,8 @@ CREATE TABLE user_sessions (
     jwt_version bigint NOT NULL DEFAULT 1,
     revoked_at timestamptz,
     last_seen_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT user_sessions_id_user_id_unique UNIQUE (id, user_id)
 );
 
 CREATE INDEX idx_user_sessions_user_device ON user_sessions(user_id, device_code);
@@ -38,9 +39,13 @@ CREATE TABLE notes (
     purge_after timestamptz,
     permanently_deleted_at timestamptz,
     version bigint NOT NULL DEFAULT 1,
-    conflict_of_note_id uuid REFERENCES notes(id),
+    conflict_of_note_id uuid,
     conflict_reason text,
-    UNIQUE(user_id, client_id)
+    CONSTRAINT notes_user_id_client_id_unique UNIQUE (user_id, client_id),
+    CONSTRAINT notes_id_user_id_unique UNIQUE (id, user_id),
+    CONSTRAINT notes_conflict_same_user_fk FOREIGN KEY (conflict_of_note_id, user_id)
+        REFERENCES notes(id, user_id)
+        ON DELETE SET NULL (conflict_of_note_id)
 );
 
 CREATE INDEX idx_notes_user_updated_id ON notes(user_id, updated_at, id);
@@ -58,18 +63,31 @@ CREATE TABLE media_assets (
     created_at timestamptz NOT NULL DEFAULT now(),
     deleted_at timestamptz,
     purge_after timestamptz,
-    purged_at timestamptz
+    purged_at timestamptz,
+    CONSTRAINT media_assets_id_user_id_unique UNIQUE (id, user_id)
 );
 
 CREATE INDEX idx_media_assets_user_deleted_purge ON media_assets(user_id, deleted_at, purge_after);
 CREATE INDEX idx_media_assets_user_purged ON media_assets(user_id, purged_at);
 
+ALTER TABLE users
+    ADD CONSTRAINT users_avatar_media_fk
+    FOREIGN KEY (avatar_media_id, id)
+    REFERENCES media_assets(id, user_id)
+    ON DELETE SET NULL (avatar_media_id);
+
 CREATE TABLE note_media_refs (
-    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    media_id uuid NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+    note_id uuid NOT NULL,
+    media_id uuid NOT NULL,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (note_id, media_id)
+    PRIMARY KEY (note_id, media_id),
+    CONSTRAINT note_media_refs_note_user_fk FOREIGN KEY (note_id, user_id)
+        REFERENCES notes(id, user_id)
+        ON DELETE CASCADE,
+    CONSTRAINT note_media_refs_media_user_fk FOREIGN KEY (media_id, user_id)
+        REFERENCES media_assets(id, user_id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX idx_note_media_refs_user_media ON note_media_refs(user_id, media_id);
@@ -79,25 +97,35 @@ CREATE TABLE tags (
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name text NOT NULL,
     path text NOT NULL,
-    parent_id uuid REFERENCES tags(id) ON DELETE CASCADE,
+    parent_id uuid,
     depth integer NOT NULL,
     note_count integer NOT NULL DEFAULT 0,
     pinned boolean NOT NULL DEFAULT false,
     sort_order integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE(user_id, path)
+    CONSTRAINT tags_user_id_path_unique UNIQUE (user_id, path),
+    CONSTRAINT tags_id_user_id_unique UNIQUE (id, user_id),
+    CONSTRAINT tags_parent_same_user_fk FOREIGN KEY (parent_id, user_id)
+        REFERENCES tags(id, user_id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX idx_tags_user_parent_sort ON tags(user_id, parent_id, sort_order);
 CREATE INDEX idx_tags_user_pinned_sort ON tags(user_id, pinned, sort_order);
 
 CREATE TABLE note_tags (
-    note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    tag_id uuid NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    note_id uuid NOT NULL,
+    tag_id uuid NOT NULL,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE(user_id, note_id, tag_id)
+    CONSTRAINT note_tags_user_note_tag_unique UNIQUE (user_id, note_id, tag_id),
+    CONSTRAINT note_tags_note_user_fk FOREIGN KEY (note_id, user_id)
+        REFERENCES notes(id, user_id)
+        ON DELETE CASCADE,
+    CONSTRAINT note_tags_tag_user_fk FOREIGN KEY (tag_id, user_id)
+        REFERENCES tags(id, user_id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX idx_note_tags_user_tag_note ON note_tags(user_id, tag_id, note_id);
@@ -105,7 +133,7 @@ CREATE INDEX idx_note_tags_user_tag_note ON note_tags(user_id, tag_id, note_id);
 CREATE TABLE sync_operations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id uuid REFERENCES user_sessions(id) ON DELETE SET NULL,
+    session_id uuid,
     op_id text NOT NULL,
     entity text NOT NULL,
     action text NOT NULL,
@@ -115,7 +143,10 @@ CREATE TABLE sync_operations (
     status text NOT NULL,
     result_json jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE(user_id, op_id)
+    CONSTRAINT sync_operations_user_id_op_id_unique UNIQUE (user_id, op_id),
+    CONSTRAINT sync_operations_session_same_user_fk FOREIGN KEY (session_id, user_id)
+        REFERENCES user_sessions(id, user_id)
+        ON DELETE SET NULL (session_id)
 );
 
 CREATE INDEX idx_sync_operations_user_created ON sync_operations(user_id, created_at);
