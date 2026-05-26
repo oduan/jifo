@@ -1,0 +1,8 @@
+.superpowers/
+backend/storage/media/*
+!backend/storage/media/.gitkeep
+backend/bin/
+backend/.env
+web/node_modules/
+web/dist/
+.DS_Store

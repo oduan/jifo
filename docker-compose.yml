@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: jifo
+      POSTGRES_PASSWORD: jifo
+      POSTGRES_DB: jifo
+    ports:
+      - "5432:5432"
+    volumes:
+      - jifo_pgdata:/var/lib/postgresql/data
+volumes:
+  jifo_pgdata:
