@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,8 @@ const (
 	userIDContextKey    contextKey = "user-id"
 	sessionIDContextKey contextKey = "session-id"
 )
+
+var ErrUnauthorized = errors.New("unauthorized")
 
 type TokenValidator func(ctx context.Context, tokenString string) (uuid.UUID, uuid.UUID, error)
 
@@ -38,7 +41,11 @@ func RequireAuth(validator TokenValidator) func(http.Handler) http.Handler {
 			}
 			userID, sessionID, err := validator(r.Context(), token)
 			if err != nil {
-				WriteError(w, r, http.StatusUnauthorized, "unauthorized", "invalid access token")
+				if errors.Is(err, ErrUnauthorized) {
+					WriteError(w, r, http.StatusUnauthorized, "unauthorized", "invalid access token")
+					return
+				}
+				WriteError(w, r, http.StatusInternalServerError, "internal_error", "auth validation failed")
 				return
 			}
 			ctx := context.WithValue(r.Context(), userIDContextKey, userID)

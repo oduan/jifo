@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -67,10 +68,13 @@ func NewRouter(deps Dependencies) http.Handler {
 		api.Group(func(protected chi.Router) {
 			protected.Use(httpx.RequireAuth(func(ctx context.Context, tokenString string) (uuid.UUID, uuid.UUID, error) {
 				if deps.Auth == nil {
-					return uuid.Nil, uuid.Nil, auth.ErrInvalidAccessToken
+					return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
 				}
 				claims, err := deps.Auth.ValidateAccessToken(ctx, tokenString)
 				if err != nil {
+					if errors.Is(err, auth.ErrInvalidAccessToken) {
+						return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
+					}
 					return uuid.Nil, uuid.Nil, err
 				}
 				return claims.UserID, claims.SessionID, nil

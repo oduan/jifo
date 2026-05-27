@@ -35,6 +35,36 @@ func TestRequireAuthRejectsMissingBearerToken(t *testing.T) {
 	}
 }
 
+func TestRequireAuthDistinguishesUnauthorizedAndInternalErrors(t *testing.T) {
+	t.Run("unauthorized", func(t *testing.T) {
+		mw := RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {
+			return uuid.Nil, uuid.Nil, ErrUnauthorized
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+		req := httptest.NewRequest(http.MethodGet, "/api/notes", nil)
+		req.Header.Set("Authorization", "Bearer bad")
+		resp := httptest.NewRecorder()
+		h.ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", resp.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("internal", func(t *testing.T) {
+		mw := RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {
+			return uuid.Nil, uuid.Nil, errors.New("database down")
+		})
+		h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+		req := httptest.NewRequest(http.MethodGet, "/api/notes", nil)
+		req.Header.Set("Authorization", "Bearer maybe")
+		resp := httptest.NewRecorder()
+		h.ServeHTTP(resp, req)
+		if resp.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", resp.Code, http.StatusInternalServerError)
+		}
+	})
+}
+
 func TestRequireAuthInjectsUserIDToContext(t *testing.T) {
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	mw := RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {

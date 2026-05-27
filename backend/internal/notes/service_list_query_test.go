@@ -55,3 +55,21 @@ func TestBuildListQuerySupportsSearchTagPathTrashAndPagination(t *testing.T) {
 		t.Fatalf("pagination args = %v, want [20 40]", args[4:])
 	}
 }
+
+func TestBuildListQueryEscapesTagPathLikeWildcards(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	sql, args := buildListQuery(ListFilter{UserID: userID, TagPath: `项目%_\A`})
+
+	if !strings.Contains(sql, `LIKE $3 ESCAPE '\\'`) {
+		t.Fatalf("sql should use ESCAPE for tag LIKE, got: %s", sql)
+	}
+	if len(args) != 3 {
+		t.Fatalf("args len = %d, want 3", len(args))
+	}
+	if args[1] != `项目%_\A` {
+		t.Fatalf("exact tag arg = %q, want unescaped exact path", args[1])
+	}
+	if args[2] != `项目\%\_\\A/%` {
+		t.Fatalf("prefix tag arg = %q, want escaped wildcard prefix", args[2])
+	}
+}
