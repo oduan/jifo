@@ -94,6 +94,29 @@ func TestChangePasswordRevokesAllSessionsAndInvalidatesOldTokens(t *testing.T) {
 	if !errors.Is(err, auth.ErrInvalidAccessToken) {
 		t.Fatalf("ValidateAccessToken(loggedIn after change) error = %v, want %v", err, auth.ErrInvalidAccessToken)
 	}
+
+	reloggedIn, err := authSvc.Login(ctx, auth.LoginInput{
+		Email:      "change-password@example.com",
+		Password:   "new-password",
+		DeviceCode: "device-c",
+		DeviceName: "iPad",
+	})
+	if err != nil {
+		t.Fatalf("Login with new password: %v", err)
+	}
+	if _, err := authSvc.ValidateAccessToken(ctx, reloggedIn.AccessToken); err != nil {
+		t.Fatalf("ValidateAccessToken(reloggedIn): %v", err)
+	}
+	refreshed, err := authSvc.Refresh(ctx, reloggedIn.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh(new refresh token): %v", err)
+	}
+	if refreshed.AccessToken == "" || refreshed.RefreshToken == "" {
+		t.Fatal("refresh after relogin should return non-empty tokens")
+	}
+	if _, err := authSvc.ValidateAccessToken(ctx, refreshed.AccessToken); err != nil {
+		t.Fatalf("ValidateAccessToken(refreshed after relogin): %v", err)
+	}
 }
 
 func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {

@@ -24,6 +24,7 @@ func TestNewServiceValidatesAccessTokenSecret(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "empty secret", secret: "", wantErr: true},
+		{name: "whitespace secret", secret: "   ", wantErr: true},
 		{name: "short secret", secret: "too-short", wantErr: true},
 		{name: "valid secret", secret: testAccessTokenSecret, wantErr: false},
 	}
