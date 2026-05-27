@@ -219,6 +219,39 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	}
 }
 
+func TestCreateAndUpdateMaintainMediaRefs(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	firstMediaID := insertTestMedia(t, ctx, db, userID, "first")
+	secondMediaID := insertTestMedia(t, ctx, db, userID, "second")
+
+	svc := NewService(db, tags.NewService(db))
+	created, err := svc.Create(ctx, CreateInput{
+		UserID:    userID,
+		ClientID:  "note-media-1",
+		Content:   Content{Blocks: []Block{{Type: "paragraph", Text: "hello"}, {Type: "image", MediaID: &firstMediaID}}},
+		PlainText: "hello",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, firstMediaID, 1)
+
+	_, err = svc.Update(ctx, UpdateInput{
+		UserID:    userID,
+		NoteID:    created.ID,
+		Content:   Content{Blocks: []Block{{Type: "image", MediaID: &secondMediaID}}},
+		PlainText: "updated",
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, firstMediaID, 0)
+	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, secondMediaID, 1)
+}
+
 func TestMutationsRejectMissingOrCrossUserNotes(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
@@ -285,6 +318,18 @@ func assertTagCount(t *testing.T, ctx context.Context, db *pgxpool.Pool, userID 
 	}
 }
 
+func assertNoteMediaRefCount(t *testing.T, ctx context.Context, db *pgxpool.Pool, userID uuid.UUID, noteID uuid.UUID, mediaID uuid.UUID, want int) {
+	t.Helper()
+
+	var got int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM note_media_refs WHERE user_id = $1 AND note_id = $2 AND media_id = $3`, userID, noteID, mediaID).Scan(&got); err != nil {
+		t.Fatalf("count note_media_refs: %v", err)
+	}
+	if got != want {
+		t.Fatalf("note_media_refs count = %d, want %d", got, want)
+	}
+}
+
 func assertNoteTagCount(t *testing.T, ctx context.Context, db *pgxpool.Pool, userID uuid.UUID, noteID uuid.UUID, want int) {
 	t.Helper()
 
@@ -295,6 +340,20 @@ func assertNoteTagCount(t *testing.T, ctx context.Context, db *pgxpool.Pool, use
 	if got != want {
 		t.Fatalf("note_tags count = %d, want %d", got, want)
 	}
+}
+
+func insertTestMedia(t *testing.T, ctx context.Context, db *pgxpool.Pool, userID uuid.UUID, key string) uuid.UUID {
+	t.Helper()
+
+	mediaID := uuid.New()
+	_, err := db.Exec(ctx, `
+		INSERT INTO media_assets (id, user_id, kind, mime_type, size_bytes, storage_key, checksum)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, mediaID, userID, "image", "image/png", 10, key, "checksum-"+key)
+	if err != nil {
+		t.Fatalf("insert media: %v", err)
+	}
+	return mediaID
 }
 
 func insertTestUser(t *testing.T, ctx context.Context, db *pgxpool.Pool) uuid.UUID {

@@ -53,6 +53,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	if err := s.rebuildNoteTags(ctx, tx, input.UserID, note.ID, input.PlainText, nil); err != nil {
 		return Note{}, err
 	}
+	if err := s.rebuildMediaRefs(ctx, tx, input.UserID, note.ID, input.Content); err != nil {
+		return Note{}, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return Note{}, err
@@ -100,6 +103,9 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Note, error) {
 		return Note{}, err
 	}
 	if err := s.rebuildNoteTags(ctx, tx, input.UserID, input.NoteID, input.PlainText, oldTagIDs); err != nil {
+		return Note{}, err
+	}
+	if err := s.rebuildMediaRefs(ctx, tx, input.UserID, input.NoteID, input.Content); err != nil {
 		return Note{}, err
 	}
 
@@ -185,6 +191,9 @@ func (s *Service) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUI
 	if err := s.rebuildNoteTags(ctx, tx, userID, noteID, note.PlainText, nil); err != nil {
 		return Note{}, err
 	}
+	if err := s.rebuildMediaRefs(ctx, tx, userID, noteID, note.Content); err != nil {
+		return Note{}, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return Note{}, err
@@ -248,6 +257,32 @@ func (s *Service) rebuildNoteTags(ctx context.Context, tx pgx.Tx, userID uuid.UU
 
 	affected = append(affected, newTagIDs...)
 	return s.tags.RecountNoteCounts(ctx, tx, userID, affected)
+}
+
+func (s *Service) rebuildMediaRefs(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID, content Content) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM note_media_refs WHERE user_id = $1 AND note_id = $2`, userID, noteID); err != nil {
+		return err
+	}
+
+	seen := make(map[uuid.UUID]struct{})
+	for _, block := range content.Blocks {
+		if block.Type != "image" || block.MediaID == nil || *block.MediaID == uuid.Nil {
+			continue
+		}
+		mediaID := *block.MediaID
+		if _, ok := seen[mediaID]; ok {
+			continue
+		}
+		seen[mediaID] = struct{}{}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO note_media_refs (user_id, note_id, media_id)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (note_id, media_id) DO NOTHING
+		`, userID, noteID, mediaID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) currentTagIDs(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) ([]uuid.UUID, error) {
