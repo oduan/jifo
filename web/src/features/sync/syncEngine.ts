@@ -36,6 +36,13 @@ export type SyncEngineOptions = {
 
 const runningSyncDbNames = new Set<string>();
 const successfulPushStatuses = new Set(['created', 'updated', 'deleted', 'restored', 'delete_conflict_ignored', 'conflict_copied', 'duplicate']);
+const syncLockKey = 'sync_lock';
+const syncLockTtlMs = 30_000;
+
+type SyncLock = {
+  owner: string;
+  expiresAt: number;
+};
 
 function isLocalImageBlock(block: CachedNoteBlock): block is Extract<CachedNoteBlock, { type: 'image' }> & { localId: string } {
   return block.type === 'image' && Boolean(block.localId) && !block.mediaId;
@@ -43,6 +50,51 @@ function isLocalImageBlock(block: CachedNoteBlock): block is Extract<CachedNoteB
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function newLockOwner() {
+  const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `sync-${randomId}`;
+}
+
+function readSyncLock(value: unknown): SyncLock | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const lock = value as Partial<SyncLock>;
+  if (typeof lock.owner !== 'string' || typeof lock.expiresAt !== 'number') {
+    return undefined;
+  }
+  return { owner: lock.owner, expiresAt: lock.expiresAt };
+}
+
+async function acquireSyncLock(db: JifoDb): Promise<string | undefined> {
+  const owner = newLockOwner();
+  const now = Date.now();
+  let acquired = false;
+
+  await db.transaction('rw', db.sync_state, async () => {
+    const current = readSyncLock((await db.sync_state.get(syncLockKey))?.value);
+    if (current && current.expiresAt > now) {
+      return;
+    }
+    await db.sync_state.put({ key: syncLockKey, value: { owner, expiresAt: now + syncLockTtlMs } });
+    acquired = true;
+  });
+
+  return acquired ? owner : undefined;
+}
+
+async function releaseSyncLock(db: JifoDb, owner: string | undefined) {
+  if (!owner) {
+    return;
+  }
+  await db.transaction('rw', db.sync_state, async () => {
+    const current = readSyncLock((await db.sync_state.get(syncLockKey))?.value);
+    if (current?.owner === owner) {
+      await db.sync_state.delete(syncLockKey);
+    }
+  });
 }
 
 async function markOperations(db: JifoDb, operations: OutboxOperation[], status: 'pushing' | 'failed', lastError?: string) {
@@ -105,9 +157,33 @@ async function applyPushResult(db: JifoDb, result: PushResult) {
   }
 }
 
+async function applySuccessfulPushMetadata(db: JifoDb, op: OutboxOperation, result: PushResult) {
+  if (!result.noteId && result.version === undefined) {
+    return;
+  }
+
+  const localNote = await db.notes_cache.get(op.noteId ?? op.clientId);
+  const noteByClientId = localNote ?? (await db.notes_cache.where('clientId').equals(op.clientId).first());
+  if (!noteByClientId) {
+    return;
+  }
+
+  const nextId = result.noteId ?? noteByClientId.id;
+  const updatedNote = {
+    ...noteByClientId,
+    id: nextId,
+    version: result.version ?? noteByClientId.version
+  };
+
+  if (nextId !== noteByClientId.id) {
+    await db.notes_cache.delete(noteByClientId.id);
+  }
+  await db.notes_cache.put(updatedNote);
+}
+
 async function settlePushedOperations(db: JifoDb, selectedOps: OutboxOperation[], pushResults: PushResult[]) {
   const resultsByOpId = new Map(pushResults.map((result) => [result.opId, result]));
-  await db.transaction('rw', db.outbox, async () => {
+  await db.transaction('rw', db.outbox, db.notes_cache, async () => {
     for (const op of selectedOps) {
       if (op.localSeq === undefined) {
         continue;
@@ -118,6 +194,7 @@ async function settlePushedOperations(db: JifoDb, selectedOps: OutboxOperation[]
         continue;
       }
       if (successfulPushStatuses.has(result.status)) {
+        await applySuccessfulPushMetadata(db, op, result);
         await db.outbox.delete(op.localSeq);
         continue;
       }
@@ -161,8 +238,13 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
     return;
   }
   runningSyncDbNames.add(lockName);
+  let lockOwner: string | undefined;
 
   try {
+    lockOwner = await acquireSyncLock(db);
+    if (!lockOwner) {
+      return;
+    }
     const recoveredCount = await recoverInterruptedPushing(db);
     const selectedOps = recoveredCount > 0 ? [] : await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
     await markOperations(db, selectedOps, 'pushing');
@@ -192,6 +274,7 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
     await markPushingAsFailed(db, errorMessage(error));
     throw error;
   } finally {
+    await releaseSyncLock(db, lockOwner);
     runningSyncDbNames.delete(lockName);
   }
 }

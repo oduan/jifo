@@ -347,11 +347,20 @@ describe('runSync', () => {
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
-  test('后端返回 duplicate 时视为成功并清理 outbox', async () => {
+  test('后端返回 duplicate 时视为成功，清理 outbox 并回填 noteId/version', async () => {
+    await db.notes_cache.put({
+      id: 'local-note-duplicate',
+      clientId: 'client-1',
+      blocks: [{ type: 'paragraph', content: 'duplicate create' }],
+      createdAt: '2026-05-27T00:00:00Z',
+      updatedAt: '2026-05-27T00:00:00Z',
+      version: 0
+    });
     await db.outbox.add({
       opId: 'op-duplicate-1',
       entity: 'note',
       action: 'create',
+      noteId: 'local-note-duplicate',
       clientId: 'client-1',
       baseVersion: 0,
       payload: { blocks: [{ type: 'paragraph', content: 'duplicate create' }] },
@@ -367,6 +376,8 @@ describe('runSync', () => {
     });
 
     expect(await db.outbox.toArray()).toHaveLength(0);
+    expect(await db.notes_cache.get('local-note-duplicate')).toBeUndefined();
+    expect((await db.notes_cache.get('n-existing'))?.version).toBe(2);
   });
 
   test('启动同步时会恢复上次中断残留的 pushing outbox', async () => {
@@ -391,9 +402,18 @@ describe('runSync', () => {
       pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-after-recover' }, notes: [] })
     });
 
-    const [op] = await db.outbox.toArray();
+    let [op] = await db.outbox.toArray();
     expect(op.status).toBe('failed');
     expect(op.lastError).toBe('interrupted_sync');
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [{ opId: 'op-interrupted-1', status: 'updated', noteId: 'n1', version: 2 }],
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:01Z', id: 'n1' }, notes: [] })
+    });
+
+    expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
   test('push 返回失败状态时保留 outbox 并记录错误', async () => {
