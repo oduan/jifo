@@ -21,6 +21,10 @@ type Service struct {
 	now  func() time.Time
 }
 
+type MediaDeletionMarker interface {
+	MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error
+}
+
 func NewService(db *pgxpool.Pool, tagSvc *tags.Service) *Service {
 	return &Service{db: db, tags: tagSvc, now: time.Now}
 }
@@ -199,6 +203,68 @@ func (s *Service) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUI
 		return Note{}, err
 	}
 	return note, nil
+}
+
+func (s *Service) PermanentlyDeleteExpiredTrash(ctx context.Context, userID uuid.UUID, mediaMarker MediaDeletionMarker) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	now := s.now().UTC()
+	rows, err := tx.Query(ctx, `
+		SELECT id
+		FROM notes
+		WHERE user_id = $1
+		  AND deleted_at IS NOT NULL
+		  AND permanently_deleted_at IS NULL
+		  AND purge_after <= $2
+	`, userID, now)
+	if err != nil {
+		return 0, err
+	}
+
+	noteIDs := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		noteIDs = append(noteIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	for _, noteID := range noteIDs {
+		if _, err := tx.Exec(ctx, `
+			UPDATE notes
+			SET permanently_deleted_at = $3,
+			    updated_at = $3,
+			    version = version + 1
+			WHERE user_id = $1 AND id = $2
+		`, userID, noteID, now); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM note_media_refs WHERE user_id = $1 AND note_id = $2`, userID, noteID); err != nil {
+			return 0, err
+		}
+	}
+
+	if len(noteIDs) > 0 && mediaMarker != nil {
+		if err := mediaMarker.MarkUnreferencedAssetsForDeletion(ctx, tx, userID); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return int64(len(noteIDs)), nil
 }
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]Note, error) {

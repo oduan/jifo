@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"jifo/backend/internal/media"
 	"jifo/backend/internal/platform/testutil"
 	"jifo/backend/internal/tags"
 )
@@ -309,6 +310,73 @@ func TestMutationsRejectMissingOrCrossUserNotes(t *testing.T) {
 
 	assertTagCount(t, ctx, db, ownerID, "私有", 1)
 	assertNoteTagCount(t, ctx, db, ownerID, created.ID, 1)
+}
+
+func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	mediaID := insertTestMedia(t, ctx, db, userID, "expired-media")
+
+	tagSvc := tags.NewService(db)
+	noteSvc := NewService(db, tagSvc)
+	mediaSvc := media.NewService(db, t.TempDir())
+
+	created, err := noteSvc.Create(ctx, CreateInput{
+		UserID:    userID,
+		ClientID:  "note-permanent-1",
+		Content:   Content{Blocks: []Block{{Type: "image", MediaID: &mediaID}}},
+		PlainText: "#过期",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	trashTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	noteSvc.SetNowForTest(func() time.Time { return trashTime })
+	if _, err := noteSvc.MoveToTrash(ctx, userID, created.ID); err != nil {
+		t.Fatalf("MoveToTrash() error = %v", err)
+	}
+
+	permanentTime := trashTime.Add(31 * 24 * time.Hour)
+	noteSvc.SetNowForTest(func() time.Time { return permanentTime })
+	mediaSvc.SetNowForTest(func() time.Time { return permanentTime })
+	count, err := noteSvc.PermanentlyDeleteExpiredTrash(ctx, userID, mediaSvc)
+	if err != nil {
+		t.Fatalf("PermanentlyDeleteExpiredTrash() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("permanently deleted count = %d, want 1", count)
+	}
+
+	var permanentlyDeletedAt *time.Time
+	if err := db.QueryRow(ctx, `SELECT permanently_deleted_at FROM notes WHERE user_id = $1 AND id = $2`, userID, created.ID).Scan(&permanentlyDeletedAt); err != nil {
+		t.Fatalf("query note permanently_deleted_at: %v", err)
+	}
+	if permanentlyDeletedAt == nil || !permanentlyDeletedAt.Equal(permanentTime) {
+		t.Fatalf("permanently_deleted_at = %v, want %v", permanentlyDeletedAt, permanentTime)
+	}
+	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, mediaID, 0)
+
+	var mediaDeletedAt, mediaPurgeAfter *time.Time
+	if err := db.QueryRow(ctx, `SELECT deleted_at, purge_after FROM media_assets WHERE user_id = $1 AND id = $2`, userID, mediaID).Scan(&mediaDeletedAt, &mediaPurgeAfter); err != nil {
+		t.Fatalf("query media deletion fields: %v", err)
+	}
+	if mediaDeletedAt == nil || !mediaDeletedAt.Equal(permanentTime) {
+		t.Fatalf("media deleted_at = %v, want %v", mediaDeletedAt, permanentTime)
+	}
+	if mediaPurgeAfter == nil || !mediaPurgeAfter.Equal(permanentTime) {
+		t.Fatalf("media purge_after = %v, want %v", mediaPurgeAfter, permanentTime)
+	}
+
+	trashNotes, err := noteSvc.List(ctx, ListFilter{UserID: userID, Trash: true})
+	if err != nil {
+		t.Fatalf("List(trash) error = %v", err)
+	}
+	if len(trashNotes) != 0 {
+		t.Fatalf("trash notes len = %d, want 0 after permanent deletion", len(trashNotes))
+	}
 }
 
 func TestCreateDeduplicatesRepeatedTags(t *testing.T) {
