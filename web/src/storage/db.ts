@@ -28,7 +28,7 @@ export type CachedMedia = {
 
 export type OutboxEntity = 'note' | 'media';
 export type OutboxAction = 'create' | 'update' | 'delete' | 'restore';
-export type OutboxStatus = 'pending' | 'pushing' | 'done' | 'failed';
+export type OutboxStatus = 'pending' | 'pushing' | 'failed';
 
 export type OutboxOperation = {
   localSeq?: number;

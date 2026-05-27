@@ -82,7 +82,31 @@ async function acquireSyncLock(db: JifoDb): Promise<string | undefined> {
     acquired = true;
   });
 
-  return acquired ? owner : undefined;
+  if (!acquired) {
+    return undefined;
+  }
+
+  const confirmed = readSyncLock((await db.sync_state.get(syncLockKey))?.value);
+  return confirmed?.owner === owner ? owner : undefined;
+}
+
+async function refreshSyncLock(db: JifoDb, owner: string) {
+  let refreshed = false;
+  await db.transaction('rw', db.sync_state, async () => {
+    const current = readSyncLock((await db.sync_state.get(syncLockKey))?.value);
+    if (current?.owner !== owner) {
+      return;
+    }
+    await db.sync_state.put({ key: syncLockKey, value: { owner, expiresAt: Date.now() + syncLockTtlMs } });
+    refreshed = true;
+  });
+  return refreshed;
+}
+
+async function ensureSyncLock(db: JifoDb, owner: string) {
+  if (!(await refreshSyncLock(db, owner))) {
+    throw new Error('sync lock lost');
+  }
 }
 
 async function releaseSyncLock(db: JifoDb, owner: string | undefined) {
@@ -244,6 +268,7 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
     if (!lockOwner) {
       return;
     }
+    await ensureSyncLock(db, lockOwner);
     const recoveredCount = await recoverInterruptedPushing(db);
     const selectedOps = recoveredCount > 0 ? [] : await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
     await markOperations(db, selectedOps, 'pushing');
@@ -255,6 +280,7 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
       }
 
       if (pushableOps.length > 0) {
+        await ensureSyncLock(db, lockOwner);
         const pushResults = await pushOutbox(pushableOps);
         for (const result of pushResults) {
           await applyPushResult(db, result);
@@ -266,6 +292,7 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
       throw error;
     }
 
+    await ensureSyncLock(db, lockOwner);
     const cursor = readCursor((await db.sync_state.get('cursor'))?.value);
     const changes = await pullChanges(cursor);
     await applyPullChanges(db, changes);

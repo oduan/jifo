@@ -246,6 +246,35 @@ describe('runSync', () => {
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
+  test('已有未过期 sync_lock 时不会修改 outbox 或执行 push', async () => {
+    await db.sync_state.put({
+      key: 'sync_lock',
+      value: { owner: 'other-context', expiresAt: Date.now() + 30_000 }
+    });
+    await db.outbox.add({
+      opId: 'op-lock-held-1',
+      entity: 'note',
+      action: 'create',
+      clientId: 'client-1',
+      baseVersion: 0,
+      payload: { blocks: [{ type: 'paragraph', content: 'locked' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+    const pushOutbox = vi.fn(async () => [{ opId: 'op-lock-held-1', status: 'created' }]);
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox,
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-locked' }, notes: [] })
+    });
+
+    const [op] = await db.outbox.toArray();
+    expect(pushOutbox).not.toHaveBeenCalled();
+    expect(op.status).toBe('pending');
+  });
+
   test('同名 DB 多实例并发 runSync 也只会推送一次同一批 outbox', async () => {
     await db.outbox.add({
       opId: 'op-db-lock-1',
