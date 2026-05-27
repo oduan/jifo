@@ -26,9 +26,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   const request = async <T>(
     path: string,
     init: RequestInit = {},
-    allowRefresh = true
+    allowRefresh = true,
+    accessTokenOverride?: string
   ): Promise<T> => {
-    const token = options.getAccessToken();
+    const token = accessTokenOverride ?? options.getAccessToken();
     const headers = new Headers(init.headers ?? undefined);
 
     if (token) {
@@ -43,7 +44,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     if (response.status === 401 && allowRefresh && options.refreshAccessToken) {
       const refreshedToken = await options.refreshAccessToken();
       if (refreshedToken) {
-        return request<T>(path, init, false);
+        return request<T>(path, init, false, refreshedToken);
       }
     }
 

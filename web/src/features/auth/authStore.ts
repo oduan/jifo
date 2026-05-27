@@ -13,7 +13,7 @@ function notify() {
 
 export const authStore = {
   getState(): AuthState {
-    return state;
+    return { ...state };
   },
 
   isAuthenticated(): boolean {

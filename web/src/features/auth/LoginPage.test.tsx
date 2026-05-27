@@ -1,9 +1,15 @@
-import { describe, expect, test, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { createApiClient } from '../../shared/api/client';
 import { LoginPage } from './LoginPage';
+import { authStore } from './authStore';
+
+afterEach(() => {
+  authStore.clear();
+  cleanup();
+});
 
 describe('api client', () => {
   test('request 会自动携带 Authorization header', async () => {
@@ -58,6 +64,43 @@ describe('api client', () => {
     const retriedHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
     expect(retriedHeaders.get('Authorization')).toBe('Bearer fresh-token');
   });
+
+  test('refresh 返回的新 token 会直接用于重试请求', async () => {
+    const refreshAccessToken = vi.fn(async () => 'fresh-token');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('unauthorized', { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+    const client = createApiClient({
+      baseUrl: 'https://api.example.com',
+      getAccessToken: () => 'expired-token',
+      refreshAccessToken,
+      fetchImpl
+    });
+
+    await client.request<{ ok: boolean }>('/notes');
+
+    const retriedHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
+    expect(retriedHeaders.get('Authorization')).toBe('Bearer fresh-token');
+  });
+});
+
+describe('authStore', () => {
+  test('getState 返回状态副本，外部修改不会污染 store', () => {
+    authStore.setAccessToken('token-1');
+
+    const snapshot = authStore.getState();
+    snapshot.accessToken = 'tampered-token';
+
+    expect(authStore.getState().accessToken).toBe('token-1');
+    authStore.clear();
+  });
 });
 
 describe('LoginPage', () => {
@@ -84,5 +127,47 @@ describe('LoginPage', () => {
       });
       expect(onSuccess).toHaveBeenCalledWith({ accessToken: 'token-1' });
     });
+  });
+
+  test('提交失败时显示错误提示', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => {
+      throw new Error('邮箱或密码错误');
+    });
+
+    render(<LoginPage onSubmit={onSubmit} />);
+
+    await user.type(screen.getByLabelText('Email'), 'user@example.com');
+    await user.type(screen.getByLabelText('Password'), 'wrong-password');
+    await user.type(screen.getByLabelText('Device Name'), 'Oisin-Laptop');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('邮箱或密码错误');
+  });
+
+  test('提交中会禁用按钮避免重复提交', async () => {
+    const user = userEvent.setup();
+    let resolveSubmit: (value: { accessToken: string }) => void = () => undefined;
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<{ accessToken: string }>((resolve) => {
+          resolveSubmit = resolve;
+        })
+    );
+
+    render(<LoginPage onSubmit={onSubmit} />);
+
+    await user.type(screen.getByLabelText('Email'), 'user@example.com');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.type(screen.getByLabelText('Device Name'), 'Oisin-Laptop');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    const submittingButton = await screen.findByRole('button', { name: '登录中...' });
+    expect(submittingButton).toBeDisabled();
+
+    await user.click(submittingButton);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    resolveSubmit({ accessToken: 'token-1' });
   });
 });
