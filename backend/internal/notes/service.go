@@ -162,18 +162,19 @@ func (s *Service) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUI
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	now := s.now().UTC()
 	note, err := scanNote(tx.QueryRow(ctx, `
 		UPDATE notes
 		SET deleted_at = NULL,
 		    purge_after = NULL,
-		    updated_at = now(),
+		    updated_at = $3,
 		    version = version + 1
 		WHERE user_id = $1
 		  AND id = $2
 		  AND deleted_at IS NOT NULL
 		  AND permanently_deleted_at IS NULL
 		RETURNING id, user_id, client_id, content, plain_text, created_at, updated_at, deleted_at, purge_after, permanently_deleted_at, version
-	`, userID, noteID))
+	`, userID, noteID, now))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Note{}, ErrNoteNotFound
 	}

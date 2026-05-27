@@ -194,6 +194,9 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	if restored.PurgeAfter != nil {
 		t.Fatalf("purge_after = %v, want nil", restored.PurgeAfter)
 	}
+	if !restored.UpdatedAt.Equal(restoreNow) {
+		t.Fatalf("updated_at = %v, want %v", restored.UpdatedAt, restoreNow)
+	}
 
 	assertNoteTagCount(t, ctx, db, userID, created.ID, 2)
 	assertTagCount(t, ctx, db, userID, "恢复", 1)
@@ -214,6 +217,60 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	if len(trashNotes) != 0 {
 		t.Fatalf("trash notes len = %d, want 0", len(trashNotes))
 	}
+}
+
+func TestMutationsRejectMissingOrCrossUserNotes(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	ownerID := insertTestUser(t, ctx, db)
+	otherID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db, tags.NewService(db))
+	created, err := svc.Create(ctx, CreateInput{
+		UserID:    ownerID,
+		ClientID:  "note-negative-1",
+		Content:   textContent("#私有"),
+		PlainText: "#私有",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if _, err := svc.Update(ctx, UpdateInput{UserID: otherID, NoteID: created.ID, Content: textContent("#越权"), PlainText: "#越权"}); err != ErrNoteNotFound {
+		t.Fatalf("cross-user Update() error = %v, want %v", err, ErrNoteNotFound)
+	}
+	if _, err := svc.MoveToTrash(ctx, otherID, created.ID); err != ErrNoteNotFound {
+		t.Fatalf("cross-user MoveToTrash() error = %v, want %v", err, ErrNoteNotFound)
+	}
+	if _, err := svc.Restore(ctx, ownerID, uuid.New()); err != ErrNoteNotFound {
+		t.Fatalf("missing Restore() error = %v, want %v", err, ErrNoteNotFound)
+	}
+
+	assertTagCount(t, ctx, db, ownerID, "私有", 1)
+	assertNoteTagCount(t, ctx, db, ownerID, created.ID, 1)
+}
+
+func TestCreateDeduplicatesRepeatedTags(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db, tags.NewService(db))
+	created, err := svc.Create(ctx, CreateInput{
+		UserID:    userID,
+		ClientID:  "note-dedup-1",
+		Content:   textContent("#重复 #重复 #重复/子 #重复/子"),
+		PlainText: "#重复 #重复 #重复/子 #重复/子",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	assertTagCount(t, ctx, db, userID, "重复", 1)
+	assertTagCount(t, ctx, db, userID, "重复/子", 1)
+	assertNoteTagCount(t, ctx, db, userID, created.ID, 2)
 }
 
 func assertTagCount(t *testing.T, ctx context.Context, db *pgxpool.Pool, userID uuid.UUID, path string, want int) {
