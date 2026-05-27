@@ -11,7 +11,7 @@ export type MediaUploadResult = {
 
 export type PushResult = {
   opId: string;
-  status: 'created' | 'updated' | 'deleted' | 'restored' | 'delete_conflict_ignored' | 'conflict_copied' | string;
+  status: 'created' | 'updated' | 'deleted' | 'restored' | 'delete_conflict_ignored' | 'conflict_copied' | 'duplicate' | string;
   noteId?: string;
   version?: number;
   note?: CachedNote;
@@ -35,7 +35,7 @@ export type SyncEngineOptions = {
 };
 
 const runningSyncDbNames = new Set<string>();
-const successfulPushStatuses = new Set(['created', 'updated', 'deleted', 'restored', 'delete_conflict_ignored', 'conflict_copied']);
+const successfulPushStatuses = new Set(['created', 'updated', 'deleted', 'restored', 'delete_conflict_ignored', 'conflict_copied', 'duplicate']);
 
 function isLocalImageBlock(block: CachedNoteBlock): block is Extract<CachedNoteBlock, { type: 'image' }> & { localId: string } {
   return block.type === 'image' && Boolean(block.localId) && !block.mediaId;
@@ -149,6 +149,12 @@ async function markPushingAsFailed(db: JifoDb, lastError: string) {
   await markOperations(db, pushingOps, 'failed', lastError);
 }
 
+async function recoverInterruptedPushing(db: JifoDb) {
+  const pushingOps = await db.outbox.where('status').equals('pushing').toArray();
+  await markOperations(db, pushingOps, 'failed', 'interrupted_sync');
+  return pushingOps.length;
+}
+
 export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: SyncEngineOptions) {
   const lockName = db.name;
   if (runningSyncDbNames.has(lockName)) {
@@ -157,7 +163,8 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
   runningSyncDbNames.add(lockName);
 
   try {
-    const selectedOps = await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
+    const recoveredCount = await recoverInterruptedPushing(db);
+    const selectedOps = recoveredCount > 0 ? [] : await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
     await markOperations(db, selectedOps, 'pushing');
 
     const pushableOps: OutboxOperation[] = [];

@@ -347,6 +347,55 @@ describe('runSync', () => {
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
+  test('后端返回 duplicate 时视为成功并清理 outbox', async () => {
+    await db.outbox.add({
+      opId: 'op-duplicate-1',
+      entity: 'note',
+      action: 'create',
+      clientId: 'client-1',
+      baseVersion: 0,
+      payload: { blocks: [{ type: 'paragraph', content: 'duplicate create' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [{ opId: 'op-duplicate-1', status: 'duplicate', noteId: 'n-existing', version: 2 }],
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'n-existing' }, notes: [] })
+    });
+
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('启动同步时会恢复上次中断残留的 pushing outbox', async () => {
+    await db.outbox.add({
+      opId: 'op-interrupted-1',
+      entity: 'note',
+      action: 'update',
+      clientId: 'client-1',
+      noteId: 'n1',
+      baseVersion: 1,
+      payload: { blocks: [{ type: 'paragraph', content: 'stuck pushing' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pushing'
+    });
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => {
+        throw new Error('should not push restored operation until next run');
+      },
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-after-recover' }, notes: [] })
+    });
+
+    const [op] = await db.outbox.toArray();
+    expect(op.status).toBe('failed');
+    expect(op.lastError).toBe('interrupted_sync');
+  });
+
   test('push 返回失败状态时保留 outbox 并记录错误', async () => {
     await db.outbox.add({
       opId: 'op-failed-1',
