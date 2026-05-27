@@ -384,7 +384,7 @@ func TestPushDeleteVersionConflictIsIgnored(t *testing.T) {
 	}
 }
 
-func TestPushRestoreVersionConflictIsIgnored(t *testing.T) {
+func TestPushRestoreVersionConflictCreatesConflictCopy(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
 	resetSchemaAndMigrate(t, ctx, db)
@@ -397,28 +397,54 @@ func TestPushRestoreVersionConflictIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	trashed, err := noteSvc.MoveToTrash(ctx, userID, created.ID)
+	_, err = noteSvc.MoveToTrash(ctx, userID, created.ID)
 	if err != nil {
 		t.Fatalf("MoveToTrash() error = %v", err)
 	}
 
 	staleVersion := int64(1)
-	res, err := svc.Push(ctx, userID, &sessionID, Operation{OpID: "op-restore-conflict-1", Entity: "note", Action: "restore", EntityID: &created.ID, BaseVersion: &staleVersion})
+	res, err := svc.Push(ctx, userID, &sessionID, Operation{
+		OpID:        "op-restore-conflict-1",
+		Entity:      "note",
+		Action:      "restore",
+		EntityID:    &created.ID,
+		BaseVersion: &staleVersion,
+		Payload: Payload{
+			Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "#恢复冲突 客户端恢复内容"}}},
+			PlainText: "#恢复冲突 客户端恢复内容",
+		},
+	})
 	if err != nil {
 		t.Fatalf("Push(restore conflict) error = %v", err)
 	}
-	if res.Status != "restore_conflict_ignored" {
-		t.Fatalf("status = %q, want restore_conflict_ignored", res.Status)
+	if res.Status != "conflict_copied" {
+		t.Fatalf("status = %q, want conflict_copied", res.Status)
 	}
-	if res.Version != trashed.Version {
-		t.Fatalf("version = %d, want current trashed version %d", res.Version, trashed.Version)
+	if res.NoteID == nil || *res.NoteID == created.ID {
+		t.Fatalf("conflict note_id = %v, should be new and not original %s", res.NoteID, created.ID)
 	}
 	var deletedAt *time.Time
 	if err := db.QueryRow(ctx, `SELECT deleted_at FROM notes WHERE user_id = $1 AND id = $2`, userID, created.ID).Scan(&deletedAt); err != nil {
 		t.Fatalf("query deleted_at: %v", err)
 	}
 	if deletedAt == nil {
-		t.Fatal("deleted_at is nil, restore conflict should not restore note")
+		t.Fatal("deleted_at is nil, restore conflict should not restore original note")
+	}
+
+	var conflictOf *uuid.UUID
+	var conflictReason *string
+	var plainText string
+	if err := db.QueryRow(ctx, `SELECT conflict_of_note_id, conflict_reason, plain_text FROM notes WHERE user_id = $1 AND id = $2`, userID, *res.NoteID).Scan(&conflictOf, &conflictReason, &plainText); err != nil {
+		t.Fatalf("query restore conflict copy: %v", err)
+	}
+	if conflictOf == nil || *conflictOf != created.ID {
+		t.Fatalf("conflict_of_note_id = %v, want %s", conflictOf, created.ID)
+	}
+	if conflictReason == nil || *conflictReason != "version_conflict" {
+		t.Fatalf("conflict_reason = %v, want version_conflict", conflictReason)
+	}
+	if plainText != "这是一条冲突副本，原笔记已在其他设备被更新。\n\n----\n#恢复冲突 客户端恢复内容" {
+		t.Fatalf("plain_text = %q, want conflict hint + divider + client text", plainText)
 	}
 }
 

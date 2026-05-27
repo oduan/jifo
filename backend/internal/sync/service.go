@@ -154,17 +154,7 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 			return PushResult{}, err
 		}
 		if op.BaseVersion != nil && *op.BaseVersion != currentVersion {
-			conflictContent := notes.Content{Blocks: make([]notes.Block, 0, len(op.Payload.Content.Blocks)+2)}
-			conflictContent.Blocks = append(conflictContent.Blocks, notes.Block{Type: "paragraph", Text: "这是一条冲突副本，原笔记已在其他设备被更新。"}, notes.Block{Type: "divider"})
-			conflictContent.Blocks = append(conflictContent.Blocks, op.Payload.Content.Blocks...)
-			conflictNote, err := s.notes.CreateTx(ctx, tx, notes.CreateInput{UserID: userID, ClientID: "conflict-" + uuid.NewString(), Content: conflictContent, PlainText: op.Payload.PlainText})
-			if err != nil {
-				return PushResult{}, err
-			}
-			if _, err := tx.Exec(ctx, `UPDATE notes SET conflict_of_note_id = $3, conflict_reason = 'version_conflict' WHERE user_id = $1 AND id = $2`, userID, conflictNote.ID, *op.EntityID); err != nil {
-				return PushResult{}, err
-			}
-			return PushResult{Status: "conflict_copied", NoteID: &conflictNote.ID, Version: conflictNote.Version}, nil
+			return s.createConflictCopyTx(ctx, tx, userID, *op.EntityID, op.Payload)
 		}
 		updated, err := s.notes.UpdateTx(ctx, tx, notes.UpdateInput{UserID: userID, NoteID: *op.EntityID, Content: op.Payload.Content, PlainText: op.Payload.PlainText})
 		if err != nil {
@@ -196,7 +186,7 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 			return PushResult{}, err
 		}
 		if op.BaseVersion != nil && *op.BaseVersion != currentVersion {
-			return PushResult{Status: "restore_conflict_ignored", NoteID: op.EntityID, Version: currentVersion}, nil
+			return s.createConflictCopyTx(ctx, tx, userID, *op.EntityID, op.Payload)
 		}
 		restored, err := s.notes.RestoreTx(ctx, tx, userID, *op.EntityID)
 		if err != nil {
@@ -206,6 +196,39 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 	default:
 		return PushResult{}, fmt.Errorf("unsupported action: %s", op.Action)
 	}
+}
+
+func (s *Service) createConflictCopyTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, originalNoteID uuid.UUID, payload Payload) (PushResult, error) {
+	conflictContent := notes.Content{Blocks: make([]notes.Block, 0, len(payload.Content.Blocks)+2)}
+	conflictContent.Blocks = append(conflictContent.Blocks,
+		notes.Block{Type: "paragraph", Text: "这是一条冲突副本，原笔记已在其他设备被更新。"},
+		notes.Block{Type: "divider"},
+	)
+	conflictContent.Blocks = append(conflictContent.Blocks, payload.Content.Blocks...)
+
+	plainText := "这是一条冲突副本，原笔记已在其他设备被更新。\n\n----"
+	if payload.PlainText != "" {
+		plainText += "\n" + payload.PlainText
+	}
+
+	conflictNote, err := s.notes.CreateTx(ctx, tx, notes.CreateInput{
+		UserID:    userID,
+		ClientID:  "conflict-" + uuid.NewString(),
+		Content:   conflictContent,
+		PlainText: plainText,
+	})
+	if err != nil {
+		return PushResult{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE notes
+		SET conflict_of_note_id = $3,
+		    conflict_reason = 'version_conflict'
+		WHERE user_id = $1 AND id = $2
+	`, userID, conflictNote.ID, originalNoteID); err != nil {
+		return PushResult{}, err
+	}
+	return PushResult{Status: "conflict_copied", NoteID: &conflictNote.ID, Version: conflictNote.Version}, nil
 }
 
 func (s *Service) currentNoteVersionTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
