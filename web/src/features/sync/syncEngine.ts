@@ -158,25 +158,24 @@ async function applyPushResult(db: JifoDb, result: PushResult) {
 }
 
 async function applySuccessfulPushMetadata(db: JifoDb, op: OutboxOperation, result: PushResult) {
-  if (!result.noteId && result.version === undefined) {
+  if (result.status === 'conflict_copied' || !op.noteId || (!result.noteId && result.version === undefined)) {
     return;
   }
 
-  const localNote = await db.notes_cache.get(op.noteId ?? op.clientId);
-  const noteByClientId = localNote ?? (await db.notes_cache.where('clientId').equals(op.clientId).first());
-  if (!noteByClientId) {
+  const localNote = await db.notes_cache.get(op.noteId);
+  if (!localNote) {
     return;
   }
 
-  const nextId = result.noteId ?? noteByClientId.id;
+  const nextId = result.noteId ?? localNote.id;
   const updatedNote = {
-    ...noteByClientId,
+    ...localNote,
     id: nextId,
-    version: result.version ?? noteByClientId.version
+    version: result.version ?? localNote.version
   };
 
-  if (nextId !== noteByClientId.id) {
-    await db.notes_cache.delete(noteByClientId.id);
+  if (nextId !== localNote.id) {
+    await db.notes_cache.delete(localNote.id);
   }
   await db.notes_cache.put(updatedNote);
 }

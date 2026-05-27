@@ -506,7 +506,15 @@ describe('runSync', () => {
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
-  test('push 只返回 conflict_copied 状态时，仍可通过后续 pull 落地冲突副本', async () => {
+  test('conflict_copied 不会把原 note id 改成冲突副本 id，仍可通过 pull 落地冲突副本', async () => {
+    await db.notes_cache.put({
+      id: 'n1',
+      clientId: 'client-1',
+      blocks: [{ type: 'paragraph', content: 'server original' }],
+      updatedAt: '2026-05-27T00:00:00Z',
+      createdAt: '2026-05-27T00:00:00Z',
+      version: 1
+    });
     await db.outbox.add({
       opId: 'op-conflict-no-note',
       entity: 'note',
@@ -540,6 +548,7 @@ describe('runSync', () => {
       })
     });
 
+    expect((await db.notes_cache.get('n1'))?.blocks).toEqual([{ type: 'paragraph', content: 'server original' }]);
     expect((await db.notes_cache.get('conflict-from-pull'))?.conflictReason).toBe('version_conflict');
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
