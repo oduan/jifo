@@ -74,6 +74,10 @@ func (s *Service) Push(ctx context.Context, userID uuid.UUID, sessionID *uuid.UU
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))`, userID.String(), op.OpID); err != nil {
+		return PushResult{}, err
+	}
+
 	var existing []byte
 	err = tx.QueryRow(ctx, `
 		SELECT result_json

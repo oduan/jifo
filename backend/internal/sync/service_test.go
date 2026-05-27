@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,6 +64,73 @@ func TestPushOpIDIsIdempotentAndReturnsFirstResult(t *testing.T) {
 	}
 	if noteCount != 1 {
 		t.Fatalf("notes count = %d, want 1", noteCount)
+	}
+}
+
+func TestPushSameOpIDConcurrentOnlyCreatesOneNote(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	sessionID := insertTestSession(t, ctx, db, userID)
+
+	noteSvc := notes.NewService(db, tags.NewService(db))
+	svc := NewService(db, noteSvc)
+	op := Operation{
+		OpID:     "op-concurrent-1",
+		Entity:   "note",
+		Action:   "create",
+		ClientID: "client-concurrent-1",
+		Payload: Payload{
+			Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "#并发 hello"}}},
+			PlainText: "#并发 hello",
+		},
+	}
+
+	const workers = 8
+	var wg sync.WaitGroup
+	results := make([]PushResult, workers)
+	errs := make([]error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = svc.Push(ctx, userID, &sessionID, op)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Push worker %d error = %v", i, err)
+		}
+	}
+	firstID := results[0].NoteID
+	if firstID == nil {
+		t.Fatal("first result note_id is nil")
+	}
+	for i, result := range results {
+		if result.Status != "created" {
+			t.Fatalf("result[%d].status = %q, want created", i, result.Status)
+		}
+		if result.NoteID == nil || *result.NoteID != *firstID {
+			t.Fatalf("result[%d].note_id = %v, want %s", i, result.NoteID, *firstID)
+		}
+	}
+
+	var noteCount int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM notes WHERE user_id = $1`, userID).Scan(&noteCount); err != nil {
+		t.Fatalf("count notes: %v", err)
+	}
+	if noteCount != 1 {
+		t.Fatalf("notes count = %d, want 1", noteCount)
+	}
+	var opCount int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_operations WHERE user_id = $1 AND op_id = $2`, userID, op.OpID).Scan(&opCount); err != nil {
+		t.Fatalf("count sync_operations: %v", err)
+	}
+	if opCount != 1 {
+		t.Fatalf("sync_operations count = %d, want 1", opCount)
 	}
 }
 
