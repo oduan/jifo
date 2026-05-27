@@ -1,0 +1,88 @@
+import { describe, expect, test, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+import { createApiClient } from '../../shared/api/client';
+import { LoginPage } from './LoginPage';
+
+describe('api client', () => {
+  test('request 会自动携带 Authorization header', async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    });
+
+    const client = createApiClient({
+      baseUrl: 'https://api.example.com',
+      getAccessToken: () => 'token-abc',
+      fetchImpl
+    });
+
+    await client.request<{ ok: boolean }>('/me');
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const firstCallHeaders = new Headers(fetchImpl.mock.calls[0]?.[1]?.headers);
+    expect(firstCallHeaders.get('Authorization')).toBe('Bearer token-abc');
+  });
+
+  test('401 时会触发 refresh 并重试请求', async () => {
+    let accessToken = 'expired-token';
+    const refreshAccessToken = vi.fn(async () => {
+      accessToken = 'fresh-token';
+      return accessToken;
+    });
+
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('unauthorized', { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+    const client = createApiClient({
+      baseUrl: 'https://api.example.com',
+      getAccessToken: () => accessToken,
+      refreshAccessToken,
+      fetchImpl
+    });
+
+    const result = await client.request<{ ok: boolean }>('/notes');
+
+    expect(result.ok).toBe(true);
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    const retriedHeaders = new Headers(fetchImpl.mock.calls[1]?.[1]?.headers);
+    expect(retriedHeaders.get('Authorization')).toBe('Bearer fresh-token');
+  });
+});
+
+describe('LoginPage', () => {
+  test('填写 email/password/deviceName 后可提交并调用成功回调', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => {
+      return { accessToken: 'token-1' };
+    });
+    const onSuccess = vi.fn();
+
+    render(<LoginPage onSubmit={onSubmit} onSuccess={onSuccess} />);
+
+    await user.type(screen.getByLabelText('Email'), 'user@example.com');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.type(screen.getByLabelText('Device Name'), 'Oisin-Laptop');
+
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        email: 'user@example.com',
+        password: 'password123',
+        deviceName: 'Oisin-Laptop'
+      });
+      expect(onSuccess).toHaveBeenCalledWith({ accessToken: 'token-1' });
+    });
+  });
+});
