@@ -16,12 +16,17 @@ import (
 	"jifo/backend/internal/platform/testutil"
 )
 
-func TestChangePasswordRevokesAllSessionsAndInvalidatesOldRefreshTokens(t *testing.T) {
+const testAccessTokenSecret = "0123456789abcdef0123456789abcdef"
+
+func TestChangePasswordRevokesAllSessionsAndInvalidatesOldTokens(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
 	resetSchemaAndMigrate(t, ctx, db)
 
-	authSvc := auth.NewService(db, "test-secret", time.Hour)
+	authSvc, err := auth.NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 	registered, err := authSvc.Register(ctx, auth.RegisterInput{
 		Email:      "change-password@example.com",
 		Password:   "old-password",
@@ -39,6 +44,12 @@ func TestChangePasswordRevokesAllSessionsAndInvalidatesOldRefreshTokens(t *testi
 	})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
+	}
+	if _, err := authSvc.ValidateAccessToken(ctx, registered.AccessToken); err != nil {
+		t.Fatalf("ValidateAccessToken(registered before change): %v", err)
+	}
+	if _, err := authSvc.ValidateAccessToken(ctx, loggedIn.AccessToken); err != nil {
+		t.Fatalf("ValidateAccessToken(loggedIn before change): %v", err)
 	}
 
 	svc := NewService(db)
@@ -74,6 +85,14 @@ func TestChangePasswordRevokesAllSessionsAndInvalidatesOldRefreshTokens(t *testi
 	_, err = authSvc.Refresh(ctx, loggedIn.RefreshToken)
 	if !errors.Is(err, auth.ErrInvalidRefreshToken) {
 		t.Fatalf("second refresh after password change error = %v, want %v", err, auth.ErrInvalidRefreshToken)
+	}
+	_, err = authSvc.ValidateAccessToken(ctx, registered.AccessToken)
+	if !errors.Is(err, auth.ErrInvalidAccessToken) {
+		t.Fatalf("ValidateAccessToken(registered after change) error = %v, want %v", err, auth.ErrInvalidAccessToken)
+	}
+	_, err = authSvc.ValidateAccessToken(ctx, loggedIn.AccessToken)
+	if !errors.Is(err, auth.ErrInvalidAccessToken) {
+		t.Fatalf("ValidateAccessToken(loggedIn after change) error = %v, want %v", err, auth.ErrInvalidAccessToken)
 	}
 }
 

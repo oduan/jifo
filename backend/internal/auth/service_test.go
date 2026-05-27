@@ -15,12 +15,50 @@ import (
 	"jifo/backend/internal/platform/testutil"
 )
 
+const testAccessTokenSecret = "0123456789abcdef0123456789abcdef"
+
+func TestNewServiceValidatesAccessTokenSecret(t *testing.T) {
+	tests := []struct {
+		name    string
+		secret  string
+		wantErr bool
+	}{
+		{name: "empty secret", secret: "", wantErr: true},
+		{name: "short secret", secret: "too-short", wantErr: true},
+		{name: "valid secret", secret: testAccessTokenSecret, wantErr: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := NewService(nil, tt.secret, time.Hour)
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalidAccessTokenSecret) {
+					t.Fatalf("NewService error = %v, want %v", err, ErrInvalidAccessTokenSecret)
+				}
+				if svc != nil {
+					t.Fatal("service must be nil on invalid secret")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewService: %v", err)
+			}
+			if svc == nil {
+				t.Fatal("service must not be nil for valid secret")
+			}
+		})
+	}
+}
+
 func TestRegisterNormalizesEmailStoresHashedRefreshTokenAndRejectsDuplicate(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
 	resetSchemaAndMigrate(t, ctx, db)
 
-	svc := NewService(db, "test-secret", time.Hour)
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	result, err := svc.Register(ctx, RegisterInput{
 		Email:      "  Foo.Bar@Example.COM  ",
@@ -95,7 +133,10 @@ func TestLoginCreatesIndependentSessionsPerDevice(t *testing.T) {
 		t.Fatalf("insert user: %v", err)
 	}
 
-	svc := NewService(db, "test-secret", time.Hour)
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	first, err := svc.Login(ctx, LoginInput{
 		Email:      "login@example.com",
@@ -116,11 +157,11 @@ func TestLoginCreatesIndependentSessionsPerDevice(t *testing.T) {
 		t.Fatalf("second Login: %v", err)
 	}
 
-	firstClaims, err := ParseAccessToken("test-secret", first.AccessToken)
+	firstClaims, err := ParseAccessToken(testAccessTokenSecret, first.AccessToken)
 	if err != nil {
 		t.Fatalf("ParseAccessToken(first): %v", err)
 	}
-	secondClaims, err := ParseAccessToken("test-secret", second.AccessToken)
+	secondClaims, err := ParseAccessToken(testAccessTokenSecret, second.AccessToken)
 	if err != nil {
 		t.Fatalf("ParseAccessToken(second): %v", err)
 	}
@@ -143,7 +184,10 @@ func TestRefreshRotatesTokenAndRejectsPreviousRefreshToken(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	resetSchemaAndMigrate(t, ctx, db)
 
-	svc := NewService(db, "test-secret", time.Hour)
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 	registered, err := svc.Register(ctx, RegisterInput{
 		Email:      "refresh@example.com",
 		Password:   "refresh-password",
@@ -168,6 +212,60 @@ func TestRefreshRotatesTokenAndRejectsPreviousRefreshToken(t *testing.T) {
 	_, err = svc.Refresh(ctx, registered.RefreshToken)
 	if !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Fatalf("refresh with old token error = %v, want %v", err, ErrInvalidRefreshToken)
+	}
+}
+
+func TestValidateAccessTokenRejectsRevokedOrVersionMismatchedSession(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	registered, err := svc.Register(ctx, RegisterInput{
+		Email:      "validate@example.com",
+		Password:   "validate-password",
+		DeviceCode: "device-validate",
+		DeviceName: "MacBook",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	claims, err := svc.ValidateAccessToken(ctx, registered.AccessToken)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken(before revoke): %v", err)
+	}
+
+	if _, err := db.Exec(ctx, `UPDATE user_sessions SET jwt_version = jwt_version + 1 WHERE id = $1`, claims.SessionID); err != nil {
+		t.Fatalf("bump jwt version: %v", err)
+	}
+	_, err = svc.ValidateAccessToken(ctx, registered.AccessToken)
+	if !errors.Is(err, ErrInvalidAccessToken) {
+		t.Fatalf("ValidateAccessToken(version mismatch) error = %v, want %v", err, ErrInvalidAccessToken)
+	}
+
+	freshLogin, err := svc.Login(ctx, LoginInput{
+		Email:      "validate@example.com",
+		Password:   "validate-password",
+		DeviceCode: "device-validate-2",
+		DeviceName: "iPhone",
+	})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	freshClaims, err := svc.ValidateAccessToken(ctx, freshLogin.AccessToken)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken(before revoke fresh): %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE user_sessions SET revoked_at = now() WHERE id = $1`, freshClaims.SessionID); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+	_, err = svc.ValidateAccessToken(ctx, freshLogin.AccessToken)
+	if !errors.Is(err, ErrInvalidAccessToken) {
+		t.Fatalf("ValidateAccessToken(revoked session) error = %v, want %v", err, ErrInvalidAccessToken)
 	}
 }
 

@@ -15,10 +15,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const minAccessTokenSecretLength = 16
+
 var (
-	ErrEmailAlreadyExists  = errors.New("email already exists")
-	ErrInvalidCredentials  = errors.New("invalid credentials")
-	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	ErrEmailAlreadyExists       = errors.New("email already exists")
+	ErrInvalidCredentials       = errors.New("invalid credentials")
+	ErrInvalidRefreshToken      = errors.New("invalid refresh token")
+	ErrInvalidAccessToken       = errors.New("invalid access token")
+	ErrInvalidAccessTokenSecret = errors.New("invalid access token secret")
 )
 
 type Service struct {
@@ -67,14 +71,19 @@ type sessionRow struct {
 	UserID     uuid.UUID
 	DeviceCode string
 	JWTVersion int64
+	RevokedAt  *time.Time
 	User       User
 }
 
-func NewService(db *pgxpool.Pool, accessTokenSecret string, accessTokenTTL time.Duration) *Service {
+func NewService(db *pgxpool.Pool, accessTokenSecret string, accessTokenTTL time.Duration) (*Service, error) {
+	accessTokenSecret = strings.TrimSpace(accessTokenSecret)
+	if len(accessTokenSecret) < minAccessTokenSecretLength {
+		return nil, ErrInvalidAccessTokenSecret
+	}
 	if accessTokenTTL <= 0 {
 		accessTokenTTL = time.Hour
 	}
-	return &Service{db: db, accessTokenSecret: accessTokenSecret, accessTokenTTL: accessTokenTTL}
+	return &Service{db: db, accessTokenSecret: accessTokenSecret, accessTokenTTL: accessTokenTTL}, nil
 }
 
 func (s *Service) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
@@ -230,6 +239,33 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 		RefreshToken: newRefreshToken,
 		User:         session.User,
 	}, nil
+}
+
+func (s *Service) ValidateAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
+	claims, err := ParseAccessToken(s.accessTokenSecret, tokenString)
+	if err != nil {
+		return nil, ErrInvalidAccessToken
+	}
+
+	var dbJWTVersion int64
+	var revokedAt *time.Time
+	err = s.db.QueryRow(ctx, `
+		SELECT jwt_version, revoked_at
+		FROM user_sessions
+		WHERE id = $1
+		  AND user_id = $2
+	`, claims.SessionID, claims.UserID).Scan(&dbJWTVersion, &revokedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidAccessToken
+		}
+		return nil, err
+	}
+	if revokedAt != nil || dbJWTVersion != claims.JWTVersion {
+		return nil, ErrInvalidAccessToken
+	}
+
+	return claims, nil
 }
 
 func (s *Service) createSessionResult(ctx context.Context, q dbtx, user User, deviceCode string, deviceName string) (*AuthResult, error) {
