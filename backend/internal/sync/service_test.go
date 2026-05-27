@@ -322,6 +322,79 @@ func TestPushUpdateVersionConflictCreatesConflictCopy(t *testing.T) {
 	}
 }
 
+func TestConcurrentUpdatesWithSameBaseVersionProduceConflictCopy(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	sessionID := insertTestSession(t, ctx, db, userID)
+
+	noteSvc := notes.NewService(db, tags.NewService(db))
+	svc := NewService(db, noteSvc)
+	created, err := noteSvc.Create(ctx, notes.CreateInput{
+		UserID:    userID,
+		ClientID:  "concurrent-update-origin",
+		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}},
+		PlainText: "v1",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	baseVersion := created.Version
+	ops := []Operation{
+		{
+			OpID:        "op-concurrent-update-a",
+			Entity:      "note",
+			Action:      "update",
+			EntityID:    &created.ID,
+			BaseVersion: &baseVersion,
+			Payload:     Payload{Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "#并发 A"}}}, PlainText: "#并发 A"},
+		},
+		{
+			OpID:        "op-concurrent-update-b",
+			Entity:      "note",
+			Action:      "update",
+			EntityID:    &created.ID,
+			BaseVersion: &baseVersion,
+			Payload:     Payload{Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "#并发 B"}}}, PlainText: "#并发 B"},
+		},
+	}
+
+	var wg sync.WaitGroup
+	results := make([]PushResult, len(ops))
+	errs := make([]error, len(ops))
+	for i := range ops {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = svc.Push(ctx, userID, &sessionID, ops[idx])
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Push update worker %d error = %v", i, err)
+		}
+	}
+	statusCounts := map[string]int{}
+	for _, result := range results {
+		statusCounts[result.Status]++
+	}
+	if statusCounts["updated"] != 1 || statusCounts["conflict_copied"] != 1 {
+		t.Fatalf("status counts = %#v, want one updated and one conflict_copied", statusCounts)
+	}
+
+	var totalNotes int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM notes WHERE user_id = $1`, userID).Scan(&totalNotes); err != nil {
+		t.Fatalf("count notes: %v", err)
+	}
+	if totalNotes != 2 {
+		t.Fatalf("notes count = %d, want original + conflict copy", totalNotes)
+	}
+}
+
 func TestPushDeleteVersionConflictIsIgnored(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)

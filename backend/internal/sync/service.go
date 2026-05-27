@@ -233,7 +233,15 @@ func (s *Service) createConflictCopyTx(ctx context.Context, tx pgx.Tx, userID uu
 
 func (s *Service) currentNoteVersionTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
 	var currentVersion int64
-	err := tx.QueryRow(ctx, `SELECT version FROM notes WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL AND permanently_deleted_at IS NULL`, userID, noteID).Scan(&currentVersion)
+	err := tx.QueryRow(ctx, `
+		SELECT version
+		FROM notes
+		WHERE user_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+		  AND permanently_deleted_at IS NULL
+		FOR UPDATE
+	`, userID, noteID).Scan(&currentVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, notes.ErrNoteNotFound
@@ -245,7 +253,14 @@ func (s *Service) currentNoteVersionTx(ctx context.Context, tx pgx.Tx, userID uu
 
 func (s *Service) currentNoteAnyVersionTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
 	var currentVersion int64
-	err := tx.QueryRow(ctx, `SELECT version FROM notes WHERE user_id = $1 AND id = $2 AND permanently_deleted_at IS NULL`, userID, noteID).Scan(&currentVersion)
+	err := tx.QueryRow(ctx, `
+		SELECT version
+		FROM notes
+		WHERE user_id = $1
+		  AND id = $2
+		  AND permanently_deleted_at IS NULL
+		FOR UPDATE
+	`, userID, noteID).Scan(&currentVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, notes.ErrNoteNotFound
