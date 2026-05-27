@@ -379,6 +379,83 @@ func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(
 	}
 }
 
+func TestListSupportsPaginationSearchTagPathAndTrash(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db, tags.NewService(db))
+	noteA, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-a", Content: textContent("#项目/后端 alpha"), PlainText: "#项目/后端 alpha"})
+	if err != nil {
+		t.Fatalf("Create(noteA) error = %v", err)
+	}
+	noteB, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-b", Content: textContent("#项目 beta"), PlainText: "#项目 beta"})
+	if err != nil {
+		t.Fatalf("Create(noteB) error = %v", err)
+	}
+	noteTrash, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-trash", Content: textContent("#项目/前端 trash me"), PlainText: "#项目/前端 trash me"})
+	if err != nil {
+		t.Fatalf("Create(noteTrash) error = %v", err)
+	}
+	notePermanent, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-permanent", Content: textContent("#生活 permanent"), PlainText: "#生活 permanent"})
+	if err != nil {
+		t.Fatalf("Create(notePermanent) error = %v", err)
+	}
+
+	if _, err := db.Exec(ctx, `UPDATE notes SET created_at = $3, updated_at = $3 WHERE user_id = $1 AND id = $2`, userID, noteA.ID, time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("set noteA timestamps: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE notes SET created_at = $3, updated_at = $3 WHERE user_id = $1 AND id = $2`, userID, noteB.ID, time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("set noteB timestamps: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE notes SET created_at = $3, updated_at = $3 WHERE user_id = $1 AND id = $2`, userID, noteTrash.ID, time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("set noteTrash timestamps: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE notes SET created_at = $3, updated_at = $3 WHERE user_id = $1 AND id = $2`, userID, notePermanent.ID, time.Date(2026, 5, 1, 13, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("set notePermanent timestamps: %v", err)
+	}
+
+	if _, err := svc.MoveToTrash(ctx, userID, noteTrash.ID); err != nil {
+		t.Fatalf("MoveToTrash() error = %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE notes SET permanently_deleted_at = now() WHERE user_id = $1 AND id = $2`, userID, notePermanent.ID); err != nil {
+		t.Fatalf("set permanently_deleted_at: %v", err)
+	}
+
+	searchNotes, err := svc.List(ctx, ListFilter{UserID: userID, Search: "alpha"})
+	if err != nil {
+		t.Fatalf("List(search) error = %v", err)
+	}
+	if len(searchNotes) != 1 || searchNotes[0].ID != noteA.ID {
+		t.Fatalf("search notes = %#v, want only noteA", searchNotes)
+	}
+
+	tagNotes, err := svc.List(ctx, ListFilter{UserID: userID, TagPath: "项目"})
+	if err != nil {
+		t.Fatalf("List(tag parent) error = %v", err)
+	}
+	if len(tagNotes) != 2 || tagNotes[0].ID != noteB.ID || tagNotes[1].ID != noteA.ID {
+		t.Fatalf("tag notes = %#v, want [noteB, noteA]", tagNotes)
+	}
+
+	pageNotes, err := svc.List(ctx, ListFilter{UserID: userID, TagPath: "项目", Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("List(pagination) error = %v", err)
+	}
+	if len(pageNotes) != 1 || pageNotes[0].ID != noteA.ID {
+		t.Fatalf("page notes = %#v, want [noteA]", pageNotes)
+	}
+
+	trashNotes, err := svc.List(ctx, ListFilter{UserID: userID, Trash: true})
+	if err != nil {
+		t.Fatalf("List(trash) error = %v", err)
+	}
+	if len(trashNotes) != 1 || trashNotes[0].ID != noteTrash.ID {
+		t.Fatalf("trash notes = %#v, want only noteTrash", trashNotes)
+	}
+}
+
 func TestCreateDeduplicatesRepeatedTags(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)

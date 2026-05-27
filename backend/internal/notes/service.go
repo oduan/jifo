@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -303,17 +305,8 @@ func (s *Service) PermanentlyDeleteExpiredTrashTx(ctx context.Context, tx pgx.Tx
 }
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]Note, error) {
-	condition := "deleted_at IS NULL AND permanently_deleted_at IS NULL"
-	if filter.Trash {
-		condition = "deleted_at IS NOT NULL AND permanently_deleted_at IS NULL"
-	}
-
-	rows, err := s.db.Query(ctx, `
-		SELECT id, user_id, client_id, content, plain_text, created_at, updated_at, deleted_at, purge_after, permanently_deleted_at, version
-		FROM notes
-		WHERE user_id = $1 AND `+condition+`
-		ORDER BY created_at DESC, id DESC
-	`, filter.UserID)
+	sql, args := buildListQuery(filter)
+	rows, err := s.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +324,55 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Note, error) {
 		return nil, err
 	}
 	return notes, nil
+}
+
+func buildListQuery(filter ListFilter) (string, []any) {
+	args := []any{filter.UserID}
+	argIndex := 2
+	conditions := []string{"n.user_id = $1", "n.permanently_deleted_at IS NULL"}
+
+	if filter.Trash {
+		conditions = append(conditions, "n.deleted_at IS NOT NULL")
+	} else {
+		conditions = append(conditions, "n.deleted_at IS NULL")
+	}
+
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		conditions = append(conditions, fmt.Sprintf("n.plain_text ILIKE $%d", argIndex))
+		args = append(args, "%"+search+"%")
+		argIndex++
+	}
+
+	if tagPath := strings.TrimSpace(filter.TagPath); tagPath != "" {
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (
+			SELECT 1
+			FROM note_tags nt
+			JOIN tags t ON t.user_id = nt.user_id AND t.id = nt.tag_id
+			WHERE nt.user_id = n.user_id
+			  AND nt.note_id = n.id
+			  AND (t.path = $%d OR t.path LIKE $%d)
+		)`, argIndex, argIndex+1))
+		args = append(args, tagPath, tagPath+"/%")
+		argIndex += 2
+	}
+
+	sql := `
+		SELECT n.id, n.user_id, n.client_id, n.content, n.plain_text, n.created_at, n.updated_at, n.deleted_at, n.purge_after, n.permanently_deleted_at, n.version
+		FROM notes n
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY n.created_at DESC, n.id DESC`
+
+	if filter.Limit > 0 {
+		sql += fmt.Sprintf(" LIMIT $%d", argIndex)
+		args = append(args, filter.Limit)
+		argIndex++
+	}
+	if filter.Offset > 0 {
+		sql += fmt.Sprintf(" OFFSET $%d", argIndex)
+		args = append(args, filter.Offset)
+	}
+
+	return sql, args
 }
 
 func (s *Service) rebuildNoteTags(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID, plainText string, affected []uuid.UUID) error {

@@ -45,6 +45,10 @@ type UpdateInput struct {
 }
 
 type ListFilter struct {
-	UserID uuid.UUID
-	Trash  bool
+	UserID  uuid.UUID
+	Trash   bool
+	Search  string
+	TagPath string
+	Limit   int
+	Offset  int
 }

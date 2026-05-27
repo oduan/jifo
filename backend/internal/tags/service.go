@@ -15,6 +15,25 @@ type Service struct {
 	repo *repository
 }
 
+type Tag struct {
+	ID        uuid.UUID
+	Name      string
+	Path      string
+	ParentID  *uuid.UUID
+	Depth     int
+	NoteCount int
+}
+
+type TreeNode struct {
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Path      string     `json:"path"`
+	ParentID  *uuid.UUID `json:"parentId,omitempty"`
+	Depth     int        `json:"depth"`
+	NoteCount int        `json:"noteCount"`
+	Children  []TreeNode `json:"children,omitempty"`
+}
+
 func NewService(db *pgxpool.Pool) *Service {
 	return &Service{db: db, repo: newRepository()}
 }
@@ -114,6 +133,77 @@ func (s *Service) RecountNoteCounts(ctx context.Context, tx pgx.Tx, userID uuid.
 		}
 	}
 	return nil
+}
+
+func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Tag, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT id, name, path, parent_id, depth, note_count
+		FROM tags
+		WHERE user_id = $1
+		ORDER BY depth ASC, sort_order ASC, path ASC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]Tag, 0)
+	for rows.Next() {
+		var tag Tag
+		if err := rows.Scan(&tag.ID, &tag.Name, &tag.Path, &tag.ParentID, &tag.Depth, &tag.NoteCount); err != nil {
+			return nil, err
+		}
+		result = append(result, tag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) Tree(ctx context.Context, userID uuid.UUID) ([]TreeNode, error) {
+	rows, err := s.List(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return buildTree(rows), nil
+}
+
+func buildTree(tags []Tag) []TreeNode {
+	nodes := make(map[uuid.UUID]*TreeNode, len(tags))
+	roots := make([]*TreeNode, 0)
+	for _, tag := range tags {
+		n := &TreeNode{
+			ID:        tag.ID,
+			Name:      tag.Name,
+			Path:      tag.Path,
+			ParentID:  tag.ParentID,
+			Depth:     tag.Depth,
+			NoteCount: tag.NoteCount,
+			Children:  make([]TreeNode, 0),
+		}
+		nodes[tag.ID] = n
+	}
+
+	for _, tag := range tags {
+		node := nodes[tag.ID]
+		if tag.ParentID == nil {
+			roots = append(roots, node)
+			continue
+		}
+		parent, ok := nodes[*tag.ParentID]
+		if !ok {
+			roots = append(roots, node)
+			continue
+		}
+		parent.Children = append(parent.Children, *node)
+	}
+
+	out := make([]TreeNode, 0, len(roots))
+	for _, root := range roots {
+		out = append(out, *root)
+	}
+	return out
 }
 
 func uniqueExpandedPaths(paths []string) []string {
