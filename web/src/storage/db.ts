@@ -41,6 +41,7 @@ export type OutboxOperation = {
   payload: Record<string, unknown> & { blocks?: CachedNoteBlock[] };
   createdAt: string;
   status: OutboxStatus;
+  lastError?: string;
 };
 
 export type SyncState = {

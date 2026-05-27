@@ -29,8 +29,31 @@ export type SyncEngineOptions = {
   pullChanges: (cursor?: unknown) => Promise<PullChangesResult>;
 };
 
+const runningSyncs = new WeakSet<JifoDb>();
+const successfulPushStatuses = new Set(['created', 'updated', 'deleted', 'restored', 'delete_conflict_ignored', 'conflict_copied']);
+
 function isLocalImageBlock(block: CachedNoteBlock): block is Extract<CachedNoteBlock, { type: 'image' }> & { localId: string } {
   return block.type === 'image' && Boolean(block.localId) && !block.mediaId;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function markOperations(db: JifoDb, operations: OutboxOperation[], status: 'pushing' | 'failed', lastError?: string) {
+  await db.transaction('rw', db.outbox, async () => {
+    for (const op of operations) {
+      if (op.localSeq !== undefined) {
+        await db.outbox.update(op.localSeq, { status, lastError });
+      }
+    }
+  });
+}
+
+async function persistOperationPayload(db: JifoDb, operation: OutboxOperation) {
+  if (operation.localSeq !== undefined) {
+    await db.outbox.update(operation.localSeq, { payload: operation.payload });
+  }
 }
 
 async function uploadLocalMediaForOperation(db: JifoDb, operation: OutboxOperation, uploadMedia: SyncEngineOptions['uploadMedia']): Promise<OutboxOperation> {
@@ -39,33 +62,63 @@ async function uploadLocalMediaForOperation(db: JifoDb, operation: OutboxOperati
     return operation;
   }
 
+  let changed = false;
   const rewrittenBlocks: CachedNoteBlock[] = [];
   for (const block of blocks) {
     if (isLocalImageBlock(block)) {
-      const result = await uploadMedia({ localId: block.localId, url: block.url });
       const cachedMedia = await db.media_cache.where('localId').equals(block.localId).first();
-      if (cachedMedia) {
-        await db.media_cache.put({ ...cachedMedia, serverId: result.mediaId, status: 'uploaded' });
+      const existingServerId = cachedMedia?.serverId;
+      const mediaId = existingServerId ?? (await uploadMedia({ localId: block.localId, url: block.url })).mediaId;
+      if (cachedMedia && cachedMedia.serverId !== mediaId) {
+        await db.media_cache.put({ ...cachedMedia, serverId: mediaId, status: 'uploaded' });
       }
-      rewrittenBlocks.push({ type: 'image', mediaId: result.mediaId, alt: block.alt });
+      rewrittenBlocks.push({ type: 'image', mediaId, alt: block.alt });
+      changed = true;
       continue;
     }
     rewrittenBlocks.push(block);
   }
 
-  return {
+  if (!changed) {
+    return operation;
+  }
+
+  const rewrittenOperation = {
     ...operation,
     payload: {
       ...operation.payload,
       blocks: rewrittenBlocks
     }
   };
+  await persistOperationPayload(db, rewrittenOperation);
+  return rewrittenOperation;
 }
 
 async function applyPushResult(db: JifoDb, result: PushResult) {
   if (result.status === 'conflict_copied' && result.note) {
     await db.notes_cache.put(result.note);
   }
+}
+
+async function settlePushedOperations(db: JifoDb, selectedOps: OutboxOperation[], pushResults: PushResult[]) {
+  const resultsByOpId = new Map(pushResults.map((result) => [result.opId, result]));
+  await db.transaction('rw', db.outbox, async () => {
+    for (const op of selectedOps) {
+      if (op.localSeq === undefined) {
+        continue;
+      }
+      const result = resultsByOpId.get(op.opId);
+      if (!result) {
+        await db.outbox.update(op.localSeq, { status: 'failed', lastError: 'missing_push_result' });
+        continue;
+      }
+      if (successfulPushStatuses.has(result.status)) {
+        await db.outbox.delete(op.localSeq);
+        continue;
+      }
+      await db.outbox.update(op.localSeq, { status: 'failed', lastError: `push_status:${result.status}` });
+    }
+  });
 }
 
 async function applyPullChanges(db: JifoDb, changes: PullChangesResult) {
@@ -76,29 +129,37 @@ async function applyPullChanges(db: JifoDb, changes: PullChangesResult) {
 }
 
 export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: SyncEngineOptions) {
-  const pendingOps = await db.outbox.where('status').equals('pending').sortBy('localSeq');
-  const pushableOps: OutboxOperation[] = [];
-
-  for (const op of pendingOps) {
-    pushableOps.push(await uploadLocalMediaForOperation(db, op, uploadMedia));
+  if (runningSyncs.has(db)) {
+    return;
   }
+  runningSyncs.add(db);
 
-  if (pushableOps.length > 0) {
-    const pushResults = await pushOutbox(pushableOps);
-    for (const result of pushResults) {
-      await applyPushResult(db, result);
-    }
-    const pushedOpIds = new Set(pushResults.map((result) => result.opId));
-    await db.transaction('rw', db.outbox, async () => {
-      for (const op of pendingOps) {
-        if (pushedOpIds.has(op.opId) && op.localSeq !== undefined) {
-          await db.outbox.delete(op.localSeq);
-        }
+  try {
+    const selectedOps = await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
+    await markOperations(db, selectedOps, 'pushing');
+
+    const pushableOps: OutboxOperation[] = [];
+    try {
+      for (const op of selectedOps) {
+        pushableOps.push(await uploadLocalMediaForOperation(db, { ...op, status: 'pushing' }, uploadMedia));
       }
-    });
-  }
 
-  const cursor = (await db.sync_state.get('cursor'))?.value;
-  const changes = await pullChanges(cursor);
-  await applyPullChanges(db, changes);
+      if (pushableOps.length > 0) {
+        const pushResults = await pushOutbox(pushableOps);
+        for (const result of pushResults) {
+          await applyPushResult(db, result);
+        }
+        await settlePushedOperations(db, selectedOps, pushResults);
+      }
+    } catch (error) {
+      await markOperations(db, selectedOps, 'failed', errorMessage(error));
+      throw error;
+    }
+
+    const cursor = (await db.sync_state.get('cursor'))?.value;
+    const changes = await pullChanges(cursor);
+    await applyPullChanges(db, changes);
+  } finally {
+    runningSyncs.delete(db);
+  }
 }

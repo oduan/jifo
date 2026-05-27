@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { createJifoDb } from '../../storage/db';
 import {
@@ -203,5 +203,174 @@ describe('runSync', () => {
     expect(serverNote?.blocks).toEqual([{ type: 'paragraph', content: 'server text' }]);
     expect((await db.sync_state.get('cursor'))?.value).toBe('cursor-2');
     expect((await db.outbox.toArray())).toHaveLength(0);
+  });
+
+  test('并发 runSync 只会推送一次同一批 outbox', async () => {
+    await db.outbox.add({
+      opId: 'op-concurrent-1',
+      entity: 'note',
+      action: 'create',
+      clientId: 'client-1',
+      baseVersion: 0,
+      payload: { blocks: [{ type: 'paragraph', content: 'once' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    let releasePush: () => void = () => undefined;
+    const pushOutbox = vi.fn(
+      () =>
+        new Promise<Array<{ opId: string; status: string }>>((resolve) => {
+          releasePush = () => resolve([{ opId: 'op-concurrent-1', status: 'created' }]);
+        })
+    );
+
+    const first = runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox,
+      pullChanges: async () => ({ cursor: 'cursor-concurrent', notes: [] })
+    });
+    await vi.waitFor(() => expect(pushOutbox).toHaveBeenCalledTimes(1));
+    const second = runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox,
+      pullChanges: async () => ({ cursor: 'cursor-concurrent', notes: [] })
+    });
+
+    releasePush();
+    await Promise.all([first, second]);
+
+    expect(pushOutbox).toHaveBeenCalledTimes(1);
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('push 返回失败状态时保留 outbox 并记录错误', async () => {
+    await db.outbox.add({
+      opId: 'op-failed-1',
+      entity: 'note',
+      action: 'update',
+      clientId: 'client-1',
+      noteId: 'n1',
+      baseVersion: 1,
+      payload: { blocks: [{ type: 'paragraph', content: 'will retry' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [{ opId: 'op-failed-1', status: 'retry_later' }],
+      pullChanges: async () => ({ cursor: 'cursor-after-failure-status', notes: [] })
+    });
+
+    const [op] = await db.outbox.toArray();
+    expect(op.status).toBe('failed');
+    expect(op.lastError).toBe('push_status:retry_later');
+  });
+
+  test('媒体上传成功但 push 失败时持久化 mediaId 并保留 failed outbox 供重试', async () => {
+    await db.media_cache.put({
+      id: 'm-local-1',
+      localId: 'local-media-1',
+      status: 'local_pending',
+      createdAt: '2026-05-27T00:00:00Z'
+    });
+    await db.outbox.add({
+      opId: 'op-media-retry-1',
+      entity: 'note',
+      action: 'create',
+      clientId: 'client-1',
+      baseVersion: 0,
+      payload: {
+        blocks: [
+          { type: 'paragraph', content: 'with image' },
+          { type: 'image', url: 'blob:abc', localId: 'local-media-1' }
+        ]
+      },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await expect(
+      runSync({
+        db,
+        uploadMedia: async () => ({ mediaId: 'server-media-1' }),
+        pushOutbox: async () => {
+          throw new Error('network down');
+        },
+        pullChanges: async () => ({ cursor: 'unused', notes: [] })
+      })
+    ).rejects.toThrow('network down');
+
+    const [failedOp] = await db.outbox.toArray();
+    expect(failedOp.status).toBe('failed');
+    expect(failedOp.lastError).toBe('network down');
+    expect(failedOp.payload.blocks).toEqual([
+      { type: 'paragraph', content: 'with image' },
+      { type: 'image', mediaId: 'server-media-1' }
+    ]);
+    expect((await db.media_cache.get('m-local-1'))?.serverId).toBe('server-media-1');
+
+    const uploadMedia = vi.fn(async () => ({ mediaId: 'server-media-1' }));
+    const pushedPayloads: unknown[] = [];
+    await runSync({
+      db,
+      uploadMedia,
+      pushOutbox: async (ops) => {
+        pushedPayloads.push(ops[0].payload);
+        return [{ opId: 'op-media-retry-1', status: 'created' }];
+      },
+      pullChanges: async () => ({ cursor: 'cursor-after-retry', notes: [] })
+    });
+
+    expect(uploadMedia).not.toHaveBeenCalled();
+    expect(pushedPayloads[0]).toEqual({
+      blocks: [
+        { type: 'paragraph', content: 'with image' },
+        { type: 'image', mediaId: 'server-media-1' }
+      ]
+    });
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('push 只返回 conflict_copied 状态时，仍可通过后续 pull 落地冲突副本', async () => {
+    await db.outbox.add({
+      opId: 'op-conflict-no-note',
+      entity: 'note',
+      action: 'update',
+      clientId: 'client-1',
+      noteId: 'n1',
+      baseVersion: 1,
+      payload: { blocks: [{ type: 'paragraph', content: 'client text' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [{ opId: 'op-conflict-no-note', status: 'conflict_copied', noteId: 'conflict-from-pull' }],
+      pullChanges: async () => ({
+        cursor: 'cursor-conflict-pull',
+        notes: [
+          {
+            id: 'conflict-from-pull',
+            clientId: 'conflict-client-1',
+            blocks: [{ type: 'paragraph', content: 'pull conflict copy' }],
+            updatedAt: '2026-05-27T01:00:00Z',
+            createdAt: '2026-05-27T01:00:00Z',
+            version: 3,
+            conflictOfNoteId: 'n1',
+            conflictReason: 'version_conflict'
+          }
+        ]
+      })
+    });
+
+    expect((await db.notes_cache.get('conflict-from-pull'))?.conflictReason).toBe('version_conflict');
+    expect(await db.outbox.toArray()).toHaveLength(0);
   });
 });
