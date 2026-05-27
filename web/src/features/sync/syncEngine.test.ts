@@ -134,7 +134,7 @@ describe('runSync', () => {
       },
       pullChanges: async () => {
         calls.push('pull');
-        return { cursor: 'cursor-1', notes: [] };
+        return { cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-1' }, notes: [] };
       }
     });
 
@@ -182,7 +182,7 @@ describe('runSync', () => {
         }
       ],
       pullChanges: async () => ({
-        cursor: 'cursor-2',
+        cursor: { updatedAt: '2026-05-27T01:00:01Z', id: 'n1' },
         notes: [
           {
             id: 'n1',
@@ -201,11 +201,11 @@ describe('runSync', () => {
 
     expect(conflict?.conflictReason).toBe('version_conflict');
     expect(serverNote?.blocks).toEqual([{ type: 'paragraph', content: 'server text' }]);
-    expect((await db.sync_state.get('cursor'))?.value).toBe('cursor-2');
+    expect((await db.sync_state.get('cursor'))?.value).toEqual({ updatedAt: '2026-05-27T01:00:01Z', id: 'n1' });
     expect((await db.outbox.toArray())).toHaveLength(0);
   });
 
-  test('并发 runSync 只会推送一次同一批 outbox', async () => {
+  test('同一 DB 实例并发 runSync 只会推送一次同一批 outbox', async () => {
     await db.outbox.add({
       opId: 'op-concurrent-1',
       entity: 'note',
@@ -229,20 +229,121 @@ describe('runSync', () => {
       db,
       uploadMedia: async () => ({ mediaId: 'unused' }),
       pushOutbox,
-      pullChanges: async () => ({ cursor: 'cursor-concurrent', notes: [] })
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-concurrent' }, notes: [] })
     });
     await vi.waitFor(() => expect(pushOutbox).toHaveBeenCalledTimes(1));
     const second = runSync({
       db,
       uploadMedia: async () => ({ mediaId: 'unused' }),
       pushOutbox,
-      pullChanges: async () => ({ cursor: 'cursor-concurrent', notes: [] })
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-concurrent' }, notes: [] })
     });
 
     releasePush();
     await Promise.all([first, second]);
 
     expect(pushOutbox).toHaveBeenCalledTimes(1);
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('同名 DB 多实例并发 runSync 也只会推送一次同一批 outbox', async () => {
+    await db.outbox.add({
+      opId: 'op-db-lock-1',
+      entity: 'note',
+      action: 'create',
+      clientId: 'client-1',
+      baseVersion: 0,
+      payload: { blocks: [{ type: 'paragraph', content: 'once across db instances' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+    const secondDb = createJifoDb('task11-sync');
+
+    let releasePush: () => void = () => undefined;
+    const pushOutbox = vi.fn(
+      () =>
+        new Promise<Array<{ opId: string; status: string }>>((resolve) => {
+          releasePush = () => resolve([{ opId: 'op-db-lock-1', status: 'created' }]);
+        })
+    );
+
+    const first = runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox,
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'n1' }, notes: [] })
+    });
+    await vi.waitFor(() => expect(pushOutbox).toHaveBeenCalledTimes(1));
+    const second = runSync({
+      db: secondDb,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox,
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'n1' }, notes: [] })
+    });
+
+    releasePush();
+    await Promise.all([first, second]);
+
+    expect(pushOutbox).toHaveBeenCalledTimes(1);
+    expect(await db.outbox.toArray()).toHaveLength(0);
+    await secondDb.close();
+  });
+
+  test('pull 失败时不会留下 pushing 状态', async () => {
+    await db.outbox.add({
+      opId: 'op-pull-fails-1',
+      entity: 'note',
+      action: 'update',
+      clientId: 'client-1',
+      noteId: 'n1',
+      baseVersion: 1,
+      payload: { blocks: [{ type: 'paragraph', content: 'server accepted before pull failed' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await expect(
+      runSync({
+        db,
+        uploadMedia: async () => ({ mediaId: 'unused' }),
+        pushOutbox: async () => {
+          throw new Error('network down before server ack');
+        },
+        pullChanges: async () => {
+          throw new Error('pull down');
+        }
+      })
+    ).rejects.toThrow('network down before server ack');
+
+    const [op] = await db.outbox.toArray();
+    expect(op.status).toBe('failed');
+    expect(op.lastError).toBe('network down before server ack');
+  });
+
+  test('pull 失败时已成功 push 的 outbox 已清理且不会残留 pushing', async () => {
+    await db.outbox.add({
+      opId: 'op-pull-fails-after-push-1',
+      entity: 'note',
+      action: 'create',
+      clientId: 'client-1',
+      baseVersion: 0,
+      payload: { blocks: [{ type: 'paragraph', content: 'server accepted' }] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await expect(
+      runSync({
+        db,
+        uploadMedia: async () => ({ mediaId: 'unused' }),
+        pushOutbox: async () => [{ opId: 'op-pull-fails-after-push-1', status: 'created' }],
+        pullChanges: async () => {
+          throw new Error('pull down');
+        }
+      })
+    ).rejects.toThrow('pull down');
+
+    expect((await db.outbox.toArray()).some((op) => op.status === 'pushing')).toBe(false);
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
@@ -263,7 +364,7 @@ describe('runSync', () => {
       db,
       uploadMedia: async () => ({ mediaId: 'unused' }),
       pushOutbox: async () => [{ opId: 'op-failed-1', status: 'retry_later' }],
-      pullChanges: async () => ({ cursor: 'cursor-after-failure-status', notes: [] })
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-after-failure-status' }, notes: [] })
     });
 
     const [op] = await db.outbox.toArray();
@@ -301,7 +402,7 @@ describe('runSync', () => {
         pushOutbox: async () => {
           throw new Error('network down');
         },
-        pullChanges: async () => ({ cursor: 'unused', notes: [] })
+        pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'unused' }, notes: [] })
       })
     ).rejects.toThrow('network down');
 
@@ -323,7 +424,7 @@ describe('runSync', () => {
         pushedPayloads.push(ops[0].payload);
         return [{ opId: 'op-media-retry-1', status: 'created' }];
       },
-      pullChanges: async () => ({ cursor: 'cursor-after-retry', notes: [] })
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-after-retry' }, notes: [] })
     });
 
     expect(uploadMedia).not.toHaveBeenCalled();
@@ -354,7 +455,7 @@ describe('runSync', () => {
       uploadMedia: async () => ({ mediaId: 'unused' }),
       pushOutbox: async () => [{ opId: 'op-conflict-no-note', status: 'conflict_copied', noteId: 'conflict-from-pull' }],
       pullChanges: async () => ({
-        cursor: 'cursor-conflict-pull',
+        cursor: { updatedAt: '2026-05-27T01:00:00Z', id: 'conflict-from-pull' },
         notes: [
           {
             id: 'conflict-from-pull',

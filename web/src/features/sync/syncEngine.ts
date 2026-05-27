@@ -17,8 +17,13 @@ export type PushResult = {
   note?: CachedNote;
 };
 
+export type PullCursor = {
+  updatedAt: string;
+  id: string;
+};
+
 export type PullChangesResult = {
-  cursor: string;
+  cursor: PullCursor;
   notes: CachedNote[];
 };
 
@@ -26,10 +31,10 @@ export type SyncEngineOptions = {
   db: JifoDb;
   uploadMedia: (input: MediaUploadInput) => Promise<MediaUploadResult>;
   pushOutbox: (operations: OutboxOperation[]) => Promise<PushResult[]>;
-  pullChanges: (cursor?: unknown) => Promise<PullChangesResult>;
+  pullChanges: (cursor?: PullCursor) => Promise<PullChangesResult>;
 };
 
-const runningSyncs = new WeakSet<JifoDb>();
+const runningSyncDbNames = new Set<string>();
 const successfulPushStatuses = new Set(['created', 'updated', 'deleted', 'restored', 'delete_conflict_ignored', 'conflict_copied']);
 
 function isLocalImageBlock(block: CachedNoteBlock): block is Extract<CachedNoteBlock, { type: 'image' }> & { localId: string } {
@@ -128,11 +133,28 @@ async function applyPullChanges(db: JifoDb, changes: PullChangesResult) {
   await db.sync_state.put({ key: 'cursor', value: changes.cursor });
 }
 
+function readCursor(value: unknown): PullCursor | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const cursor = value as Partial<PullCursor>;
+  if (typeof cursor.updatedAt !== 'string' || typeof cursor.id !== 'string') {
+    return undefined;
+  }
+  return { updatedAt: cursor.updatedAt, id: cursor.id };
+}
+
+async function markPushingAsFailed(db: JifoDb, lastError: string) {
+  const pushingOps = await db.outbox.where('status').equals('pushing').toArray();
+  await markOperations(db, pushingOps, 'failed', lastError);
+}
+
 export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: SyncEngineOptions) {
-  if (runningSyncs.has(db)) {
+  const lockName = db.name;
+  if (runningSyncDbNames.has(lockName)) {
     return;
   }
-  runningSyncs.add(db);
+  runningSyncDbNames.add(lockName);
 
   try {
     const selectedOps = await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
@@ -156,10 +178,13 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
       throw error;
     }
 
-    const cursor = (await db.sync_state.get('cursor'))?.value;
+    const cursor = readCursor((await db.sync_state.get('cursor'))?.value);
     const changes = await pullChanges(cursor);
     await applyPullChanges(db, changes);
+  } catch (error) {
+    await markPushingAsFailed(db, errorMessage(error));
+    throw error;
   } finally {
-    runningSyncs.delete(db);
+    runningSyncDbNames.delete(lockName);
   }
 }
