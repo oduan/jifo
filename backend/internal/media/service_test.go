@@ -30,8 +30,28 @@ func TestValidateUploadAllowsImagesAndRejectsInvalidTypesAndLargeFiles(t *testin
 	if err := svc.ValidateUpload("application/octet-stream", 1024); err != ErrInvalidMIMEType {
 		t.Fatalf("ValidateUpload(unknown) error = %v, want %v", err, ErrInvalidMIMEType)
 	}
+	if err := svc.ValidateUpload("image/png", 0); err != ErrInvalidSize {
+		t.Fatalf("ValidateUpload(zero size) error = %v, want %v", err, ErrInvalidSize)
+	}
 	if err := svc.ValidateUpload("image/png", DefaultMaxSizeBytes+1); err != ErrFileTooLarge {
 		t.Fatalf("ValidateUpload(too large) error = %v, want %v", err, ErrFileTooLarge)
+	}
+}
+
+func TestUploadRejectsChecksumMismatchBeforeWritingFinalFile(t *testing.T) {
+	svc := NewService(nil, t.TempDir())
+	body := []byte("fake png bytes")
+
+	_, err := svc.Upload(context.Background(), UploadInput{
+		UserID:    uuid.New(),
+		Kind:      "image",
+		MIMEType:  "image/png",
+		SizeBytes: int64(len(body)),
+		Checksum:  "not-the-real-checksum",
+		Reader:    bytes.NewReader(body),
+	})
+	if err != ErrChecksumMismatch {
+		t.Fatalf("Upload() error = %v, want %v", err, ErrChecksumMismatch)
 	}
 }
 
@@ -65,6 +85,46 @@ func TestUploadStoresAssetMetadataAndFile(t *testing.T) {
 	}
 	if !bytes.Equal(got, body) {
 		t.Fatalf("stored file = %q, want %q", got, body)
+	}
+}
+
+func TestMarkUnreferencedDoesNotMarkAvatarMedia(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	root := t.TempDir()
+	svc := NewService(db, root)
+	fixedNow := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+	svc.SetNowForTest(func() time.Time { return fixedNow })
+
+	body := []byte("avatar image")
+	asset, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)})
+	if err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE users SET avatar_media_id = $2 WHERE id = $1`, userID, asset.ID); err != nil {
+		t.Fatalf("set avatar: %v", err)
+	}
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := svc.MarkUnreferencedAssetsForDeletion(ctx, tx, userID); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("MarkUnreferencedAssetsForDeletion() error = %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var deletedAt *time.Time
+	if err := db.QueryRow(ctx, `SELECT deleted_at FROM media_assets WHERE user_id = $1 AND id = $2`, userID, asset.ID).Scan(&deletedAt); err != nil {
+		t.Fatalf("query avatar media: %v", err)
+	}
+	if deletedAt != nil {
+		t.Fatalf("avatar media deleted_at = %v, want nil", deletedAt)
 	}
 }
 

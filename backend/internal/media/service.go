@@ -18,8 +18,10 @@ import (
 const DefaultMaxSizeBytes int64 = 10 * 1024 * 1024
 
 var (
-	ErrInvalidMIMEType = errors.New("invalid media mime type")
-	ErrFileTooLarge    = errors.New("media file too large")
+	ErrInvalidMIMEType  = errors.New("invalid media mime type")
+	ErrInvalidSize      = errors.New("invalid media size")
+	ErrFileTooLarge     = errors.New("media file too large")
+	ErrChecksumMismatch = errors.New("media checksum mismatch")
 )
 
 type Service struct {
@@ -66,6 +68,9 @@ func (s *Service) ValidateUpload(mimeType string, size int64) error {
 	default:
 		return ErrInvalidMIMEType
 	}
+	if size <= 0 {
+		return ErrInvalidSize
+	}
 	if size > s.maxSizeBytes {
 		return ErrFileTooLarge
 	}
@@ -106,9 +111,13 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (Asset, error) 
 		return Asset{}, errors.New("media size does not match input")
 	}
 
+	actualChecksum := hex.EncodeToString(h.Sum(nil))
 	checksum := input.Checksum
 	if checksum == "" {
-		checksum = hex.EncodeToString(h.Sum(nil))
+		checksum = actualChecksum
+	} else if checksum != actualChecksum {
+		_ = os.Remove(tmpPath)
+		return Asset{}, ErrChecksumMismatch
 	}
 
 	if err := os.Rename(tmpPath, finalPath); err != nil {
@@ -140,6 +149,10 @@ func (s *Service) MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.
 		  AND NOT EXISTS (
 			SELECT 1 FROM note_media_refs nmr
 			WHERE nmr.user_id = ma.user_id AND nmr.media_id = ma.id
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM users u
+			WHERE u.id = ma.user_id AND u.avatar_media_id = ma.id
 		  )
 	`, userID, now, purgeAfter)
 	return err

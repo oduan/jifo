@@ -231,7 +231,7 @@ func TestCreateAndUpdateMaintainMediaRefs(t *testing.T) {
 	created, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-media-1",
-		Content:   Content{Blocks: []Block{{Type: "paragraph", Text: "hello"}, {Type: "image", MediaID: &firstMediaID}}},
+		Content:   Content{Blocks: []Block{{Type: "paragraph", Text: "hello"}, {Type: "image", MediaID: &firstMediaID}, {Type: "image", MediaID: &firstMediaID}}},
 		PlainText: "hello",
 	})
 	if err != nil {
@@ -250,6 +250,33 @@ func TestCreateAndUpdateMaintainMediaRefs(t *testing.T) {
 	}
 	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, firstMediaID, 0)
 	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, secondMediaID, 1)
+}
+
+func TestCreateRejectsCrossUserMediaRef(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	ownerID := insertTestUser(t, ctx, db)
+	otherID := insertTestUser(t, ctx, db)
+	otherMediaID := insertTestMedia(t, ctx, db, otherID, "other-media")
+
+	svc := NewService(db, tags.NewService(db))
+	_, err := svc.Create(ctx, CreateInput{
+		UserID:    ownerID,
+		ClientID:  "note-cross-media-1",
+		Content:   Content{Blocks: []Block{{Type: "image", MediaID: &otherMediaID}}},
+		PlainText: "cross media",
+	})
+	if err == nil {
+		t.Fatal("Create() with cross-user media error = nil, want error")
+	}
+	var refs int
+	if countErr := db.QueryRow(ctx, `SELECT COUNT(*) FROM note_media_refs WHERE user_id = $1`, ownerID).Scan(&refs); countErr != nil {
+		t.Fatalf("count note_media_refs: %v", countErr)
+	}
+	if refs != 0 {
+		t.Fatalf("owner note_media_refs = %d, want 0", refs)
+	}
 }
 
 func TestMutationsRejectMissingOrCrossUserNotes(t *testing.T) {
