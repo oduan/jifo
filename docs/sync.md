@@ -2,6 +2,8 @@
 
 Jifo 同步采用离线优先思路：Web 先写 IndexedDB 本地缓存与 outbox；网络可用时按顺序同步到后端，再 pull 远端变更刷新本地缓存。
 
+> 当前状态：后端 `internal/sync.Service` 和 Web `syncEngine` 已实现核心协议与测试；但 `/api/sync/push` HTTP handler 仍是占位返回 `501 not_implemented`，尚未把 service 完整接入 HTTP API。
+
 ## IndexedDB schema
 
 Web 本地数据库由 `web/src/storage/db.ts` 定义，使用 Dexie。

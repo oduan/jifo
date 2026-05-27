@@ -156,11 +156,12 @@ Authorization: Bearer <accessToken>
 {
   "items": [
     {
-      "id": "uuid",
-      "userID": "uuid",
-      "name": "思考",
-      "path": "思考",
-      "noteCount": 1
+      "ID": "uuid",
+      "Name": "思考",
+      "Path": "思考",
+      "ParentID": null,
+      "Depth": 0,
+      "NoteCount": 1
     }
   ]
 }
@@ -176,16 +177,25 @@ Authorization: Bearer <accessToken>
 {
   "items": [
     {
-      "tag": { "path": "电视剧", "noteCount": 1 },
+      "id": "uuid",
+      "name": "电视剧",
+      "path": "电视剧",
+      "depth": 0,
+      "noteCount": 1,
       "children": [
-        { "tag": { "path": "电视剧/电视剧1", "noteCount": 1 }, "children": [] }
+        {
+          "id": "uuid",
+          "name": "电视剧1",
+          "path": "电视剧/电视剧1",
+          "parentId": "uuid",
+          "depth": 1,
+          "noteCount": 1
+        }
       ]
     }
   ]
 }
 ```
-
-实际字段以 Go `tags.TreeNode` JSON 输出为准。
 
 ## Heatmap
 
@@ -236,9 +246,10 @@ Authorization: Bearer <accessToken>
 {
   "error": {
     "code": "not_implemented",
-    "message": "sync handler not implemented"
+    "message": "sync handler not implemented",
+    "requestId": "..."
   }
 }
 ```
 
-后端 `internal/sync.Service` 已实现 note 操作 push/pull 的核心服务逻辑，包括 `created/updated/deleted/restored/duplicate/conflict_copied/delete_conflict_ignored` 等状态；Web 侧也已实现 IndexedDB outbox 与 sync engine。完整 HTTP handler 可在下一迭代接入。
+后端 `internal/sync.Service` 已实现 note 操作 push/pull 的核心服务逻辑，包括 `created/updated/deleted/restored/duplicate/conflict_copied/delete_conflict_ignored` 等状态；Web 侧也已实现 IndexedDB outbox 与 sync engine。但当前 HTTP handler 尚未把这些 service 方法暴露为完整 API，完整 HTTP 接入可在下一迭代完成。
