@@ -384,6 +384,44 @@ func TestPushDeleteVersionConflictIsIgnored(t *testing.T) {
 	}
 }
 
+func TestPushRestoreVersionConflictIsIgnored(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	sessionID := insertTestSession(t, ctx, db, userID)
+
+	noteSvc := notes.NewService(db, tags.NewService(db))
+	svc := NewService(db, noteSvc)
+	created, err := noteSvc.Create(ctx, notes.CreateInput{UserID: userID, ClientID: "restore-conflict-origin", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}}, PlainText: "v1"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	trashed, err := noteSvc.MoveToTrash(ctx, userID, created.ID)
+	if err != nil {
+		t.Fatalf("MoveToTrash() error = %v", err)
+	}
+
+	staleVersion := int64(1)
+	res, err := svc.Push(ctx, userID, &sessionID, Operation{OpID: "op-restore-conflict-1", Entity: "note", Action: "restore", EntityID: &created.ID, BaseVersion: &staleVersion})
+	if err != nil {
+		t.Fatalf("Push(restore conflict) error = %v", err)
+	}
+	if res.Status != "restore_conflict_ignored" {
+		t.Fatalf("status = %q, want restore_conflict_ignored", res.Status)
+	}
+	if res.Version != trashed.Version {
+		t.Fatalf("version = %d, want current trashed version %d", res.Version, trashed.Version)
+	}
+	var deletedAt *time.Time
+	if err := db.QueryRow(ctx, `SELECT deleted_at FROM notes WHERE user_id = $1 AND id = $2`, userID, created.ID).Scan(&deletedAt); err != nil {
+		t.Fatalf("query deleted_at: %v", err)
+	}
+	if deletedAt == nil {
+		t.Fatal("deleted_at is nil, restore conflict should not restore note")
+	}
+}
+
 func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)

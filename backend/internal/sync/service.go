@@ -98,7 +98,7 @@ func (s *Service) Push(ctx context.Context, userID uuid.UUID, sessionID *uuid.UU
 		return PushResult{}, err
 	}
 
-	result, err := s.applyNewOperation(ctx, userID, op)
+	result, err := s.applyNewOperationTx(ctx, tx, userID, op)
 	if err != nil {
 		return PushResult{}, err
 	}
@@ -124,29 +124,20 @@ func (s *Service) Push(ctx context.Context, userID uuid.UUID, sessionID *uuid.UU
 	return result, nil
 }
 
-func (s *Service) applyNewOperation(ctx context.Context, userID uuid.UUID, op Operation) (PushResult, error) {
+func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, op Operation) (PushResult, error) {
 	if op.Entity != "note" {
 		return PushResult{}, fmt.Errorf("unsupported entity: %s", op.Entity)
 	}
 
 	switch op.Action {
 	case "create":
-		note, err := s.notes.Create(ctx, notes.CreateInput{
-			UserID:    userID,
-			ClientID:  op.ClientID,
-			Content:   op.Payload.Content,
-			PlainText: op.Payload.PlainText,
-		})
+		note, err := s.notes.CreateTx(ctx, tx, notes.CreateInput{UserID: userID, ClientID: op.ClientID, Content: op.Payload.Content, PlainText: op.Payload.PlainText})
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				var existingID uuid.UUID
 				var existingVersion int64
-				if queryErr := s.db.QueryRow(ctx, `
-					SELECT id, version
-					FROM notes
-					WHERE user_id = $1 AND client_id = $2
-				`, userID, op.ClientID).Scan(&existingID, &existingVersion); queryErr != nil {
+				if queryErr := tx.QueryRow(ctx, `SELECT id, version FROM notes WHERE user_id = $1 AND client_id = $2`, userID, op.ClientID).Scan(&existingID, &existingVersion); queryErr != nil {
 					return PushResult{}, queryErr
 				}
 				return PushResult{Status: "duplicate", NoteID: &existingID, Version: existingVersion}, nil
@@ -158,46 +149,24 @@ func (s *Service) applyNewOperation(ctx context.Context, userID uuid.UUID, op Op
 		if op.EntityID == nil {
 			return PushResult{}, errors.New("entity_id is required for update")
 		}
-		currentVersion, err := s.currentNoteVersion(ctx, userID, *op.EntityID)
+		currentVersion, err := s.currentNoteVersionTx(ctx, tx, userID, *op.EntityID)
 		if err != nil {
 			return PushResult{}, err
 		}
-
 		if op.BaseVersion != nil && *op.BaseVersion != currentVersion {
 			conflictContent := notes.Content{Blocks: make([]notes.Block, 0, len(op.Payload.Content.Blocks)+2)}
-			conflictContent.Blocks = append(conflictContent.Blocks,
-				notes.Block{Type: "paragraph", Text: "这是一条冲突副本，原笔记已在其他设备被更新。"},
-				notes.Block{Type: "divider"},
-			)
+			conflictContent.Blocks = append(conflictContent.Blocks, notes.Block{Type: "paragraph", Text: "这是一条冲突副本，原笔记已在其他设备被更新。"}, notes.Block{Type: "divider"})
 			conflictContent.Blocks = append(conflictContent.Blocks, op.Payload.Content.Blocks...)
-
-			conflictNote, err := s.notes.Create(ctx, notes.CreateInput{
-				UserID:    userID,
-				ClientID:  "conflict-" + uuid.NewString(),
-				Content:   conflictContent,
-				PlainText: op.Payload.PlainText,
-			})
+			conflictNote, err := s.notes.CreateTx(ctx, tx, notes.CreateInput{UserID: userID, ClientID: "conflict-" + uuid.NewString(), Content: conflictContent, PlainText: op.Payload.PlainText})
 			if err != nil {
 				return PushResult{}, err
 			}
-
-			if _, err := s.db.Exec(ctx, `
-				UPDATE notes
-				SET conflict_of_note_id = $3,
-				    conflict_reason = 'version_conflict'
-				WHERE user_id = $1 AND id = $2
-			`, userID, conflictNote.ID, *op.EntityID); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE notes SET conflict_of_note_id = $3, conflict_reason = 'version_conflict' WHERE user_id = $1 AND id = $2`, userID, conflictNote.ID, *op.EntityID); err != nil {
 				return PushResult{}, err
 			}
 			return PushResult{Status: "conflict_copied", NoteID: &conflictNote.ID, Version: conflictNote.Version}, nil
 		}
-
-		updated, err := s.notes.Update(ctx, notes.UpdateInput{
-			UserID:    userID,
-			NoteID:    *op.EntityID,
-			Content:   op.Payload.Content,
-			PlainText: op.Payload.PlainText,
-		})
+		updated, err := s.notes.UpdateTx(ctx, tx, notes.UpdateInput{UserID: userID, NoteID: *op.EntityID, Content: op.Payload.Content, PlainText: op.Payload.PlainText})
 		if err != nil {
 			return PushResult{}, err
 		}
@@ -206,14 +175,14 @@ func (s *Service) applyNewOperation(ctx context.Context, userID uuid.UUID, op Op
 		if op.EntityID == nil {
 			return PushResult{}, errors.New("entity_id is required for delete")
 		}
-		currentVersion, err := s.currentNoteVersion(ctx, userID, *op.EntityID)
+		currentVersion, err := s.currentNoteAnyVersionTx(ctx, tx, userID, *op.EntityID)
 		if err != nil {
 			return PushResult{}, err
 		}
 		if op.BaseVersion != nil && *op.BaseVersion != currentVersion {
 			return PushResult{Status: "delete_conflict_ignored", NoteID: op.EntityID, Version: currentVersion}, nil
 		}
-		deleted, err := s.notes.MoveToTrash(ctx, userID, *op.EntityID)
+		deleted, err := s.notes.MoveToTrashTx(ctx, tx, userID, *op.EntityID)
 		if err != nil {
 			return PushResult{}, err
 		}
@@ -222,7 +191,14 @@ func (s *Service) applyNewOperation(ctx context.Context, userID uuid.UUID, op Op
 		if op.EntityID == nil {
 			return PushResult{}, errors.New("entity_id is required for restore")
 		}
-		restored, err := s.notes.Restore(ctx, userID, *op.EntityID)
+		currentVersion, err := s.currentNoteAnyVersionTx(ctx, tx, userID, *op.EntityID)
+		if err != nil {
+			return PushResult{}, err
+		}
+		if op.BaseVersion != nil && *op.BaseVersion != currentVersion {
+			return PushResult{Status: "restore_conflict_ignored", NoteID: op.EntityID, Version: currentVersion}, nil
+		}
+		restored, err := s.notes.RestoreTx(ctx, tx, userID, *op.EntityID)
 		if err != nil {
 			return PushResult{}, err
 		}
@@ -232,16 +208,21 @@ func (s *Service) applyNewOperation(ctx context.Context, userID uuid.UUID, op Op
 	}
 }
 
-func (s *Service) currentNoteVersion(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
+func (s *Service) currentNoteVersionTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
 	var currentVersion int64
-	err := s.db.QueryRow(ctx, `
-		SELECT version
-		FROM notes
-		WHERE user_id = $1
-		  AND id = $2
-		  AND deleted_at IS NULL
-		  AND permanently_deleted_at IS NULL
-	`, userID, noteID).Scan(&currentVersion)
+	err := tx.QueryRow(ctx, `SELECT version FROM notes WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL AND permanently_deleted_at IS NULL`, userID, noteID).Scan(&currentVersion)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, notes.ErrNoteNotFound
+		}
+		return 0, err
+	}
+	return currentVersion, nil
+}
+
+func (s *Service) currentNoteAnyVersionTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
+	var currentVersion int64
+	err := tx.QueryRow(ctx, `SELECT version FROM notes WHERE user_id = $1 AND id = $2 AND permanently_deleted_at IS NULL`, userID, noteID).Scan(&currentVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, notes.ErrNoteNotFound
@@ -262,6 +243,7 @@ func (s *Service) Pull(ctx context.Context, userID uuid.UUID, cursor Cursor, lim
 		WHERE user_id = $1
 	`
 	args := []any{userID}
+
 	if !cursor.UpdatedAt.IsZero() {
 		baseSQL += ` AND (updated_at, id) > ($2, $3)`
 		args = append(args, cursor.UpdatedAt, cursor.ID)
@@ -282,16 +264,7 @@ func (s *Service) Pull(ctx context.Context, userID uuid.UUID, cursor Cursor, lim
 	for rows.Next() {
 		var item PullItem
 		var contentJSON []byte
-		if err := rows.Scan(
-			&item.NoteID,
-			&item.ClientID,
-			&contentJSON,
-			&item.PlainText,
-			&item.UpdatedAt,
-			&item.Version,
-			&item.DeletedAt,
-			&item.PurgedAt,
-		); err != nil {
+		if err := rows.Scan(&item.NoteID, &item.ClientID, &contentJSON, &item.PlainText, &item.UpdatedAt, &item.Version, &item.DeletedAt, &item.PurgedAt); err != nil {
 			return PullResult{}, err
 		}
 		if len(contentJSON) > 0 {

@@ -40,6 +40,17 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	note, err := s.CreateTx(ctx, tx, input)
+	if err != nil {
+		return Note{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
+func (s *Service) CreateTx(ctx context.Context, tx pgx.Tx, input CreateInput) (Note, error) {
 	contentJSON, err := json.Marshal(input.Content)
 	if err != nil {
 		return Note{}, err
@@ -60,10 +71,6 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	if err := s.rebuildMediaRefs(ctx, tx, input.UserID, note.ID, input.Content); err != nil {
 		return Note{}, err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Note{}, err
-	}
 	return note, nil
 }
 
@@ -74,6 +81,17 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Note, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	note, err := s.UpdateTx(ctx, tx, input)
+	if err != nil {
+		return Note{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
+func (s *Service) UpdateTx(ctx context.Context, tx pgx.Tx, input UpdateInput) (Note, error) {
 	oldTagIDs, err := s.currentTagIDs(ctx, tx, input.UserID, input.NoteID)
 	if err != nil {
 		return Note{}, err
@@ -112,10 +130,6 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Note, error) {
 	if err := s.rebuildMediaRefs(ctx, tx, input.UserID, input.NoteID, input.Content); err != nil {
 		return Note{}, err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Note{}, err
-	}
 	return note, nil
 }
 
@@ -126,6 +140,17 @@ func (s *Service) MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	note, err := s.MoveToTrashTx(ctx, tx, userID, noteID)
+	if err != nil {
+		return Note{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
+func (s *Service) MoveToTrashTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (Note, error) {
 	oldTagIDs, err := s.currentTagIDs(ctx, tx, userID, noteID)
 	if err != nil {
 		return Note{}, err
@@ -158,10 +183,6 @@ func (s *Service) MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid
 	if err := s.tags.RecountNoteCounts(ctx, tx, userID, oldTagIDs); err != nil {
 		return Note{}, err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Note{}, err
-	}
 	return note, nil
 }
 
@@ -172,6 +193,17 @@ func (s *Service) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUI
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	note, err := s.RestoreTx(ctx, tx, userID, noteID)
+	if err != nil {
+		return Note{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
+func (s *Service) RestoreTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (Note, error) {
 	now := s.now().UTC()
 	note, err := scanNote(tx.QueryRow(ctx, `
 		UPDATE notes
@@ -198,10 +230,6 @@ func (s *Service) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUI
 	if err := s.rebuildMediaRefs(ctx, tx, userID, noteID, note.Content); err != nil {
 		return Note{}, err
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Note{}, err
-	}
 	return note, nil
 }
 
@@ -212,6 +240,17 @@ func (s *Service) PermanentlyDeleteExpiredTrash(ctx context.Context, userID uuid
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	count, err := s.PermanentlyDeleteExpiredTrashTx(ctx, tx, userID, mediaMarker)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Service) PermanentlyDeleteExpiredTrashTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, mediaMarker MediaDeletionMarker) (int64, error) {
 	now := s.now().UTC()
 	rows, err := tx.Query(ctx, `
 		SELECT id
@@ -259,10 +298,6 @@ func (s *Service) PermanentlyDeleteExpiredTrash(ctx context.Context, userID uuid
 		if err := mediaMarker.MarkUnreferencedAssetsForDeletion(ctx, tx, userID); err != nil {
 			return 0, err
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return 0, err
 	}
 	return int64(len(noteIDs)), nil
 }
