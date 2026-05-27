@@ -5,11 +5,7 @@ import { authStore } from '../features/auth/authStore';
 import { NotesPage } from '../features/notes/NotesPage';
 
 function useAccessToken() {
-  return useSyncExternalStore(
-    authStore.subscribe,
-    () => authStore.getState().accessToken,
-    () => authStore.getState().accessToken
-  );
+  return useSyncExternalStore(authStore.subscribe, authStore.getAccessToken, authStore.getAccessToken);
 }
 
 export function App() {

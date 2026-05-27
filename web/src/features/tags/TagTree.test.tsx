@@ -26,4 +26,19 @@ describe('TagTree', () => {
     await user.click(screen.getByRole('button', { name: '工作 (2)' }));
     expect(onSelect).toHaveBeenCalledWith('work');
   });
+
+  test('note_count=0 的父标签不会阻断有计数子标签', () => {
+    render(
+      <TagTree
+        tags={[
+          { id: 'projects', name: '项目', noteCount: 0 },
+          { id: 'projects/jifo', name: 'Jifo', noteCount: 2, parentId: 'projects' }
+        ]}
+        onSelect={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: '项目 (0)' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Jifo (2)' })).toBeInTheDocument();
+  });
 });

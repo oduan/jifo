@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 import { authStore } from '../features/auth/authStore';
 import { App } from './App';
 
 afterEach(() => {
   authStore.clear();
-  cleanup();
 });
 
 describe('App', () => {

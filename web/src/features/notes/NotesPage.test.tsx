@@ -47,6 +47,40 @@ describe('NotesPage', () => {
     expect(screen.queryByText('生活笔记')).not.toBeInTheDocument();
   });
 
+  test('搜索支持标签名', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NotesPage
+        userName="oisin"
+        notes={[
+          {
+            id: 'n1',
+            createdAt: '2026-05-27',
+            blocks: [{ type: 'paragraph', content: '无关键词内容' }],
+            tagIds: ['work']
+          },
+          {
+            id: 'n2',
+            createdAt: '2026-05-26',
+            blocks: [{ type: 'paragraph', content: '生活笔记' }],
+            tagIds: ['life']
+          }
+        ]}
+        tags={[
+          { id: 'work', name: '工作', noteCount: 1 },
+          { id: 'life', name: '生活', noteCount: 1 }
+        ]}
+        heatmapCells={[]}
+      />
+    );
+
+    await user.type(screen.getByRole('searchbox', { name: '搜索笔记' }), '工作');
+
+    expect(screen.getByText('无关键词内容')).toBeInTheDocument();
+    expect(screen.queryByText('生活笔记')).not.toBeInTheDocument();
+  });
+
   test('点击新笔记可以打开编辑器', async () => {
     const user = userEvent.setup();
 

@@ -39,15 +39,41 @@ describe('NoteEditor', () => {
     confirmSpy.mockRestore();
   });
 
-  test('支持 image block 插入回调', async () => {
+  test('打开大输入时同步主输入内容，并在关闭主输入未提交内容时二次确认', async () => {
     const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<NoteEditor onSubmit={vi.fn()} />);
+
+    await user.type(screen.getByLabelText('笔记内容'), '主输入内容');
+    await user.click(screen.getByRole('button', { name: '扩大输入' }));
+
+    expect(screen.getByLabelText('大输入内容')).toHaveValue('主输入内容');
+
+    await user.click(screen.getByRole('button', { name: '关闭大输入' }));
+
+    expect(confirmSpy).toHaveBeenCalledWith('有未提交内容，确认关闭吗？');
+    expect(screen.getByRole('dialog', { name: '大输入浮层' })).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  test('支持 image block 插入并随提交落地', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
     const onInsertImage = vi.fn();
 
-    render(<NoteEditor onSubmit={vi.fn()} onInsertImage={onInsertImage} />);
+    render(<NoteEditor onSubmit={onSubmit} onInsertImage={onInsertImage} />);
 
+    await user.type(screen.getByLabelText('笔记内容'), '图文笔记');
     await user.type(screen.getByLabelText('图片 URL'), 'https://example.com/a.png');
     await user.click(screen.getByRole('button', { name: '插入图片' }));
+    await user.click(screen.getByRole('button', { name: '提交笔记' }));
 
     expect(onInsertImage).toHaveBeenCalledWith('https://example.com/a.png');
+    expect(onSubmit).toHaveBeenCalledWith([
+      { type: 'paragraph', content: '图文笔记' },
+      { type: 'image', url: 'https://example.com/a.png' }
+    ]);
   });
 });

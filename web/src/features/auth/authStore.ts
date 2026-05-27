@@ -16,6 +16,10 @@ export const authStore = {
     return { ...state };
   },
 
+  getAccessToken(): string | null {
+    return state.accessToken;
+  },
+
   isAuthenticated(): boolean {
     return Boolean(state.accessToken);
   },

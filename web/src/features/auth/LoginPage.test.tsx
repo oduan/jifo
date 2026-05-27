@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { createApiClient } from '../../shared/api/client';
@@ -8,7 +8,6 @@ import { authStore } from './authStore';
 
 afterEach(() => {
   authStore.clear();
-  cleanup();
 });
 
 describe('api client', () => {

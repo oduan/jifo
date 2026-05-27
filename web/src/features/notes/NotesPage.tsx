@@ -17,14 +17,21 @@ type NotesPageProps = {
   onLogout?: () => void;
 };
 
-function noteContains(note: Note, query: string): boolean {
+function noteContains(note: Note, tagsById: Map<string, TagNode>, query: string): boolean {
   if (!query.trim()) {
     return true;
   }
   const normalized = query.trim().toLowerCase();
-  return note.blocks.some((block) => {
+  const blockMatches = note.blocks.some((block) => {
     const value = block.type === 'paragraph' ? block.content : block.url;
     return value.toLowerCase().includes(normalized);
+  });
+  if (blockMatches) {
+    return true;
+  }
+  return note.tagIds.some((tagId) => {
+    const tag = tagsById.get(tagId);
+    return tag ? `${tag.name} ${tag.id}`.toLowerCase().includes(normalized) : tagId.toLowerCase().includes(normalized);
   });
 }
 
@@ -41,13 +48,14 @@ export function NotesPage({
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [showEditor, setShowEditor] = useState(notes.length === 0);
+  const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
 
   const filteredNotes = useMemo(() => {
     return notes.filter((note) => {
       const tagMatches = selectedTagId ? note.tagIds.includes(selectedTagId) : true;
-      return tagMatches && noteContains(note, query);
+      return tagMatches && noteContains(note, tagsById, query);
     });
-  }, [notes, query, selectedTagId]);
+  }, [notes, query, selectedTagId, tagsById]);
 
   return (
     <div

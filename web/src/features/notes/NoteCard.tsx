@@ -22,6 +22,17 @@ function blockText(block: NoteBlock): string {
   return block.alt ? `[图片] ${block.alt}` : `[图片] ${block.url}`;
 }
 
+function paragraphText(blocks: NoteBlock[]): string {
+  return blocks
+    .filter((block): block is Extract<NoteBlock, { type: 'paragraph' }> => block.type === 'paragraph')
+    .map((block) => block.content)
+    .join('\n\n');
+}
+
+function imageBlocks(blocks: NoteBlock[]): Extract<NoteBlock, { type: 'image' }>[] {
+  return blocks.filter((block): block is Extract<NoteBlock, { type: 'image' }> => block.type === 'image');
+}
+
 function noteText(blocks: NoteBlock[]): string {
   return blocks.map(blockText).join('\n');
 }
@@ -64,7 +75,8 @@ export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
 
       {editing ? (
         <NoteEditor
-          initialText={content}
+          initialText={paragraphText(note.blocks)}
+          initialImageBlocks={imageBlocks(note.blocks)}
           onSubmit={(blocks) => {
             onUpdate(note.id, blocks);
             setEditing(false);

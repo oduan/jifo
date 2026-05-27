@@ -6,6 +6,7 @@ export type NoteBlock =
 
 type NoteEditorProps = {
   initialText?: string;
+  initialImageBlocks?: Extract<NoteBlock, { type: 'image' }>[];
   onSubmit: (blocks: NoteBlock[]) => void;
   onInsertImage?: (url: string) => void;
 };
@@ -18,20 +19,22 @@ function toParagraphBlocks(text: string): NoteBlock[] {
     .map((content) => ({ type: 'paragraph', content }));
 }
 
-export function NoteEditor({ initialText = '', onSubmit, onInsertImage }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', initialImageBlocks = [], onSubmit, onInsertImage }: NoteEditorProps) {
   const [text, setText] = useState(initialText);
   const [largeText, setLargeText] = useState(initialText);
   const [isLargeOpen, setLargeOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
+  const [imageBlocks, setImageBlocks] = useState<Extract<NoteBlock, { type: 'image' }>[]>(initialImageBlocks);
 
   const submitText = (value: string) => {
-    const blocks = toParagraphBlocks(value);
+    const blocks = [...toParagraphBlocks(value), ...imageBlocks];
     if (blocks.length === 0) {
       return;
     }
     onSubmit(blocks);
     setText('');
     setLargeText('');
+    setImageBlocks([]);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -39,11 +42,26 @@ export function NoteEditor({ initialText = '', onSubmit, onInsertImage }: NoteEd
     submitText(text);
   };
 
+  const openLargeInput = () => {
+    setLargeText(text);
+    setLargeOpen(true);
+  };
+
   const closeLargeInput = () => {
-    if (largeText.trim() && !window.confirm('有未提交内容，确认关闭吗？')) {
+    if ((largeText.trim() || text.trim() || imageBlocks.length > 0) && !window.confirm('有未提交内容，确认关闭吗？')) {
       return;
     }
     setLargeOpen(false);
+  };
+
+  const insertImage = () => {
+    const url = imageUrl.trim();
+    if (!url) {
+      return;
+    }
+    setImageBlocks((blocks) => [...blocks, { type: 'image', url }]);
+    onInsertImage?.(url);
+    setImageUrl('');
   };
 
   return (
@@ -60,8 +78,16 @@ export function NoteEditor({ initialText = '', onSubmit, onInsertImage }: NoteEd
         />
       </label>
 
+      {imageBlocks.length > 0 ? (
+        <ul aria-label="已插入图片">
+          {imageBlocks.map((block) => (
+            <li key={block.url}>{block.url}</li>
+          ))}
+        </ul>
+      ) : null}
+
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => setLargeOpen(true)} aria-label="扩大输入">
+        <button type="button" onClick={openLargeInput} aria-label="扩大输入">
           扩大输入
         </button>
         <button type="submit">提交笔记</button>
@@ -76,17 +102,7 @@ export function NoteEditor({ initialText = '', onSubmit, onInsertImage }: NoteEd
           placeholder="https://example.com/image.png"
         />
       </label>
-      <button
-        type="button"
-        onClick={() => {
-          const url = imageUrl.trim();
-          if (!url) {
-            return;
-          }
-          onInsertImage?.(url);
-          setImageUrl('');
-        }}
-      >
+      <button type="button" onClick={insertImage}>
         插入图片
       </button>
 
