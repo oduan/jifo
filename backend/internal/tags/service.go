@@ -34,6 +34,24 @@ func (s *Service) EnsurePaths(ctx context.Context, userID uuid.UUID, paths []str
 		_ = tx.Rollback(ctx)
 	}()
 
+	result, err = s.EnsurePathsTx(ctx, tx, userID, paths)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) EnsurePathsTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, paths []string) (map[string]uuid.UUID, error) {
+	ordered := uniqueExpandedPaths(paths)
+	result := make(map[string]uuid.UUID, len(ordered))
+	if len(ordered) == 0 {
+		return result, nil
+	}
+
 	for _, path := range ordered {
 		parts := strings.Split(path, "/")
 		name := parts[len(parts)-1]
@@ -56,10 +74,46 @@ func (s *Service) EnsurePaths(ctx context.Context, userID uuid.UUID, paths []str
 		result[path] = id
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
 	return result, nil
+}
+
+func (s *Service) RecountNoteCounts(ctx context.Context, tx pgx.Tx, userID uuid.UUID, tagIDs []uuid.UUID) error {
+	seen := make(map[uuid.UUID]struct{}, len(tagIDs))
+	unique := make([]uuid.UUID, 0, len(tagIDs))
+	for _, id := range tagIDs {
+		if id == uuid.Nil {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+
+	for _, tagID := range unique {
+		_, err := tx.Exec(ctx, `
+			UPDATE tags
+			SET note_count = (
+				SELECT count(*)::int
+				FROM note_tags nt
+				JOIN notes n ON n.id = nt.note_id AND n.user_id = nt.user_id
+				WHERE nt.user_id = $1
+				  AND nt.tag_id = $2
+				  AND n.deleted_at IS NULL
+				  AND n.permanently_deleted_at IS NULL
+			),
+			updated_at = now()
+			WHERE user_id = $1 AND id = $2
+		`, userID, tagID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func uniqueExpandedPaths(paths []string) []string {
