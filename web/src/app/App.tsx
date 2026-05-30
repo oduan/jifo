@@ -5,7 +5,6 @@ import { submitAuth } from '../features/auth/api';
 import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
-import { uploadMedia } from '../features/media/api';
 import { createNote, deleteNote, fromApiNote, listNotes, updateNote } from '../features/notes/api';
 import { Note } from '../features/notes/NoteCard';
 import { NoteBlock } from '../features/notes/NoteEditor';
@@ -141,10 +140,6 @@ export function App() {
       onDeleteNote={(id: string) => withMutation(async () => {
         await deleteNote(client, id);
       })}
-      onUploadImage={async (file: File) => {
-        const asset = await uploadMedia(client, file);
-        return { type: 'image', url: asset.url, mediaId: asset.id, alt: file.name };
-      }}
       onLogout={() => authStore.clear()}
     />
   );

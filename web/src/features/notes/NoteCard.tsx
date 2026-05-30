@@ -16,7 +16,6 @@ type NoteCardProps = {
   note: Note;
   onDelete: (id: string) => void;
   onUpdate: (id: string, blocks: NoteBlock[]) => void;
-  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
 };
 
 function blockText(block: NoteBlock): string {
@@ -41,7 +40,7 @@ function noteText(blocks: NoteBlock[]): string {
   return blocks.map(blockText).join('\n');
 }
 
-export function NoteCard({ note, onDelete, onUpdate, onUploadImage }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -74,10 +73,8 @@ export function NoteCard({ note, onDelete, onUpdate, onUploadImage }: NoteCardPr
       {editing ? (
         <NoteEditor
           initialText={paragraphText(note.blocks)}
-          initialImageBlocks={imageBlocks(note.blocks)}
-          onUploadImage={onUploadImage}
           onSubmit={(blocks) => {
-            onUpdate(note.id, blocks);
+            onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
             setEditing(false);
           }}
         />

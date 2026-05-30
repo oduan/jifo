@@ -21,7 +21,6 @@ type NotesPageProps = {
   onCreateNote?: (blocks: NoteBlock[]) => void | Promise<void>;
   onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
   onDeleteNote?: (id: string) => void | Promise<void>;
-  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
   onLogout?: () => void;
 };
 
@@ -55,12 +54,10 @@ export function NotesPage({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
-  onUploadImage,
   onLogout
 }: NotesPageProps) {
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [showEditor, setShowEditor] = useState(notes.length === 0);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
@@ -122,15 +119,9 @@ export function NotesPage({
 
       <section className="jifo-workspace" aria-label="笔记工作区">
         <header className="workspace-header">
-          <div>
-            <p className="jifo-kicker">Jifo</p>
+          <div className="workspace-heading">
+            <span className="jifo-kicker">JIFO</span>
             <h2 className="workspace-title">{selectedTag ? selectedTag.name : '全部笔记'}</h2>
-            <p className="workspace-subtitle">{selectedTag ? `当前标签：${selectedTag.id}` : '记录和回看你的想法'}</p>
-          </div>
-          <div className="workspace-actions">
-            <Button type="button" variant="primary" onClick={() => setShowEditor(true)}>
-              新笔记
-            </Button>
           </div>
         </header>
 
@@ -148,6 +139,10 @@ export function NotesPage({
         {isLoading ? <div className="loading-banner" aria-live="polite">正在加载真实笔记数据…</div> : null}
         {isMutating ? <div className="sync-banner" aria-live="polite">正在保存更改…</div> : null}
 
+        <section className="composer-card" aria-label="新笔记编辑器">
+          <NoteEditor onSubmit={(blocks) => onCreateNote?.(blocks)} />
+        </section>
+
         <div className="search-row">
           <Field label="搜索笔记">
             <TextInput
@@ -163,18 +158,6 @@ export function NotesPage({
           </Field>
         </div>
 
-        {showEditor ? (
-          <section className="composer-card" aria-label="新笔记编辑器">
-            <NoteEditor
-              onUploadImage={onUploadImage}
-              onSubmit={(blocks) => {
-                onCreateNote?.(blocks);
-                setShowEditor(false);
-              }}
-            />
-          </section>
-        ) : null}
-
         <section className="notes-stream" aria-label="笔记流">
           {filteredNotes.map((note) => (
             <NoteCard
@@ -182,7 +165,6 @@ export function NotesPage({
               note={note}
               onDelete={(id) => onDeleteNote?.(id)}
               onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
-              onUploadImage={onUploadImage}
             />
           ))}
           {filteredNotes.length === 0 ? <EmptyState title="还没有笔记" description="写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。" /> : null}

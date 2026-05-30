@@ -85,14 +85,17 @@ describe('NotesPage', () => {
     expect(screen.queryByText('生活笔记')).not.toBeInTheDocument();
   });
 
-  test('点击新笔记可以打开编辑器', async () => {
+  test('顶部直接展示新笔记输入框并可提交', async () => {
     const user = userEvent.setup();
+    const onCreateNote = vi.fn();
 
-    render(
-      <NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} onCreateNote={vi.fn()} />
-    );
+    render(<NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} onCreateNote={onCreateNote} />);
 
-    await user.click(screen.getByRole('button', { name: '新笔记' }));
-    expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新笔记' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('笔记内容'), '直接输入新笔记');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(onCreateNote).toHaveBeenCalledWith([{ type: 'paragraph', content: '直接输入新笔记' }]);
   });
 });
