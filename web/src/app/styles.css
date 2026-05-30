@@ -422,6 +422,12 @@ h3 {
   background: rgba(255, 255, 255, 0.68);
 }
 
+.workspace-search__input:focus-visible {
+  outline: none;
+  border-color: rgba(232, 184, 91, 0.72);
+  box-shadow: 0 0 0 2px rgba(232, 184, 91, 0.18);
+}
+
 .error-banner,
 .loading-banner,
 .sync-banner {
