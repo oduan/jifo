@@ -632,8 +632,8 @@ h3 {
 }
 
 .tag-button[aria-pressed="true"] {
-  background: var(--jifo-green-tint);
-  border-color: var(--jifo-green-line);
+  background: transparent;
+  border-color: transparent;
   color: var(--jifo-green-dark);
 }
 
