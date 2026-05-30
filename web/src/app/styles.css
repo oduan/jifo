@@ -541,9 +541,11 @@ h3 {
   align-items: center;
   gap: 7px;
   border-radius: 9px;
+  padding: 2px 7px;
+  transition: background-color 160ms ease;
 }
 
-.tag-row:hover .tag-button {
+.tag-row:hover {
   background: var(--jifo-button-hover);
 }
 
@@ -615,7 +617,6 @@ h3 {
   transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
-.tag-button:hover,
 .nav-pill:hover {
   background: var(--jifo-button-hover);
 }
@@ -624,8 +625,10 @@ h3 {
   width: auto;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 22px;
+  padding: 2px 0;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .tag-button[aria-pressed="true"] {
@@ -636,7 +639,7 @@ h3 {
 
 .nav-pill {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .nav-pill:hover,
