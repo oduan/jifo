@@ -3,6 +3,7 @@ export type TagNode = {
   name: string;
   noteCount: number;
   parentId?: string;
+  path?: string;
 };
 
 type TagTreeProps = {
@@ -22,7 +23,7 @@ function renderTags(tags: TagNode[], parentId: string | undefined, onSelect: (ta
   }
 
   return (
-    <ul style={{ listStyle: 'none', paddingLeft: parentId ? 16 : 0, margin: 0 }}>
+    <ul className="tag-list">
       {children.map((tag) => {
         const childTree = renderTags(tags, tag.id, onSelect, selectedTagId);
         if (tag.noteCount === 0) {
@@ -32,17 +33,13 @@ function renderTags(tags: TagNode[], parentId: string | undefined, onSelect: (ta
           <li key={tag.id}>
             <button
               type="button"
+              className="tag-button"
               onClick={() => onSelect(tag.id)}
               aria-pressed={selectedTagId === tag.id}
-              style={{
-                border: 0,
-                background: selectedTagId === tag.id ? '#dcfce7' : 'transparent',
-                borderRadius: 8,
-                padding: '4px 8px',
-                cursor: 'pointer'
-              }}
+              aria-label={`${tag.name} (${tag.noteCount})`}
             >
-              {tag.name} ({tag.noteCount})
+              <span>{tag.name}</span>
+              <span className="tag-count">{tag.noteCount}</span>
             </button>
             {childTree}
           </li>
@@ -53,5 +50,5 @@ function renderTags(tags: TagNode[], parentId: string | undefined, onSelect: (ta
 }
 
 export function TagTree({ tags, selectedTagId, onSelect }: TagTreeProps) {
-  return <nav aria-label="全部标签">{renderTags(tags, undefined, onSelect, selectedTagId)}</nav>;
+  return <nav className="tag-tree" aria-label="全部标签">{renderTags(tags, undefined, onSelect, selectedTagId)}</nav>;
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,9 @@ import (
 
 	"jifo/backend/internal/auth"
 	"jifo/backend/internal/heatmap"
+	"jifo/backend/internal/media"
 	"jifo/backend/internal/notes"
+	syncsvc "jifo/backend/internal/sync"
 	"jifo/backend/internal/tags"
 )
 
@@ -47,11 +50,24 @@ func (f *fakeAuthService) ValidateAccessToken(ctx context.Context, token string)
 type fakeNotesService struct{}
 
 func (f *fakeNotesService) Create(ctx context.Context, input notes.CreateInput) (notes.Note, error) {
-	return notes.Note{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: input.UserID, ClientID: input.ClientID, PlainText: input.PlainText}, nil
+	return notes.Note{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: input.UserID, ClientID: input.ClientID, Content: input.Content, PlainText: input.PlainText, Version: 1}, nil
 }
 
 func (f *fakeNotesService) List(ctx context.Context, filter notes.ListFilter) ([]notes.Note, error) {
-	return []notes.Note{{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: filter.UserID, ClientID: "c1", PlainText: "hello"}}, nil
+	return []notes.Note{{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: filter.UserID, ClientID: "c1", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "hello"}}}, PlainText: "hello", Version: 1}}, nil
+}
+
+func (f *fakeNotesService) Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error) {
+	return notes.Note{ID: input.NoteID, UserID: input.UserID, ClientID: "c1", Content: input.Content, PlainText: input.PlainText, Version: 2}, nil
+}
+
+func (f *fakeNotesService) MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error) {
+	deletedAt := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
+	return notes.Note{ID: noteID, UserID: userID, ClientID: "c1", PlainText: "deleted", DeletedAt: &deletedAt, Version: 2}, nil
+}
+
+func (f *fakeNotesService) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error) {
+	return notes.Note{ID: noteID, UserID: userID, ClientID: "c1", PlainText: "restored", Version: 3}, nil
 }
 
 type fakeTagsService struct{}
@@ -70,21 +86,57 @@ func (f *fakeHeatmapService) Aggregate(ctx context.Context, userID uuid.UUID, fr
 	return []heatmap.DayCount{{Date: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), CreatedCount: 1, UpdatedCount: 2, TotalCount: 3}}, nil
 }
 
+type fakeSyncService struct{}
+
+func (f *fakeSyncService) Push(ctx context.Context, userID uuid.UUID, sessionID *uuid.UUID, op syncsvc.Operation) (syncsvc.PushResult, error) {
+	noteID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	return syncsvc.PushResult{Status: "created", NoteID: &noteID, Version: 1}, nil
+}
+
+func (f *fakeSyncService) Pull(ctx context.Context, userID uuid.UUID, cursor syncsvc.Cursor, limit int) (syncsvc.PullResult, error) {
+	noteID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	return syncsvc.PullResult{Items: []syncsvc.PullItem{{NoteID: noteID, ClientID: "client-sync", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "sync note"}}}, PlainText: "sync note", Version: 1, UpdatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}}}, nil
+}
+
+type fakeMediaService struct{}
+
+type fakeMediaFile struct{ *strings.Reader }
+
+func (f fakeMediaFile) Close() error { return nil }
+
+func (f *fakeMediaService) List(ctx context.Context, userID uuid.UUID) ([]media.Asset, error) {
+	return []media.Asset{{ID: uuid.MustParse("55555555-5555-5555-5555-555555555555"), UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: 3, Checksum: "checksum", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}}, nil
+}
+
+func (f *fakeMediaService) Get(ctx context.Context, userID uuid.UUID, assetID uuid.UUID) (media.Asset, error) {
+	return media.Asset{ID: assetID, UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: 3, Checksum: "checksum", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}, nil
+}
+
+func (f *fakeMediaService) Open(asset media.Asset) (media.File, error) {
+	return fakeMediaFile{Reader: strings.NewReader("png")}, nil
+}
+
+func (f *fakeMediaService) Upload(ctx context.Context, input media.UploadInput) (media.Asset, error) {
+	return media.Asset{ID: uuid.MustParse("55555555-5555-5555-5555-555555555555"), UserID: input.UserID, Kind: input.Kind, MIMEType: input.MIMEType, SizeBytes: input.SizeBytes, Checksum: "checksum", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}, nil
+}
+
 func TestRouterSmoke(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Auth:    &fakeAuthService{userID: uuid.MustParse("11111111-1111-1111-1111-111111111111")},
 		Notes:   &fakeNotesService{},
 		Tags:    &fakeTagsService{},
 		Heatmap: &fakeHeatmapService{},
+		Sync:    &fakeSyncService{},
+		Media:   &fakeMediaService{},
 	})
 
-	registerBody := map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev", "deviceName": "mac"}
+	registerBody := map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev"}
 	registerResp := doJSON(t, router, http.MethodPost, "/api/auth/register", registerBody, "")
 	if registerResp.Code != http.StatusCreated {
 		t.Fatalf("register status = %d, want %d", registerResp.Code, http.StatusCreated)
 	}
 
-	loginBody := map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev", "deviceName": "mac"}
+	loginBody := map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev"}
 	loginResp := doJSON(t, router, http.MethodPost, "/api/auth/login", loginBody, "")
 	if loginResp.Code != http.StatusOK {
 		t.Fatalf("login status = %d, want %d", loginResp.Code, http.StatusOK)
@@ -101,6 +153,22 @@ func TestRouterSmoke(t *testing.T) {
 		t.Fatalf("list notes status = %d, want %d", listResp.Code, http.StatusOK)
 	}
 
+	updateBody := map[string]any{"plainText": "#项目 updated", "content": map[string]any{"blocks": []map[string]any{{"type": "paragraph", "text": "#项目 updated"}}}}
+	updateResp := doJSON(t, router, http.MethodPatch, "/api/notes/33333333-3333-3333-3333-333333333333", updateBody, "access-token")
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("update note status = %d, want %d", updateResp.Code, http.StatusOK)
+	}
+
+	deleteResp := doJSON(t, router, http.MethodDelete, "/api/notes/33333333-3333-3333-3333-333333333333", nil, "access-token")
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("delete note status = %d, want %d", deleteResp.Code, http.StatusOK)
+	}
+
+	restoreResp := doJSON(t, router, http.MethodPost, "/api/notes/33333333-3333-3333-3333-333333333333/restore", nil, "access-token")
+	if restoreResp.Code != http.StatusOK {
+		t.Fatalf("restore note status = %d, want %d", restoreResp.Code, http.StatusOK)
+	}
+
 	treeResp := doJSON(t, router, http.MethodGet, "/api/tags/tree", nil, "access-token")
 	if treeResp.Code != http.StatusOK {
 		t.Fatalf("tags tree status = %d, want %d", treeResp.Code, http.StatusOK)
@@ -109,6 +177,27 @@ func TestRouterSmoke(t *testing.T) {
 	heatmapResp := doJSON(t, router, http.MethodGet, "/api/heatmap?from=2026-05-01&to=2026-05-07", nil, "access-token")
 	if heatmapResp.Code != http.StatusOK {
 		t.Fatalf("heatmap status = %d, want %d", heatmapResp.Code, http.StatusOK)
+	}
+
+	pushBody := map[string]any{"operations": []map[string]any{{"opId": "op-1", "entity": "note", "action": "create", "clientId": "client-sync", "payload": map[string]any{"blocks": []map[string]any{{"type": "paragraph", "text": "sync note"}}}}}}
+	pushResp := doJSON(t, router, http.MethodPost, "/api/sync/push", pushBody, "access-token")
+	if pushResp.Code != http.StatusOK {
+		t.Fatalf("sync push status = %d, want %d", pushResp.Code, http.StatusOK)
+	}
+
+	pullResp := doJSON(t, router, http.MethodGet, "/api/sync/pull?limit=10", nil, "access-token")
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("sync pull status = %d, want %d", pullResp.Code, http.StatusOK)
+	}
+
+	mediaListResp := doJSON(t, router, http.MethodGet, "/api/media", nil, "access-token")
+	if mediaListResp.Code != http.StatusOK {
+		t.Fatalf("media list status = %d, want %d", mediaListResp.Code, http.StatusOK)
+	}
+
+	mediaGetResp := doJSON(t, router, http.MethodGet, "/api/media/55555555-5555-5555-5555-555555555555", nil, "access-token")
+	if mediaGetResp.Code != http.StatusOK {
+		t.Fatalf("media get status = %d, want %d", mediaGetResp.Code, http.StatusOK)
 	}
 }
 

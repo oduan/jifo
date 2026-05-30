@@ -31,6 +31,9 @@ type AuthService interface {
 type NotesService interface {
 	Create(ctx context.Context, input notes.CreateInput) (notes.Note, error)
 	List(ctx context.Context, filter notes.ListFilter) ([]notes.Note, error)
+	Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error)
+	MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
+	Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
 }
 
 type TagsService interface {
@@ -42,11 +45,22 @@ type HeatmapService interface {
 	Aggregate(ctx context.Context, userID uuid.UUID, from time.Time, to time.Time) ([]heatmap.DayCount, error)
 }
 
+type SyncService interface {
+	Push(ctx context.Context, userID uuid.UUID, sessionID *uuid.UUID, op sync.Operation) (sync.PushResult, error)
+	Pull(ctx context.Context, userID uuid.UUID, cursor sync.Cursor, limit int) (sync.PullResult, error)
+}
+
+type MediaService interface {
+	media.HandlerService
+}
+
 type Dependencies struct {
 	Auth    AuthService
 	Notes   NotesService
 	Tags    TagsService
 	Heatmap HeatmapService
+	Sync    SyncService
+	Media   MediaService
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -83,6 +97,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			notesHandler := notes.NewHandler(deps.Notes)
 			protected.Post("/notes", notesHandler.Create)
 			protected.Get("/notes", notesHandler.List)
+			protected.Patch("/notes/{noteID}", notesHandler.Update)
+			protected.Put("/notes/{noteID}", notesHandler.Update)
+			protected.Delete("/notes/{noteID}", notesHandler.Delete)
+			protected.Post("/notes/{noteID}/restore", notesHandler.Restore)
 
 			tagsHandler := tags.NewHandler(deps.Tags)
 			protected.Get("/tags", tagsHandler.List)
@@ -91,10 +109,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			heatmapHandler := heatmap.NewHandler(deps.Heatmap)
 			protected.Get("/heatmap", heatmapHandler.Get)
 
-			mediaHandler := media.NewHandler()
+			mediaHandler := media.NewHandler(deps.Media)
 			mediaHandler.RegisterRoutes(protected)
 
-			syncHandler := sync.NewHandler()
+			syncHandler := sync.NewHandler(deps.Sync)
 			syncHandler.RegisterRoutes(protected)
 		})
 	})
@@ -121,11 +139,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("init auth service: %v", err)
 	}
-	_ = media.NewService(database, cfg.MediaRoot)
-	_ = sync.NewService(database, noteSvc)
+	mediaSvc := media.NewService(database, cfg.MediaRoot)
+	syncSvc := sync.NewService(database, noteSvc)
 	heatmapSvc := heatmap.NewService(database)
 
-	router := NewRouter(Dependencies{Auth: authSvc, Notes: noteSvc, Tags: tagSvc, Heatmap: heatmapSvc})
+	router := NewRouter(Dependencies{Auth: authSvc, Notes: noteSvc, Tags: tagSvc, Heatmap: heatmapSvc, Sync: syncSvc, Media: mediaSvc})
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"

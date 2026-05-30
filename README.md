@@ -10,7 +10,7 @@ Jifo 是一个类似 Flomo 的笔记 MVP：Go + PostgreSQL 后端、React Web、
 - Web：Vite + React + TypeScript、认证界面、Flomo-like 双栏笔记布局、笔记编辑器、标签树、热力图、IndexedDB cache/outbox、离线同步引擎基础。
 - 存储：PostgreSQL；Web 本地缓存使用 Dexie/IndexedDB。
 
-> 注意：HTTP 层的 `/api/sync/push` 和 `/api/media` 当前仍是最小占位路由；同步核心逻辑已在后端 service 与 Web sync engine 中落地，后续可继续接入完整 HTTP handler。
+> 注意：HTTP 层已接入 notes/tags/heatmap、`/api/sync/push`、`/api/sync/pull` 以及 `/api/media` 上传/读取；Web App 已接真实 API，离线 sync engine 自动挂载与更多设置项仍可继续补全。
 
 ## 快速开始
 
@@ -18,7 +18,7 @@ Jifo 是一个类似 Flomo 的笔记 MVP：Go + PostgreSQL 后端、React Web、
 docker compose up -d db
 
 cd backend
-DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret go run ./cmd/api
+DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret-at-least-16 go run ./cmd/api
 
 cd ../web
 npm install

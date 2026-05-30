@@ -3,6 +3,9 @@ import { useMemo, useState } from 'react';
 import { Heatmap, HeatmapCell } from '../heatmap/Heatmap';
 import { SettingsPopover } from '../settings/SettingsPopover';
 import { TagNode, TagTree } from '../tags/TagTree';
+import { Button } from '../../shared/ui/Button';
+import { EmptyState } from '../../shared/ui/EmptyState';
+import { Field, TextInput } from '../../shared/ui/Input';
 import { Note, NoteCard } from './NoteCard';
 import { NoteBlock, NoteEditor } from './NoteEditor';
 
@@ -11,9 +14,14 @@ type NotesPageProps = {
   notes: Note[];
   tags: TagNode[];
   heatmapCells: HeatmapCell[];
-  onCreateNote?: (blocks: NoteBlock[]) => void;
-  onUpdateNote?: (id: string, blocks: NoteBlock[]) => void;
-  onDeleteNote?: (id: string) => void;
+  isLoading?: boolean;
+  isMutating?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+  onCreateNote?: (blocks: NoteBlock[]) => void | Promise<void>;
+  onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
+  onDeleteNote?: (id: string) => void | Promise<void>;
+  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
   onLogout?: () => void;
 };
 
@@ -40,15 +48,22 @@ export function NotesPage({
   notes,
   tags,
   heatmapCells,
+  isLoading = false,
+  isMutating = false,
+  error,
+  onRetry,
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  onUploadImage,
   onLogout
 }: NotesPageProps) {
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [showEditor, setShowEditor] = useState(notes.length === 0);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
+  const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
+  const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
 
   const filteredNotes = useMemo(() => {
     return notes.filter((note) => {
@@ -57,69 +72,101 @@ export function NotesPage({
     });
   }, [notes, query, selectedTagId, tagsById]);
 
+  const selectedTag = selectedTagId ? tagsById.get(selectedTagId) : undefined;
+
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'grid',
-        gridTemplateColumns: '280px minmax(0, 1fr)',
-        background: '#f8fafc',
-        color: '#111827',
-        fontFamily: 'system-ui, sans-serif'
-      }}
-    >
-      <aside style={{ borderRight: '1px solid #e5e7eb', padding: 20, display: 'grid', alignContent: 'start', gap: 18 }}>
-        <header>
-          <strong>{userName}</strong>
-          <p>{notes.length} 条笔记</p>
+    <main className="jifo-shell">
+      <aside className="jifo-sidebar" aria-label="Jifo 侧边栏">
+        <header className="sidebar-user">
+          <div className="user-avatar" aria-hidden="true" />
+          <div>
+            <h1 className="user-name">{userName}</h1>
+            <p className="user-status">本地优先 · 自动同步</p>
+          </div>
           <SettingsPopover userName={userName} onLogout={onLogout} />
         </header>
 
-        <section>
+        <section className="stats-grid" aria-label="账户统计">
+          <div className="stat-card">
+            <strong>{notes.length}</strong>
+            <span>{notes.length} 条笔记</span>
+          </div>
+          <div className="stat-card">
+            <strong>{visibleTagCount}</strong>
+            <span>{visibleTagCount} 个标签</span>
+          </div>
+          <div className="stat-card">
+            <strong>{activeDays}</strong>
+            <span>记录天数</span>
+          </div>
+        </section>
+
+        <section className="sidebar-section">
           <h2>热力图</h2>
           <Heatmap cells={heatmapCells} />
         </section>
 
-        <section>
+        <section className="sidebar-section">
           <h2>笔记筛选</h2>
-          <button type="button" aria-label="全部笔记" onClick={() => setSelectedTagId(null)}>
-            全部
+          <button type="button" className="nav-pill" aria-pressed={selectedTagId === null} aria-label="全部笔记" onClick={() => setSelectedTagId(null)}>
+            <span>全部笔记</span>
+            <span className="nav-count">{notes.length}</span>
           </button>
         </section>
 
-        <section>
+        <section className="sidebar-section">
           <h2>全部标签</h2>
           <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={setSelectedTagId} />
         </section>
       </aside>
 
-      <main style={{ padding: 28, display: 'grid', alignContent: 'start', gap: 18 }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
+      <section className="jifo-workspace" aria-label="笔记工作区">
+        <header className="workspace-header">
           <div>
-            <h1>全部笔记</h1>
-            <p>{selectedTagId ? `当前标签：${selectedTagId}` : '记录和回看你的想法'}</p>
+            <p className="jifo-kicker">Jifo</p>
+            <h2 className="workspace-title">{selectedTag ? selectedTag.name : '全部笔记'}</h2>
+            <p className="workspace-subtitle">{selectedTag ? `当前标签：${selectedTag.id}` : '记录和回看你的想法'}</p>
           </div>
-          <button type="button" onClick={() => setShowEditor(true)}>
-            新笔记
-          </button>
+          <div className="workspace-actions">
+            <Button type="button" variant="primary" onClick={() => setShowEditor(true)}>
+              新笔记
+            </Button>
+          </div>
         </header>
 
-        <label>
-          <span>搜索笔记</span>
-          <input
-            type="search"
-            role="searchbox"
-            aria-label="搜索笔记"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索文字或标签"
-            style={{ marginLeft: 8 }}
-          />
-        </label>
+        {error ? (
+          <div className="error-banner" role="alert">
+            <span>{error}</span>
+            {onRetry ? (
+              <Button type="button" variant="ghost" onClick={onRetry}>
+                重试
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {isLoading ? <div className="loading-banner" aria-live="polite">正在加载真实笔记数据…</div> : null}
+        {isMutating ? <div className="sync-banner" aria-live="polite">正在保存更改…</div> : null}
+
+        <div className="search-row">
+          <Field label="搜索笔记">
+            <TextInput
+              type="search"
+              name="notes-search"
+              role="searchbox"
+              aria-label="搜索笔记"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索文字或标签…"
+              autoComplete="off"
+            />
+          </Field>
+        </div>
 
         {showEditor ? (
-          <section aria-label="新笔记编辑器" style={{ background: 'white', borderRadius: 12, padding: 16 }}>
+          <section className="composer-card" aria-label="新笔记编辑器">
             <NoteEditor
+              onUploadImage={onUploadImage}
               onSubmit={(blocks) => {
                 onCreateNote?.(blocks);
                 setShowEditor(false);
@@ -128,18 +175,19 @@ export function NotesPage({
           </section>
         ) : null}
 
-        <section aria-label="笔记流" style={{ display: 'grid', gap: 12 }}>
+        <section className="notes-stream" aria-label="笔记流">
           {filteredNotes.map((note) => (
             <NoteCard
               key={note.id}
               note={note}
               onDelete={(id) => onDeleteNote?.(id)}
               onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
+              onUploadImage={onUploadImage}
             />
           ))}
-          {filteredNotes.length === 0 ? <p>暂无笔记</p> : null}
+          {filteredNotes.length === 0 ? <EmptyState title="还没有笔记" description="写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。" /> : null}
         </section>
-      </main>
-    </div>
+      </section>
+    </main>
   );
 }

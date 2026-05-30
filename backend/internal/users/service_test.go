@@ -31,7 +31,6 @@ func TestChangePasswordRevokesAllSessionsAndInvalidatesOldTokens(t *testing.T) {
 		Email:      "change-password@example.com",
 		Password:   "old-password",
 		DeviceCode: "device-a",
-		DeviceName: "MacBook",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -40,7 +39,6 @@ func TestChangePasswordRevokesAllSessionsAndInvalidatesOldTokens(t *testing.T) {
 		Email:      "change-password@example.com",
 		Password:   "old-password",
 		DeviceCode: "device-b",
-		DeviceName: "iPhone",
 	})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
@@ -99,7 +97,6 @@ func TestChangePasswordRevokesAllSessionsAndInvalidatesOldTokens(t *testing.T) {
 		Email:      "change-password@example.com",
 		Password:   "new-password",
 		DeviceCode: "device-c",
-		DeviceName: "iPad",
 	})
 	if err != nil {
 		t.Fatalf("Login with new password: %v", err)

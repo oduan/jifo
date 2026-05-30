@@ -2,7 +2,7 @@
 
 Jifo 同步采用离线优先思路：Web 先写 IndexedDB 本地缓存与 outbox；网络可用时按顺序同步到后端，再 pull 远端变更刷新本地缓存。
 
-> 当前状态：后端 `internal/sync.Service` 和 Web `syncEngine` 已实现核心协议与测试；但 `/api/sync/push` HTTP handler 仍是占位返回 `501 not_implemented`，尚未把 service 完整接入 HTTP API。
+> 当前状态：后端 `internal/sync.Service`、`/api/sync/push`、`/api/sync/pull` 和 Web `syncEngine` 已实现核心协议与测试；Web App 主界面已接真实 notes/tags/heatmap API，离线 sync engine 的自动启动与媒体上传 UI 仍可继续打磨。
 
 ## IndexedDB schema
 
@@ -128,6 +128,63 @@ graph LR
 ```
 
 如果上传成功但 push 失败，下一次重试会复用已持久化的 `mediaId`，避免重复上传同一媒体。
+
+## HTTP API
+
+### Push
+
+`POST /api/sync/push`
+
+```json
+{
+  "operations": [
+    {
+      "opId": "op-uuid",
+      "entity": "note",
+      "action": "create",
+      "clientId": "client-note-001",
+      "noteId": "uuid-for-update-delete-restore",
+      "baseVersion": 1,
+      "payload": {
+        "blocks": [{ "type": "paragraph", "text": "离线创建 #思考" }],
+        "plainText": "离线创建 #思考"
+      }
+    }
+  ]
+}
+```
+
+响应：
+
+```json
+{
+  "results": [
+    { "opId": "op-uuid", "status": "created", "noteId": "uuid", "version": 1 }
+  ]
+}
+```
+
+### Pull
+
+`GET /api/sync/pull?updatedAt=&id=&limit=100` 或 `POST /api/sync/pull`。
+
+响应包含 Web adapter 友好的 `notes` 与游标：
+
+```json
+{
+  "notes": [
+    {
+      "id": "uuid",
+      "clientId": "client-note-001",
+      "content": { "blocks": [{ "type": "paragraph", "text": "同步笔记" }] },
+      "plainText": "同步笔记",
+      "version": 1,
+      "updatedAt": "2026-05-30T01:00:00Z"
+    }
+  ],
+  "cursor": { "updatedAt": "2026-05-30T01:00:00Z", "id": "uuid" }
+}
+```
 
 ## Push result 状态
 

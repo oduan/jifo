@@ -1,3 +1,5 @@
+import { Button } from '../../shared/ui/Button';
+
 type SettingsPopoverProps = {
   userName: string;
   onLogout?: () => void;
@@ -5,14 +7,14 @@ type SettingsPopoverProps = {
 
 export function SettingsPopover({ userName, onLogout }: SettingsPopoverProps) {
   return (
-    <details>
+    <details className="settings-popover">
       <summary>设置</summary>
-      <div style={{ display: 'grid', gap: 8, padding: 8 }}>
+      <div className="settings-panel">
         <span>{userName}</span>
         {onLogout ? (
-          <button type="button" onClick={onLogout}>
+          <Button type="button" variant="ghost" onClick={onLogout}>
             退出登录
-          </button>
+          </Button>
         ) : null}
       </div>
     </details>

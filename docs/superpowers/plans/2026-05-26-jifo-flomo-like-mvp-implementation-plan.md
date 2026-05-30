@@ -1049,7 +1049,7 @@ git commit -m "feat: add offline outbox sync engine" -m "Co-Authored-By: Craft A
 
 ```bash
 docker compose up -d db
-cd backend && DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret go run ./cmd/api
+cd backend && DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret-at-least-16 go run ./cmd/api
 cd web && npm install && npm run dev
 ```
 

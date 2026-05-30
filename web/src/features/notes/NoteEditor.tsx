@@ -1,14 +1,18 @@
 import { FormEvent, useState } from 'react';
 
+import { Button } from '../../shared/ui/Button';
+import { Field, Textarea, TextInput } from '../../shared/ui/Input';
+
 export type NoteBlock =
   | { type: 'paragraph'; content: string }
-  | { type: 'image'; url: string; alt?: string };
+  | { type: 'image'; url: string; mediaId?: string; alt?: string };
 
 type NoteEditorProps = {
   initialText?: string;
   initialImageBlocks?: Extract<NoteBlock, { type: 'image' }>[];
   onSubmit: (blocks: NoteBlock[]) => void;
   onInsertImage?: (url: string) => void;
+  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
 };
 
 function toParagraphBlocks(text: string): NoteBlock[] {
@@ -19,12 +23,14 @@ function toParagraphBlocks(text: string): NoteBlock[] {
     .map((content) => ({ type: 'paragraph', content }));
 }
 
-export function NoteEditor({ initialText = '', initialImageBlocks = [], onSubmit, onInsertImage }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', initialImageBlocks = [], onSubmit, onInsertImage, onUploadImage }: NoteEditorProps) {
   const [text, setText] = useState(initialText);
   const [largeText, setLargeText] = useState(initialText);
   const [isLargeOpen, setLargeOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [imageBlocks, setImageBlocks] = useState<Extract<NoteBlock, { type: 'image' }>[]>(initialImageBlocks);
+  const [isUploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const submitText = (value: string) => {
     const blocks = [...toParagraphBlocks(value), ...imageBlocks];
@@ -64,87 +70,124 @@ export function NoteEditor({ initialText = '', initialImageBlocks = [], onSubmit
     setImageUrl('');
   };
 
+  const uploadImage = async (file: File | undefined) => {
+    if (!file || !onUploadImage) {
+      return;
+    }
+    setUploadingImage(true);
+    setImageError(null);
+    try {
+      const block = await onUploadImage(file);
+      setImageBlocks((blocks) => [...blocks, block]);
+      onInsertImage?.(block.url);
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : '图片上传失败，请稍后重试。');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 10 }}>
-      <label>
-        <div>笔记内容</div>
-        <textarea
+    <form className="note-editor" onSubmit={handleSubmit}>
+      <Field label="笔记内容">
+        <Textarea
           aria-label="笔记内容"
+          name="note-content"
           rows={5}
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="记录此刻想法..."
-          style={{ width: '100%', boxSizing: 'border-box' }}
+          placeholder="记录此刻想法…"
         />
-      </label>
+      </Field>
 
       {imageBlocks.length > 0 ? (
-        <ul aria-label="已插入图片">
+        <ul className="inserted-images" aria-label="已插入图片">
           {imageBlocks.map((block) => (
             <li key={block.url}>{block.url}</li>
           ))}
         </ul>
       ) : null}
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" onClick={openLargeInput} aria-label="扩大输入">
+      <div className="editor-actions">
+        <Button type="button" variant="ghost" onClick={openLargeInput} aria-label="扩大输入">
           扩大输入
-        </button>
-        <button type="submit">提交笔记</button>
+        </Button>
+        <Button type="submit" variant="primary">
+          提交笔记
+        </Button>
       </div>
 
-      <label>
-        <div>图片 URL</div>
-        <input
-          aria-label="图片 URL"
-          value={imageUrl}
-          onChange={(event) => setImageUrl(event.target.value)}
-          placeholder="https://example.com/image.png"
-        />
-      </label>
-      <button type="button" onClick={insertImage}>
-        插入图片
-      </button>
+      <div className="image-url-row">
+        <Field label="图片 URL">
+          <TextInput
+            aria-label="图片 URL"
+            name="image-url"
+            value={imageUrl}
+            onChange={(event) => setImageUrl(event.target.value)}
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            placeholder="https://example.com/image.png…"
+          />
+        </Field>
+        <Button type="button" onClick={insertImage}>
+          插入图片
+        </Button>
+      </div>
+
+      {onUploadImage ? (
+        <div className="image-upload-row">
+          <Field label="上传图片">
+            <TextInput
+              aria-label="上传图片"
+              name="image-file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              disabled={isUploadingImage}
+              onChange={(event) => {
+                void uploadImage(event.currentTarget.files?.[0]);
+                event.currentTarget.value = '';
+              }}
+            />
+          </Field>
+          <span className="image-upload-hint">{isUploadingImage ? '上传中…' : '支持 PNG、JPEG、WebP、GIF，最大 10MB'}</span>
+        </div>
+      ) : null}
+
+      {imageError ? (
+        <p className="auth-error" role="alert">
+          {imageError}
+        </p>
+      ) : null}
 
       {isLargeOpen ? (
-        <div
-          role="dialog"
-          aria-label="大输入浮层"
-          style={{
-            position: 'fixed',
-            inset: 24,
-            background: 'white',
-            border: '1px solid #d1d5db',
-            borderRadius: 12,
-            padding: 16,
-            boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
-            zIndex: 10
-          }}
-        >
-          <label>
-            <div>大输入内容</div>
-            <textarea
-              aria-label="大输入内容"
-              rows={14}
-              value={largeText}
-              onChange={(event) => setLargeText(event.target.value)}
-              style={{ width: '100%', boxSizing: 'border-box' }}
-            />
-          </label>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button
-              type="button"
-              onClick={() => {
-                setText(largeText);
-                submitText(largeText);
-                setLargeOpen(false);
-              }}
-            >
-              提交笔记
-            </button>
-            <button type="button" onClick={closeLargeInput}>
-              关闭大输入
-            </button>
+        <div className="large-editor-backdrop" role="presentation">
+          <div className="large-editor-dialog" role="dialog" aria-label="大输入浮层">
+            <Field label="大输入内容">
+              <Textarea
+                aria-label="大输入内容"
+                name="large-note-content"
+                rows={14}
+                value={largeText}
+                onChange={(event) => setLargeText(event.target.value)}
+              />
+            </Field>
+            <div className="editor-actions">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => {
+                  setText(largeText);
+                  submitText(largeText);
+                  setLargeOpen(false);
+                }}
+              >
+                提交笔记
+              </Button>
+              <Button type="button" variant="ghost" onClick={closeLargeInput}>
+                关闭大输入
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}

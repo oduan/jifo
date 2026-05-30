@@ -22,6 +22,7 @@ var (
 	ErrInvalidSize      = errors.New("invalid media size")
 	ErrFileTooLarge     = errors.New("media file too large")
 	ErrChecksumMismatch = errors.New("media checksum mismatch")
+	ErrAssetNotFound    = errors.New("media asset not found")
 )
 
 type Service struct {
@@ -75,6 +76,53 @@ func (s *Service) ValidateUpload(mimeType string, size int64) error {
 		return ErrFileTooLarge
 	}
 	return nil
+}
+
+func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Asset, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT id, user_id, kind, mime_type, size_bytes, storage_key, checksum, created_at, deleted_at, purge_after, purged_at
+		FROM media_assets
+		WHERE user_id = $1
+		  AND deleted_at IS NULL
+		  AND purged_at IS NULL
+		ORDER BY created_at DESC, id DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	assets := make([]Asset, 0)
+	for rows.Next() {
+		asset, err := scanAsset(rows)
+		if err != nil {
+			return nil, err
+		}
+		assets = append(assets, asset)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return assets, nil
+}
+
+func (s *Service) Get(ctx context.Context, userID uuid.UUID, assetID uuid.UUID) (Asset, error) {
+	asset, err := scanAsset(s.db.QueryRow(ctx, `
+		SELECT id, user_id, kind, mime_type, size_bytes, storage_key, checksum, created_at, deleted_at, purge_after, purged_at
+		FROM media_assets
+		WHERE user_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+		  AND purged_at IS NULL
+	`, userID, assetID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Asset{}, ErrAssetNotFound
+	}
+	return asset, err
+}
+
+func (s *Service) Open(asset Asset) (File, error) {
+	return os.Open(filepath.Join(s.mediaRoot, filepath.FromSlash(asset.StorageKey)))
 }
 
 func (s *Service) Upload(ctx context.Context, input UploadInput) (Asset, error) {

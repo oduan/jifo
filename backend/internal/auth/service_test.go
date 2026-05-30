@@ -65,7 +65,6 @@ func TestRegisterNormalizesEmailStoresHashedRefreshTokenAndRejectsDuplicate(t *t
 		Email:      "  Foo.Bar@Example.COM  ",
 		Password:   "super-secret-password",
 		DeviceCode: "device-1",
-		DeviceName: "MacBook",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -81,13 +80,13 @@ func TestRegisterNormalizesEmailStoresHashedRefreshTokenAndRejectsDuplicate(t *t
 		t.Fatal("register should return non-empty access and refresh tokens")
 	}
 
-	var storedEmail, storedUsername, refreshTokenHash string
+	var storedEmail, storedUsername, storedDeviceName, refreshTokenHash string
 	err = db.QueryRow(ctx, `
-		SELECT u.email, u.username, s.refresh_token_hash
+		SELECT u.email, u.username, s.device_name, s.refresh_token_hash
 		FROM users u
 		JOIN user_sessions s ON s.user_id = u.id
 		WHERE u.id = $1
-	`, result.User.ID).Scan(&storedEmail, &storedUsername, &refreshTokenHash)
+	`, result.User.ID).Scan(&storedEmail, &storedUsername, &storedDeviceName, &refreshTokenHash)
 	if err != nil {
 		t.Fatalf("query stored user/session: %v", err)
 	}
@@ -96,6 +95,9 @@ func TestRegisterNormalizesEmailStoresHashedRefreshTokenAndRejectsDuplicate(t *t
 	}
 	if storedUsername != "foo.bar" {
 		t.Fatalf("stored username = %q, want %q", storedUsername, "foo.bar")
+	}
+	if _, err := uuid.Parse(storedDeviceName); err != nil {
+		t.Fatalf("stored device name = %q, want backend-generated UUID: %v", storedDeviceName, err)
 	}
 	if refreshTokenHash == "" {
 		t.Fatal("refresh token hash must be stored")
@@ -108,7 +110,6 @@ func TestRegisterNormalizesEmailStoresHashedRefreshTokenAndRejectsDuplicate(t *t
 		Email:      "foo.bar@example.com",
 		Password:   "another-password",
 		DeviceCode: "device-2",
-		DeviceName: "iPhone",
 	})
 	if !errors.Is(err, ErrEmailAlreadyExists) {
 		t.Fatalf("duplicate register error = %v, want %v", err, ErrEmailAlreadyExists)
@@ -143,7 +144,6 @@ func TestLoginCreatesIndependentSessionsPerDevice(t *testing.T) {
 		Email:      "login@example.com",
 		Password:   "login-password",
 		DeviceCode: "device-a",
-		DeviceName: "iPhone",
 	})
 	if err != nil {
 		t.Fatalf("first Login: %v", err)
@@ -152,7 +152,6 @@ func TestLoginCreatesIndependentSessionsPerDevice(t *testing.T) {
 		Email:      "login@example.com",
 		Password:   "login-password",
 		DeviceCode: "device-b",
-		DeviceName: "iPad",
 	})
 	if err != nil {
 		t.Fatalf("second Login: %v", err)
@@ -193,7 +192,6 @@ func TestRefreshRotatesTokenAndRejectsPreviousRefreshToken(t *testing.T) {
 		Email:      "refresh@example.com",
 		Password:   "refresh-password",
 		DeviceCode: "device-refresh",
-		DeviceName: "Pixel",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -229,7 +227,6 @@ func TestValidateAccessTokenRejectsRevokedOrVersionMismatchedSession(t *testing.
 		Email:      "validate@example.com",
 		Password:   "validate-password",
 		DeviceCode: "device-validate",
-		DeviceName: "MacBook",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -252,7 +249,6 @@ func TestValidateAccessTokenRejectsRevokedOrVersionMismatchedSession(t *testing.
 		Email:      "validate@example.com",
 		Password:   "validate-password",
 		DeviceCode: "device-validate-2",
-		DeviceName: "iPhone",
 	})
 	if err != nil {
 		t.Fatalf("Login: %v", err)

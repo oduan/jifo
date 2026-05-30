@@ -103,7 +103,22 @@ describe('authStore', () => {
 });
 
 describe('LoginPage', () => {
-  test('填写 email/password/deviceName 后可提交并调用成功回调', async () => {
+  test('呈现温暖克制的产品化登录界面并支持切换注册模式', async () => {
+    const user = userEvent.setup();
+
+    render(<LoginPage onSubmit={vi.fn()} />);
+
+    expect(screen.getByRole('main')).toHaveClass('auth-page');
+    expect(screen.getByText('轻量记录，安静回看')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '登录模式' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: '注册模式' }));
+
+    expect(screen.getByRole('button', { name: '注册模式' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '创建账号' })).toBeInTheDocument();
+  });
+
+  test('填写 email/password 后可提交并调用成功回调', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => {
       return { accessToken: 'token-1' };
@@ -114,7 +129,8 @@ describe('LoginPage', () => {
 
     await user.type(screen.getByLabelText('Email'), 'user@example.com');
     await user.type(screen.getByLabelText('Password'), 'password123');
-    await user.type(screen.getByLabelText('Device Name'), 'Oisin-Laptop');
+
+    expect(screen.queryByLabelText('Device Name')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '登录' }));
 
@@ -122,7 +138,7 @@ describe('LoginPage', () => {
       expect(onSubmit).toHaveBeenCalledWith({
         email: 'user@example.com',
         password: 'password123',
-        deviceName: 'Oisin-Laptop'
+        mode: 'login'
       });
       expect(onSuccess).toHaveBeenCalledWith({ accessToken: 'token-1' });
     });
@@ -138,7 +154,6 @@ describe('LoginPage', () => {
 
     await user.type(screen.getByLabelText('Email'), 'user@example.com');
     await user.type(screen.getByLabelText('Password'), 'wrong-password');
-    await user.type(screen.getByLabelText('Device Name'), 'Oisin-Laptop');
     await user.click(screen.getByRole('button', { name: '登录' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('邮箱或密码错误');
@@ -158,10 +173,9 @@ describe('LoginPage', () => {
 
     await user.type(screen.getByLabelText('Email'), 'user@example.com');
     await user.type(screen.getByLabelText('Password'), 'password123');
-    await user.type(screen.getByLabelText('Device Name'), 'Oisin-Laptop');
     await user.click(screen.getByRole('button', { name: '登录' }));
 
-    const submittingButton = await screen.findByRole('button', { name: '登录中...' });
+    const submittingButton = await screen.findByRole('button', { name: '登录中…' });
     expect(submittingButton).toBeDisabled();
 
     await user.click(submittingButton);

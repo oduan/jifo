@@ -1,10 +1,13 @@
 import { useState } from 'react';
 
+import { Button } from '../../shared/ui/Button';
 import { NoteBlock, NoteEditor } from './NoteEditor';
 
 export type Note = {
   id: string;
   createdAt: string;
+  updatedAt?: string;
+  version?: number;
   blocks: NoteBlock[];
   tagIds: string[];
 };
@@ -13,6 +16,7 @@ type NoteCardProps = {
   note: Note;
   onDelete: (id: string) => void;
   onUpdate: (id: string, blocks: NoteBlock[]) => void;
+  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
 };
 
 function blockText(block: NoteBlock): string {
@@ -37,7 +41,7 @@ function noteText(blocks: NoteBlock[]): string {
   return blocks.map(blockText).join('\n');
 }
 
-export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onUpdate, onUploadImage }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -47,27 +51,21 @@ export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
   const visibleContent = !expanded && shouldCollapse ? lines.slice(0, 5).join('\n') : content;
 
   return (
-    <article
-      style={{
-        border: '1px solid #e5e7eb',
-        borderRadius: 12,
-        padding: 16,
-        background: 'white',
-        display: 'grid',
-        gap: 10
-      }}
-    >
-      <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+    <article className="note-card">
+      <header className="note-card__header">
         <time dateTime={note.createdAt}>{note.createdAt}</time>
-        <div style={{ position: 'relative' }}>
-          <button type="button" aria-label="更多操作" onClick={() => setMenuOpen((open) => !open)}>
+        <div className="note-menu">
+          <Button type="button" variant="ghost" aria-label="更多操作" onClick={() => setMenuOpen((open) => !open)}>
             ⋯
-          </button>
+          </Button>
           {menuOpen ? (
-            <div role="menu" style={{ position: 'absolute', right: 0, top: '100%', background: 'white' }}>
-              <button type="button" onClick={() => onDelete(note.id)}>
+            <div className="note-menu__panel" role="menu">
+              <Button type="button" variant="ghost" onClick={() => setEditing(true)}>
+                编辑
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => onDelete(note.id)}>
                 删除
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>
@@ -77,21 +75,22 @@ export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
         <NoteEditor
           initialText={paragraphText(note.blocks)}
           initialImageBlocks={imageBlocks(note.blocks)}
+          onUploadImage={onUploadImage}
           onSubmit={(blocks) => {
             onUpdate(note.id, blocks);
             setEditing(false);
           }}
         />
       ) : (
-        <div onDoubleClick={() => setEditing(true)} style={{ whiteSpace: 'pre-wrap', cursor: 'text' }}>
+        <div className="note-card__content" onDoubleClick={() => setEditing(true)}>
           {visibleContent}
         </div>
       )}
 
       {shouldCollapse ? (
-        <button type="button" onClick={() => setExpanded((value) => !value)}>
+        <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>
           {expanded ? '收起' : '展开'}
-        </button>
+        </Button>
       ) : null}
     </article>
   );

@@ -36,8 +36,12 @@ describe('NotesPage', () => {
       />
     );
 
-    expect(screen.getByText('全部笔记')).toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveClass('jifo-shell');
+    expect(screen.getByRole('complementary', { name: 'Jifo 侧边栏' })).toHaveClass('jifo-sidebar');
+    expect(screen.getAllByText('全部笔记').length).toBeGreaterThan(0);
     expect(screen.getByText('全部标签')).toBeInTheDocument();
+    expect(screen.getByText('2 条笔记')).toBeInTheDocument();
+    expect(screen.getByText('2 个标签')).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: '搜索笔记' })).toBeInTheDocument();
     expect(screen.getByLabelText('1 条笔记于 2026-05-27')).toBeInTheDocument();
 

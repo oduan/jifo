@@ -50,7 +50,20 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 
     if (!response.ok) {
       const bodyText = await response.text();
-      throw new ApiError('Request failed', response.status, bodyText || undefined);
+      let message = 'Request failed';
+      let body: unknown = bodyText || undefined;
+
+      if (bodyText) {
+        try {
+          body = JSON.parse(bodyText) as unknown;
+          const maybeError = body as { error?: { message?: string; code?: string } };
+          message = maybeError.error?.message || maybeError.error?.code || message;
+        } catch {
+          message = bodyText;
+        }
+      }
+
+      throw new ApiError(message, response.status, body);
     }
 
     if (response.status === 204) {

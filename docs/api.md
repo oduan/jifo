@@ -33,8 +33,7 @@ Authorization: Bearer <accessToken>
   "email": "user@example.com",
   "password": "password123",
   "username": "Oisin",
-  "deviceCode": "web-chrome-profile-1",
-  "deviceName": "Oisin Laptop"
+  "deviceCode": "web-chrome-profile-1"
 }
 ```
 
@@ -52,6 +51,8 @@ Authorization: Bearer <accessToken>
 }
 ```
 
+说明：`device_name` 由后端在创建 session 时自动生成 UUID，客户端无需也不应提交设备名称。
+
 常见错误：
 
 - `400 bad_request`：JSON 无效或缺少 `email/password/deviceCode`
@@ -67,12 +68,11 @@ Authorization: Bearer <accessToken>
 {
   "email": "user@example.com",
   "password": "password123",
-  "deviceCode": "web-chrome-profile-1",
-  "deviceName": "Oisin Laptop"
+  "deviceCode": "web-chrome-profile-1"
 }
 ```
 
-响应 `200` 同注册。
+响应 `200` 同注册。`device_name` 由后端在创建 session 时自动生成 UUID，客户端无需也不应提交设备名称。
 
 常见错误：
 
@@ -107,9 +107,11 @@ Authorization: Bearer <accessToken>
   "item": {
     "id": "uuid",
     "clientId": "client-note-001",
+    "content": { "blocks": [{ "type": "paragraph", "text": "今天开始写 #思考" }] },
     "plainText": "今天开始写 #思考...",
     "createdAt": "2026-05-27T...Z",
-    "updatedAt": "2026-05-27T...Z"
+    "updatedAt": "2026-05-27T...Z",
+    "version": 1
   }
 }
 ```
@@ -135,14 +137,64 @@ Authorization: Bearer <accessToken>
     {
       "id": "uuid",
       "clientId": "client-note-001",
+      "content": { "blocks": [{ "type": "paragraph", "text": "今天开始写 #思考" }] },
       "plainText": "今天开始写 #思考...",
       "deletedAt": null,
       "createdAt": "2026-05-27T...Z",
-      "updatedAt": "2026-05-27T...Z"
+      "updatedAt": "2026-05-27T...Z",
+      "version": 1
     }
   ]
 }
 ```
+
+### 更新笔记
+
+`PATCH /notes/{id}`（也支持 `PUT /notes/{id}`）
+
+请求：
+
+```json
+{
+  "content": {
+    "blocks": [{ "type": "paragraph", "text": "更新后的 #思考" }]
+  },
+  "plainText": "更新后的 #思考"
+}
+```
+
+响应 `200`：
+
+```json
+{
+  "item": {
+    "id": "uuid",
+    "clientId": "client-note-001",
+    "content": { "blocks": [{ "type": "paragraph", "text": "更新后的 #思考" }] },
+    "plainText": "更新后的 #思考",
+    "createdAt": "2026-05-27T...Z",
+    "updatedAt": "2026-05-30T...Z",
+    "version": 2
+  }
+}
+```
+
+常见错误：
+
+- `400 bad_request`：无效 UUID 或 JSON
+- `404 note_not_found`
+
+### 移入回收站
+
+`DELETE /notes/{id}`
+
+响应 `200` 返回被移入回收站的 `item`，其中 `deletedAt` 不为空；30 天后可由清理任务永久删除。
+
+### 从回收站恢复
+
+`POST /notes/{id}/restore`
+
+响应 `200` 返回恢复后的 `item`，其中 `deletedAt` 为空。
 
 ## Tags
 
@@ -222,34 +274,154 @@ Authorization: Bearer <accessToken>
 
 ## Media
 
-### 媒体列表（占位）
+### 上传媒体
 
-`GET /media`
+`POST /media`
 
-当前响应：
+请求类型：`multipart/form-data`
 
-```json
-{ "items": [] }
-```
+字段：
 
-本地媒体存储 service 已有基础能力，但 HTTP 上传/读取 handler 尚未完整接入。
+- `file`：必填，支持 `image/jpeg`、`image/png`、`image/webp`、`image/gif`
+- `checksum`：可选，SHA-256 hex；提供时后端会校验
 
-## Sync
-
-### Push（占位）
-
-`POST /sync/push`
-
-当前 HTTP handler 返回：
+响应 `201`：
 
 ```json
 {
-  "error": {
-    "code": "not_implemented",
-    "message": "sync handler not implemented",
-    "requestId": "..."
+  "item": {
+    "id": "uuid",
+    "kind": "image",
+    "mimeType": "image/png",
+    "sizeBytes": 12345,
+    "checksum": "sha256-hex",
+    "url": "/api/media/uuid",
+    "createdAt": "2026-05-30T...Z"
   }
 }
 ```
 
-后端 `internal/sync.Service` 已实现 note 操作 push/pull 的核心服务逻辑，包括 `created/updated/deleted/restored/duplicate/conflict_copied/delete_conflict_ignored` 等状态；Web 侧也已实现 IndexedDB outbox 与 sync engine。但当前 HTTP handler 尚未把这些 service 方法暴露为完整 API，完整 HTTP 接入可在下一迭代完成。
+常见错误：
+
+- `400 bad_request`：缺少文件或 multipart 格式错误
+- `400 invalid_media_size`
+- `400 checksum_mismatch`
+- `413 file_too_large`
+- `415 invalid_media_type`
+
+### 媒体列表
+
+`GET /media`
+
+响应 `200`：
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "kind": "image",
+      "mimeType": "image/png",
+      "sizeBytes": 12345,
+      "checksum": "sha256-hex",
+      "url": "/api/media/uuid",
+      "createdAt": "2026-05-30T...Z"
+    }
+  ]
+}
+```
+
+### 读取媒体
+
+`GET /media/{id}`
+
+按 bearer token 鉴权，只允许读取当前用户自己的媒体。响应体为原始图片二进制，`Content-Type` 为上传时的 MIME type。
+
+## Sync
+
+### Push
+
+`POST /sync/push`
+
+请求：
+
+```json
+{
+  "operations": [
+    {
+      "opId": "op-uuid",
+      "entity": "note",
+      "action": "create",
+      "clientId": "client-note-001",
+      "noteId": "uuid-for-update-delete-restore",
+      "baseVersion": 1,
+      "payload": {
+        "blocks": [{ "type": "paragraph", "text": "离线创建 #思考" }],
+        "plainText": "离线创建 #思考"
+      }
+    }
+  ]
+}
+```
+
+响应 `200`：
+
+```json
+{
+  "results": [
+    {
+      "opId": "op-uuid",
+      "status": "created",
+      "noteId": "uuid",
+      "version": 1
+    }
+  ]
+}
+```
+
+`status` 由 `internal/sync.Service` 返回，包括 `created`、`updated`、`deleted`、`restored`、`duplicate`、`conflict_copied`、`delete_conflict_ignored` 等。
+
+### Pull
+
+`GET /sync/pull?updatedAt=&id=&limit=100`
+
+也支持 `POST /sync/pull`：
+
+```json
+{
+  "cursor": {
+    "updatedAt": "2026-05-30T01:00:00Z",
+    "id": "uuid"
+  },
+  "limit": 100
+}
+```
+
+响应 `200`：
+
+```json
+{
+  "notes": [
+    {
+      "id": "uuid",
+      "noteId": "uuid",
+      "clientId": "client-note-001",
+      "content": { "blocks": [{ "type": "paragraph", "text": "同步笔记" }] },
+      "plainText": "同步笔记",
+      "version": 1,
+      "updatedAt": "2026-05-30T01:00:00Z",
+      "tombstone": "trash"
+    }
+  ],
+  "cursor": {
+    "updatedAt": "2026-05-30T01:00:00Z",
+    "id": "uuid"
+  },
+  "nextCursor": {
+    "updatedAt": "2026-05-30T01:00:00Z",
+    "id": "uuid"
+  }
+}
+```
+
+说明：`notes` 是 Web sync adapter 友好的响应；`items` 字段同时保留 service 原始条目，方便调试。

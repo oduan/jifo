@@ -28,7 +28,6 @@ type authRequest struct {
 	Password   string `json:"password"`
 	Username   string `json:"username"`
 	DeviceCode string `json:"deviceCode"`
-	DeviceName string `json:"deviceName"`
 }
 
 type authResponse struct {
@@ -74,7 +73,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := h.svc.Login(r.Context(), LoginInput{Email: input.Email, Password: input.Password, DeviceCode: input.DeviceCode, DeviceName: input.DeviceName})
+	result, err := h.svc.Login(r.Context(), LoginInput{Email: input.Email, Password: input.Password, DeviceCode: input.DeviceCode})
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidCredentials):
@@ -100,7 +99,7 @@ func decodeAuthRequest(w http.ResponseWriter, r *http.Request) (RegisterInput, b
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "email, password, deviceCode are required")
 		return RegisterInput{}, false
 	}
-	return RegisterInput{Email: req.Email, Password: req.Password, Username: strings.TrimSpace(req.Username), DeviceCode: req.DeviceCode, DeviceName: strings.TrimSpace(req.DeviceName)}, true
+	return RegisterInput{Email: req.Email, Password: req.Password, Username: strings.TrimSpace(req.Username), DeviceCode: req.DeviceCode}, true
 }
 
 func toAuthResponse(result *AuthResult) authResponse {

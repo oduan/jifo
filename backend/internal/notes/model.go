@@ -10,6 +10,8 @@ type Block struct {
 	Type    string     `json:"type"`
 	Text    string     `json:"text,omitempty"`
 	MediaID *uuid.UUID `json:"mediaId,omitempty"`
+	URL     string     `json:"url,omitempty"`
+	Alt     string     `json:"alt,omitempty"`
 }
 
 type Content struct {

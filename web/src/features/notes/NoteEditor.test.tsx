@@ -76,4 +76,24 @@ describe('NoteEditor', () => {
       { type: 'image', url: 'https://example.com/a.png' }
     ]);
   });
+
+  test('支持上传图片并提交 mediaId image block', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onUploadImage = vi.fn(async () => ({ type: 'image' as const, url: '/api/media/m1', mediaId: 'm1', alt: 'a.png' }));
+
+    render(<NoteEditor onSubmit={onSubmit} onUploadImage={onUploadImage} />);
+
+    const file = new File(['fake png'], 'a.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText('上传图片'), file);
+    await screen.findByText('/api/media/m1');
+    await user.type(screen.getByLabelText('笔记内容'), '上传图文');
+    await user.click(screen.getByRole('button', { name: '提交笔记' }));
+
+    expect(onUploadImage).toHaveBeenCalledWith(file);
+    expect(onSubmit).toHaveBeenCalledWith([
+      { type: 'paragraph', content: '上传图文' },
+      { type: 'image', url: '/api/media/m1', mediaId: 'm1', alt: 'a.png' }
+    ]);
+  });
 });

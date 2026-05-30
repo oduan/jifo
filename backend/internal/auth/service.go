@@ -36,14 +36,12 @@ type RegisterInput struct {
 	Password   string
 	Username   string
 	DeviceCode string
-	DeviceName string
 }
 
 type LoginInput struct {
 	Email      string
 	Password   string
 	DeviceCode string
-	DeviceName string
 }
 
 type User struct {
@@ -127,7 +125,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (*AuthResul
 		return nil, err
 	}
 
-	result, err := s.createSessionResult(ctx, tx, user, input.DeviceCode, input.DeviceName)
+	result, err := s.createSessionResult(ctx, tx, user, input.DeviceCode)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +161,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*AuthResult, err
 		return nil, ErrInvalidCredentials
 	}
 
-	return s.createSessionResult(ctx, s.db, user, input.DeviceCode, input.DeviceName)
+	return s.createSessionResult(ctx, s.db, user, input.DeviceCode)
 }
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult, error) {
@@ -268,7 +266,7 @@ func (s *Service) ValidateAccessToken(ctx context.Context, tokenString string) (
 	return claims, nil
 }
 
-func (s *Service) createSessionResult(ctx context.Context, q dbtx, user User, deviceCode string, deviceName string) (*AuthResult, error) {
+func (s *Service) createSessionResult(ctx context.Context, q dbtx, user User, deviceCode string) (*AuthResult, error) {
 	refreshToken, err := generateRefreshToken()
 	if err != nil {
 		return nil, err
@@ -279,7 +277,7 @@ func (s *Service) createSessionResult(ctx context.Context, q dbtx, user User, de
 		INSERT INTO user_sessions (user_id, device_code, device_name, refresh_token_hash, last_seen_at)
 		VALUES ($1, $2, $3, $4, now())
 		RETURNING id, jwt_version
-	`, user.ID, session.DeviceCode, defaultDeviceName(deviceName), hashRefreshToken(refreshToken)).Scan(&session.ID, &session.JWTVersion)
+	`, user.ID, session.DeviceCode, generateDeviceName(), hashRefreshToken(refreshToken)).Scan(&session.ID, &session.JWTVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -316,12 +314,8 @@ func defaultUsername(email string) string {
 	return email
 }
 
-func defaultDeviceName(deviceName string) string {
-	deviceName = strings.TrimSpace(deviceName)
-	if deviceName == "" {
-		return "unknown-device"
-	}
-	return deviceName
+func generateDeviceName() string {
+	return uuid.NewString()
 }
 
 func generateRefreshToken() (string, error) {

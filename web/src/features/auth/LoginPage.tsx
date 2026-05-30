@@ -1,13 +1,23 @@
 import { FormEvent, useState } from 'react';
 
+import { createApiClient } from '../../shared/api/client';
+import { Button } from '../../shared/ui/Button';
+import { Field, TextInput } from '../../shared/ui/Input';
+import { submitAuth } from './api';
+import { authStore, AuthUser } from './authStore';
+
+export type AuthMode = 'login' | 'register';
+
 export type LoginPayload = {
   email: string;
   password: string;
-  deviceName: string;
+  mode: AuthMode;
 };
 
 export type LoginResult = {
   accessToken: string;
+  refreshToken?: string;
+  user?: AuthUser;
 };
 
 type LoginPageProps = {
@@ -15,14 +25,17 @@ type LoginPageProps = {
   onSuccess?: (result: LoginResult) => void;
 };
 
-const defaultSubmit = async (_payload: LoginPayload): Promise<LoginResult> => {
-  return { accessToken: 'demo-token' };
-};
+const defaultClient = createApiClient({
+  baseUrl: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  getAccessToken: authStore.getAccessToken
+});
+
+const defaultSubmit = async (payload: LoginPayload): Promise<LoginResult> => submitAuth(defaultClient, payload);
 
 export function LoginPage({ onSubmit = defaultSubmit, onSuccess }: LoginPageProps) {
+  const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [deviceName, setDeviceName] = useState('');
   const [isSubmitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,60 +45,94 @@ export function LoginPage({ onSubmit = defaultSubmit, onSuccess }: LoginPageProp
     setError(null);
 
     try {
-      const result = await onSubmit({ email, password, deviceName });
+      const result = await onSubmit({ email, password, mode });
       onSuccess?.(result);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '登录失败');
+      setError(submitError instanceof Error ? submitError.message : mode === 'login' ? '登录失败，请检查邮箱和密码。' : '注册失败，请稍后重试。');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const submitLabel = mode === 'login' ? '登录' : '创建账号';
+  const loadingLabel = mode === 'login' ? '登录中…' : '注册中…';
+
   return (
-    <main style={{ maxWidth: 420, margin: '48px auto', fontFamily: 'system-ui' }}>
-      <h1>Jifo 登录</h1>
-      <p>先完成认证，主笔记布局将在 Task 10 实现。</p>
+    <main className="auth-page">
+      <section className="auth-hero" aria-labelledby="auth-title">
+        <div>
+          <p className="auth-kicker">Jifo Notes</p>
+          <h1 id="auth-title" className="auth-title">
+            轻量记录，安静回看
+          </h1>
+          <p className="auth-subtitle">
+            像 Flomo 一样快速写下想法，用嵌套标签、热力图和离线同步，把日常片段沉淀成可以回看的知识流。
+          </p>
+        </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
-        <label>
-          <div>Email</div>
-          <input
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            type="email"
-            required
-            autoComplete="email"
-          />
-        </label>
+        <div className="auth-feature-grid" aria-label="Jifo 核心能力">
+          <div className="auth-feature">
+            <strong>图文块笔记</strong>
+            <span>文字、分割线和图片在同一个轻量编辑器里完成。</span>
+          </div>
+          <div className="auth-feature">
+            <strong>嵌套标签</strong>
+            <span>用 #电视剧/电视剧1 这样的路径自然组织内容。</span>
+          </div>
+          <div className="auth-feature">
+            <strong>离线优先</strong>
+            <span>断网时先保存到本地，恢复网络后自动同步。</span>
+          </div>
+        </div>
+      </section>
 
-        <label>
-          <div>Password</div>
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            type="password"
-            required
-            autoComplete="current-password"
-          />
-        </label>
+      <section className="auth-card" aria-label="认证表单">
+        <div className="auth-tabs" aria-label="认证模式">
+          <button className="auth-tab" type="button" aria-label="登录模式" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>
+            登录
+          </button>
+          <button className="auth-tab" type="button" aria-label="注册模式" aria-pressed={mode === 'register'} onClick={() => setMode('register')}>
+            注册
+          </button>
+        </div>
 
-        <label>
-          <div>Device Name</div>
-          <input
-            value={deviceName}
-            onChange={(event) => setDeviceName(event.target.value)}
-            type="text"
-            required
-            placeholder="My Laptop"
-          />
-        </label>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <Field label="Email">
+            <TextInput
+              name="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              type="email"
+              required
+              autoComplete="email"
+              spellCheck={false}
+              placeholder="user@example.com…"
+            />
+          </Field>
 
-        {error ? <p role="alert">{error}</p> : null}
+          <Field label="Password">
+            <TextInput
+              name="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              required
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              placeholder="至少 8 位…"
+            />
+          </Field>
 
-        <button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? '登录中...' : '登录'}
-        </button>
-      </form>
+          {error ? (
+            <p className="auth-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <Button type="submit" variant="primary" disabled={isSubmitting}>
+            {isSubmitting ? loadingLabel : submitLabel}
+          </Button>
+        </form>
+      </section>
     </main>
   );
 }

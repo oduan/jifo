@@ -3,10 +3,14 @@ package notes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"jifo/backend/internal/platform/httpx"
 )
@@ -14,6 +18,9 @@ import (
 type HandlerService interface {
 	Create(ctx context.Context, input CreateInput) (Note, error)
 	List(ctx context.Context, filter ListFilter) ([]Note, error)
+	Update(ctx context.Context, input UpdateInput) (Note, error)
+	MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (Note, error)
+	Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (Note, error)
 }
 
 type Handler struct {
@@ -30,13 +37,20 @@ type createNoteRequest struct {
 	PlainText string  `json:"plainText"`
 }
 
+type updateNoteRequest struct {
+	Content   Content `json:"content"`
+	PlainText string  `json:"plainText"`
+}
+
 type noteDTO struct {
 	ID        string     `json:"id"`
 	ClientID  string     `json:"clientId"`
+	Content   Content    `json:"content"`
 	PlainText string     `json:"plainText"`
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+	Version   int64      `json:"version"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -111,14 +125,104 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "notes service not configured")
+		return
+	}
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
+		return
+	}
+	noteID, ok := noteIDParam(w, r)
+	if !ok {
+		return
+	}
+	var req updateNoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid json body")
+		return
+	}
+	note, err := h.svc.Update(r.Context(), UpdateInput{UserID: userID, NoteID: noteID, Content: req.Content, PlainText: req.PlainText})
+	if err != nil {
+		writeMutationError(w, r, err, "update note failed")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"item": toNoteDTO(note)})
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "notes service not configured")
+		return
+	}
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
+		return
+	}
+	noteID, ok := noteIDParam(w, r)
+	if !ok {
+		return
+	}
+	note, err := h.svc.MoveToTrash(r.Context(), userID, noteID)
+	if err != nil {
+		writeMutationError(w, r, err, "delete note failed")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"item": toNoteDTO(note)})
+}
+
+func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "notes service not configured")
+		return
+	}
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
+		return
+	}
+	noteID, ok := noteIDParam(w, r)
+	if !ok {
+		return
+	}
+	note, err := h.svc.Restore(r.Context(), userID, noteID)
+	if err != nil {
+		writeMutationError(w, r, err, "restore note failed")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"item": toNoteDTO(note)})
+}
+
+func noteIDParam(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	noteID, err := uuid.Parse(chi.URLParam(r, "noteID"))
+	if err != nil || noteID == uuid.Nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid note id")
+		return uuid.Nil, false
+	}
+	return noteID, true
+}
+
+func writeMutationError(w http.ResponseWriter, r *http.Request, err error, message string) {
+	if errors.Is(err, ErrNoteNotFound) {
+		httpx.WriteError(w, r, http.StatusNotFound, "note_not_found", "note not found")
+		return
+	}
+	httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", message)
+}
+
 func toNoteDTO(note Note) noteDTO {
 	return noteDTO{
 		ID:        note.ID.String(),
 		ClientID:  note.ClientID,
+		Content:   note.Content,
 		PlainText: note.PlainText,
 		DeletedAt: note.DeletedAt,
 		CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt,
+		Version:   note.Version,
 	}
 }
 
