@@ -8,7 +8,7 @@ describe('NotesPage', () => {
   test('渲染主布局并支持标签筛选笔记流', async () => {
     const user = userEvent.setup();
 
-    render(
+    const { container } = render(
       <NotesPage
         userName="oisin"
         notes={[
@@ -38,6 +38,8 @@ describe('NotesPage', () => {
 
     expect(screen.getByRole('main')).toHaveClass('jifo-shell');
     expect(screen.getByRole('complementary', { name: 'Jifo 侧边栏' })).toHaveClass('jifo-sidebar');
+    expect(container.querySelector('.user-avatar')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /oisin/ })).toBeInTheDocument();
     expect(screen.queryByText('本地优先 · 自动同步')).not.toBeInTheDocument();
     expect(screen.getAllByText('全部笔记').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: '笔记筛选' })).not.toBeInTheDocument();

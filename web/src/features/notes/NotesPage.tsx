@@ -95,10 +95,6 @@ export function NotesPage({
     <main className="jifo-shell">
       <aside className="jifo-sidebar" aria-label="Jifo 侧边栏">
         <header className="sidebar-user">
-          <div className="user-avatar" aria-hidden="true" />
-          <div>
-            <h1 className="user-name">{userName}</h1>
-          </div>
           <SettingsPopover userName={userName} onLogout={onLogout} />
         </header>
 

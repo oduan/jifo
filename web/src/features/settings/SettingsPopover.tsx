@@ -8,8 +8,9 @@ type SettingsPopoverProps = {
 export function SettingsPopover({ userName, onLogout }: SettingsPopoverProps) {
   return (
     <details className="settings-popover">
-      <summary className="settings-trigger" aria-label="打开设置菜单" title="设置">
-        <span aria-hidden="true">⌄</span>
+      <summary className="settings-trigger" role="button" aria-label={`${userName} 设置菜单`} title="设置">
+        <span className="user-name">{userName}</span>
+        <span className="settings-trigger__chevron" aria-hidden="true">▾</span>
       </summary>
       <div className="settings-panel">
         <span className="settings-panel__user">{userName}</span>
