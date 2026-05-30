@@ -12,6 +12,9 @@
   --jifo-green: #3d7c4a;
   --jifo-green-dark: #26382b;
   --jifo-green-soft: #dcebd7;
+  --jifo-green-tint: #edf5e8;
+  --jifo-green-line: rgba(61, 124, 74, 0.18);
+  --jifo-button-hover: rgba(255, 255, 255, 0.66);
   --jifo-amber: #e8b85b;
   --jifo-danger: #a94438;
   --jifo-shadow: 0 18px 48px rgba(55, 40, 20, 0.1);
@@ -89,7 +92,7 @@ h3 {
   padding: 6px 11px;
   cursor: pointer;
   color: var(--jifo-ink);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 252, 247, 0.72);
   box-shadow: 0 1px 6px rgba(55, 40, 20, 0.04);
   transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
@@ -119,8 +122,12 @@ h3 {
 }
 
 .jifo-button--ghost {
-  background: transparent;
+  background: rgba(255, 252, 247, 0.34);
   border-color: var(--jifo-line);
+}
+
+.jifo-button--ghost:hover:not(:disabled) {
+  background: var(--jifo-button-hover);
 }
 
 .jifo-card {
@@ -441,18 +448,19 @@ h3 {
 
 .notes-stream {
   display: grid;
-  gap: 8px;
+  gap: 7px;
+  background: transparent;
   content-visibility: auto;
 }
 
 .note-card {
   display: grid;
-  gap: 7px;
-  padding: 10px;
+  gap: 4px;
+  padding: 8px 10px;
   border: 1px solid var(--jifo-line);
   border-radius: var(--jifo-radius-lg);
   background: rgba(255, 252, 247, 0.86);
-  box-shadow: var(--jifo-shadow-soft);
+  box-shadow: 0 6px 16px rgba(55, 40, 20, 0.05);
 }
 
 .note-card__header {
@@ -464,14 +472,15 @@ h3 {
 
 .note-card time {
   color: var(--jifo-muted);
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
 .note-card__content {
   white-space: pre-wrap;
   color: #3a322a;
-  line-height: 1.62;
+  font-size: 13px;
+  line-height: 1.5;
   word-break: break-word;
   cursor: text;
 }
@@ -491,6 +500,13 @@ h3 {
   border-radius: var(--jifo-radius-sm);
   background: var(--jifo-card-solid);
   box-shadow: var(--jifo-shadow-soft);
+}
+
+.note-menu .jifo-button,
+.note-menu__panel .jifo-button {
+  min-height: 26px;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .tag-tree {
@@ -514,30 +530,32 @@ h3 {
 .tag-button,
 .nav-pill {
   width: 100%;
-  min-height: 28px;
+  min-height: 26px;
   display: flex;
   justify-content: space-between;
   gap: 6px;
   align-items: center;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 9px;
   padding: 4px 7px;
   color: #4d4338;
   background: transparent;
   cursor: pointer;
+  font-size: 12px;
   line-height: 1.2;
-  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
 .tag-button:hover,
 .nav-pill:hover {
-  background: rgba(255, 255, 255, 0.58);
+  background: var(--jifo-button-hover);
 }
 
 .tag-button[aria-pressed="true"],
 .nav-pill[aria-pressed="true"] {
-  background: var(--jifo-green-dark);
-  color: #fffaf2;
+  background: var(--jifo-green-tint);
+  border-color: var(--jifo-green-line);
+  color: var(--jifo-green-dark);
 }
 
 .tag-count,
