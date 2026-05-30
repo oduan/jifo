@@ -305,7 +305,7 @@ h3 {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .user-avatar {
@@ -318,9 +318,9 @@ h3 {
 }
 
 .user-name {
-  margin: 0 0 2px;
+  margin: 0;
   font-size: 16px;
-  line-height: 1.15;
+  line-height: 1;
 }
 
 .user-status {
