@@ -790,10 +790,15 @@ h3 {
 
 .note-editor__textarea {
   min-height: 96px;
-  padding-right: 42px;
-  padding-bottom: 42px;
+  padding: 13px 50px 48px 14px;
   border-radius: 16px;
   font-size: 13px;
+}
+
+.note-editor__textarea:focus-visible {
+  outline: none;
+  border-color: rgba(232, 184, 91, 0.72);
+  box-shadow: 0 0 0 2px rgba(232, 184, 91, 0.18);
 }
 
 .expand-icon-button,
