@@ -42,8 +42,10 @@ describe('NotesPage', () => {
     expect(screen.queryByRole('heading', { name: '笔记筛选' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '热力图' })).not.toBeInTheDocument();
     expect(screen.getByText('全部标签')).toBeInTheDocument();
-    expect(screen.getByText('2 条笔记')).toBeInTheDocument();
-    expect(screen.getByText('2 个标签')).toBeInTheDocument();
+    expect(screen.getByText('笔记')).toBeInTheDocument();
+    expect(screen.getByText('标签')).toBeInTheDocument();
+    expect(screen.queryByText('2 条笔记')).not.toBeInTheDocument();
+    expect(screen.queryByText('2 个标签')).not.toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: '搜索笔记' })).toBeInTheDocument();
     expect(screen.getByRole('search', { name: '搜索笔记' })).toHaveClass('workspace-search');
     expect(screen.getByLabelText('1 条笔记于 2026-05-27')).toBeInTheDocument();

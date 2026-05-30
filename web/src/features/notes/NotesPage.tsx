@@ -106,11 +106,11 @@ export function NotesPage({
         <section className="stats-grid" aria-label="账户统计">
           <div className="stat-card">
             <strong>{notes.length}</strong>
-            <span>{notes.length} 条笔记</span>
+            <span>笔记</span>
           </div>
           <div className="stat-card">
             <strong>{visibleTagCount}</strong>
-            <span>{visibleTagCount} 个标签</span>
+            <span>标签</span>
           </div>
           <div className="stat-card">
             <strong>{activeDays}</strong>
