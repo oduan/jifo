@@ -43,6 +43,7 @@ describe('NotesPage', () => {
     expect(screen.getByText('2 条笔记')).toBeInTheDocument();
     expect(screen.getByText('2 个标签')).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: '搜索笔记' })).toBeInTheDocument();
+    expect(screen.getByRole('search', { name: '搜索笔记' })).toHaveClass('workspace-search');
     expect(screen.getByLabelText('1 条笔记于 2026-05-27')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '工作 (1)' }));
@@ -94,7 +95,7 @@ describe('NotesPage', () => {
     expect(screen.queryByRole('button', { name: '新笔记' })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText('笔记内容'), '直接输入新笔记');
-    await user.click(screen.getByRole('button', { name: '提交' }));
+    await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
     expect(onCreateNote).toHaveBeenCalledWith([{ type: 'paragraph', content: '直接输入新笔记' }]);
   });

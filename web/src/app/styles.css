@@ -376,7 +376,7 @@ h3 {
 .workspace-header {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
   padding: 0 1px;
 }
@@ -384,19 +384,26 @@ h3 {
 .workspace-heading {
   display: flex;
   align-items: baseline;
-  gap: 8px;
   min-width: 0;
 }
 
 .workspace-title {
   margin: 0;
-  font-size: clamp(22px, 2.6vw, 30px);
-  line-height: 1.1;
+  font-size: clamp(19px, 2vw, 24px);
+  line-height: 1.12;
 }
 
-.search-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+.workspace-search {
+  width: min(260px, 42vw);
+  min-width: 180px;
+}
+
+.workspace-search__input {
+  height: 34px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.68);
 }
 
 .error-banner,
@@ -675,6 +682,12 @@ h3 {
   }
 
   .workspace-header {
+    align-items: stretch;
     flex-direction: column;
+  }
+
+  .workspace-search {
+    width: 100%;
+    min-width: 0;
   }
 }

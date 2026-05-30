@@ -5,7 +5,7 @@ import { SettingsPopover } from '../settings/SettingsPopover';
 import { TagNode, TagTree } from '../tags/TagTree';
 import { Button } from '../../shared/ui/Button';
 import { EmptyState } from '../../shared/ui/EmptyState';
-import { Field, TextInput } from '../../shared/ui/Input';
+import { TextInput } from '../../shared/ui/Input';
 import { Note, NoteCard } from './NoteCard';
 import { NoteBlock, NoteEditor } from './NoteEditor';
 
@@ -120,8 +120,20 @@ export function NotesPage({
       <section className="jifo-workspace" aria-label="笔记工作区">
         <header className="workspace-header">
           <div className="workspace-heading">
-            <span className="jifo-kicker">JIFO</span>
             <h2 className="workspace-title">{selectedTag ? selectedTag.name : '全部笔记'}</h2>
+          </div>
+          <div className="workspace-search" role="search" aria-label="搜索笔记">
+            <TextInput
+              type="search"
+              name="notes-search"
+              role="searchbox"
+              aria-label="搜索笔记"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索文字或标签…"
+              autoComplete="off"
+              className="workspace-search__input"
+            />
           </div>
         </header>
 
@@ -142,21 +154,6 @@ export function NotesPage({
         <section className="composer-card" aria-label="新笔记编辑器">
           <NoteEditor onSubmit={(blocks) => onCreateNote?.(blocks)} />
         </section>
-
-        <div className="search-row">
-          <Field label="搜索笔记">
-            <TextInput
-              type="search"
-              name="notes-search"
-              role="searchbox"
-              aria-label="搜索笔记"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索文字或标签…"
-              autoComplete="off"
-            />
-          </Field>
-        </div>
 
         <section className="notes-stream" aria-label="笔记流">
           {filteredNotes.map((note) => (
