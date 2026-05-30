@@ -35,10 +35,13 @@ describe('NoteEditor', () => {
     const textarea = screen.getByLabelText('笔记内容');
     expect(textarea).toHaveAttribute('rows', '5');
 
-    await user.click(screen.getByRole('button', { name: '扩大输入' }));
+    const expandButton = screen.getByRole('button', { name: '扩大输入' });
+    expect(expandButton).toHaveTextContent('⤢');
+
+    await user.click(expandButton);
 
     expect(textarea).toHaveAttribute('rows', '10');
-    expect(screen.getByRole('button', { name: '收起输入' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收起输入' })).toHaveTextContent('⤢');
   });
 
   test('提交后清空内容、恢复默认高度，并禁用发送按钮', async () => {

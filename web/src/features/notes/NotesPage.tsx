@@ -98,7 +98,6 @@ export function NotesPage({
           <div className="user-avatar" aria-hidden="true" />
           <div>
             <h1 className="user-name">{userName}</h1>
-            <p className="user-status">本地优先 · 自动同步</p>
           </div>
           <SettingsPopover userName={userName} onLogout={onLogout} />
         </header>

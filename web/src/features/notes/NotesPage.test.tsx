@@ -38,6 +38,7 @@ describe('NotesPage', () => {
 
     expect(screen.getByRole('main')).toHaveClass('jifo-shell');
     expect(screen.getByRole('complementary', { name: 'Jifo 侧边栏' })).toHaveClass('jifo-sidebar');
+    expect(screen.queryByText('本地优先 · 自动同步')).not.toBeInTheDocument();
     expect(screen.getAllByText('全部笔记').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: '笔记筛选' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '热力图' })).not.toBeInTheDocument();

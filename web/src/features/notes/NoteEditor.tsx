@@ -54,7 +54,7 @@ export function NoteEditor({ initialText = '', onSubmit }: NoteEditorProps) {
           title={isExpanded ? '收起输入' : '扩大输入'}
           onClick={() => setExpanded((value) => !value)}
         >
-          <span aria-hidden="true">{isExpanded ? '↙' : '↗'}</span>
+          <span aria-hidden="true">⤢</span>
         </button>
         <button
           type="submit"
