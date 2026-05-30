@@ -592,8 +592,7 @@ h3 {
 }
 
 .note-editor {
-  display: grid;
-  gap: 7px;
+  display: block;
 }
 
 .note-editor__input-wrap {
@@ -602,24 +601,31 @@ h3 {
 
 .note-editor__textarea {
   min-height: 96px;
-  padding-right: 38px;
+  padding-right: 42px;
+  padding-bottom: 42px;
+  border-radius: 16px;
+  font-size: 13px;
+}
+
+.expand-icon-button,
+.send-icon-button {
+  position: absolute;
+  width: 27px;
+  height: 27px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 160ms ease, color 160ms ease, border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
 .expand-icon-button {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 26px;
-  height: 26px;
-  display: inline-grid;
-  place-items: center;
+  top: 7px;
+  right: 7px;
   border: 1px solid var(--jifo-line);
-  border-radius: 999px;
   color: var(--jifo-muted);
   background: rgba(255, 252, 247, 0.9);
   box-shadow: 0 4px 12px rgba(55, 40, 20, 0.06);
-  cursor: pointer;
-  transition: transform 160ms ease, color 160ms ease, border-color 160ms ease, background-color 160ms ease;
 }
 
 .expand-icon-button:hover {
@@ -629,11 +635,27 @@ h3 {
   background: #fffdf8;
 }
 
-.editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  flex-wrap: wrap;
+.send-icon-button {
+  right: 8px;
+  bottom: 8px;
+  border: 1px solid rgba(61, 124, 74, 0.22);
+  color: #fffaf2;
+  background: var(--jifo-green);
+  box-shadow: 0 7px 18px rgba(61, 124, 74, 0.22);
+}
+
+.send-icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #346e40;
+}
+
+.send-icon-button:disabled {
+  cursor: not-allowed;
+  color: rgba(129, 117, 104, 0.7);
+  background: rgba(32, 27, 22, 0.08);
+  border-color: rgba(32, 27, 22, 0.08);
+  box-shadow: none;
+  opacity: 1;
 }
 
 @media (max-width: 920px) {

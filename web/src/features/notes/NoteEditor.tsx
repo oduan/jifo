@@ -1,6 +1,5 @@
 import { FormEvent, useState } from 'react';
 
-import { Button } from '../../shared/ui/Button';
 import { Textarea } from '../../shared/ui/Input';
 
 export type NoteBlock =
@@ -23,11 +22,12 @@ function toParagraphBlocks(text: string): NoteBlock[] {
 export function NoteEditor({ initialText = '', onSubmit }: NoteEditorProps) {
   const [text, setText] = useState(initialText);
   const [isExpanded, setExpanded] = useState(false);
+  const blocks = toParagraphBlocks(text);
+  const hasContent = blocks.length > 0;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const blocks = toParagraphBlocks(text);
-    if (blocks.length === 0) {
+    if (!hasContent) {
       return;
     }
     onSubmit(blocks);
@@ -56,12 +56,15 @@ export function NoteEditor({ initialText = '', onSubmit }: NoteEditorProps) {
         >
           <span aria-hidden="true">{isExpanded ? '↙' : '↗'}</span>
         </button>
-      </div>
-
-      <div className="editor-actions">
-        <Button type="submit" variant="primary">
-          提交
-        </Button>
+        <button
+          type="submit"
+          className="send-icon-button"
+          aria-label="发送笔记"
+          title="发送笔记"
+          disabled={!hasContent}
+        >
+          <span aria-hidden="true">➤</span>
+        </button>
       </div>
     </form>
   );
