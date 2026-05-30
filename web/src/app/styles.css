@@ -279,9 +279,9 @@ h3 {
 .jifo-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 274px minmax(0, 1fr);
+  grid-template-columns: 264px minmax(0, 1fr);
   gap: 12px;
-  width: min(1440px, calc(100vw - 20px));
+  width: min(1180px, calc(100vw - 28px));
   margin: 0 auto;
   padding: 10px 0;
 }
