@@ -98,15 +98,21 @@ export function NotesPage({
           </div>
         </section>
 
-        <section className="sidebar-section">
-          <h2>热力图</h2>
+        <section className="sidebar-section sidebar-section--heatmap">
           <Heatmap cells={heatmapCells} />
         </section>
 
-        <section className="sidebar-section">
-          <h2>笔记筛选</h2>
+        <section className="sidebar-section sidebar-section--primary-filter">
           <button type="button" className="nav-pill" aria-pressed={selectedTagId === null} aria-label="全部笔记" onClick={() => setSelectedTagId(null)}>
-            <span>全部笔记</span>
+            <span className="nav-pill__label">
+              <span className="nav-grid-icon" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+              </span>
+              <span>全部笔记</span>
+            </span>
             <span className="nav-count">{notes.length}</span>
           </button>
         </section>

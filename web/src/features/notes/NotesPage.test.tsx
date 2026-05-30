@@ -39,6 +39,8 @@ describe('NotesPage', () => {
     expect(screen.getByRole('main')).toHaveClass('jifo-shell');
     expect(screen.getByRole('complementary', { name: 'Jifo 侧边栏' })).toHaveClass('jifo-sidebar');
     expect(screen.getAllByText('全部笔记').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: '笔记筛选' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '热力图' })).not.toBeInTheDocument();
     expect(screen.getByText('全部标签')).toBeInTheDocument();
     expect(screen.getByText('2 条笔记')).toBeInTheDocument();
     expect(screen.getByText('2 个标签')).toBeInTheDocument();
@@ -50,6 +52,11 @@ describe('NotesPage', () => {
 
     expect(screen.getByText('工作笔记')).toBeInTheDocument();
     expect(screen.queryByText('生活笔记')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '全部笔记' }));
+
+    expect(screen.getByText('工作笔记')).toBeInTheDocument();
+    expect(screen.getByText('生活笔记')).toBeInTheDocument();
   });
 
   test('搜索支持标签名', async () => {
