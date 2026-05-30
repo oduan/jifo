@@ -584,19 +584,62 @@ h3 {
   background: rgba(255, 252, 247, 0.58);
 }
 
+.settings-popover {
+  position: relative;
+  margin-left: auto;
+}
+
 .settings-popover summary {
+  list-style: none;
+}
+
+.settings-popover summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-trigger {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
   cursor: pointer;
   color: var(--jifo-muted);
+  background: rgba(255, 255, 255, 0.48);
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.settings-popover:hover .settings-trigger,
+.settings-popover[open] .settings-trigger {
+  color: var(--jifo-green-dark);
+  background: var(--jifo-button-hover, rgba(255, 255, 255, 0.66));
 }
 
 .settings-panel {
-  margin-top: 6px;
-  display: grid;
-  gap: 5px;
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 136px;
+  display: none;
+  gap: 6px;
   padding: 7px;
   border: 1px solid var(--jifo-line);
   border-radius: var(--jifo-radius-sm);
-  background: rgba(255, 255, 255, 0.68);
+  background: var(--jifo-card-solid);
+  box-shadow: var(--jifo-shadow-soft);
+  font-size: 12px;
+}
+
+.settings-popover:hover .settings-panel,
+.settings-popover[open] .settings-panel {
+  display: grid;
+}
+
+.settings-panel__user {
+  color: var(--jifo-muted);
+  padding: 2px 5px;
+  word-break: break-word;
 }
 
 .note-editor {
