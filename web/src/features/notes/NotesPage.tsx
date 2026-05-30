@@ -62,12 +62,32 @@ export function NotesPage({
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
 
+  const selectedTagIds = useMemo(() => {
+    if (!selectedTagId) {
+      return null;
+    }
+
+    const descendants = new Set([selectedTagId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      tags.forEach((tag) => {
+        if (tag.parentId && descendants.has(tag.parentId) && !descendants.has(tag.id)) {
+          descendants.add(tag.id);
+          changed = true;
+        }
+      });
+    }
+
+    return descendants;
+  }, [selectedTagId, tags]);
+
   const filteredNotes = useMemo(() => {
     return notes.filter((note) => {
-      const tagMatches = selectedTagId ? note.tagIds.includes(selectedTagId) : true;
+      const tagMatches = selectedTagIds ? note.tagIds.some((tagId) => selectedTagIds.has(tagId)) : true;
       return tagMatches && noteContains(note, tagsById, query);
     });
-  }, [notes, query, selectedTagId, tagsById]);
+  }, [notes, query, selectedTagIds, tagsById]);
 
   const selectedTag = selectedTagId ? tagsById.get(selectedTagId) : undefined;
 

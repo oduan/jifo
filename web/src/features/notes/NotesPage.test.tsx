@@ -59,6 +59,48 @@ describe('NotesPage', () => {
     expect(screen.getByText('生活笔记')).toBeInTheDocument();
   });
 
+  test('点击父标签会筛选自身和所有子标签笔记', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NotesPage
+        userName="oisin"
+        notes={[
+          {
+            id: 'n1',
+            createdAt: '2026-05-27',
+            blocks: [{ type: 'paragraph', content: '父标签笔记' }],
+            tagIds: ['测试标签']
+          },
+          {
+            id: 'n2',
+            createdAt: '2026-05-26',
+            blocks: [{ type: 'paragraph', content: '子标签笔记' }],
+            tagIds: ['测试标签/测试2']
+          },
+          {
+            id: 'n3',
+            createdAt: '2026-05-25',
+            blocks: [{ type: 'paragraph', content: '其他笔记' }],
+            tagIds: ['其他']
+          }
+        ]}
+        tags={[
+          { id: '测试标签', name: '测试标签', noteCount: 1 },
+          { id: '测试标签/测试2', name: '测试2', noteCount: 1, parentId: '测试标签' },
+          { id: '其他', name: '其他', noteCount: 1 }
+        ]}
+        heatmapCells={[]}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '测试标签 (1)' }));
+
+    expect(screen.getByText('父标签笔记')).toBeInTheDocument();
+    expect(screen.getByText('子标签笔记')).toBeInTheDocument();
+    expect(screen.queryByText('其他笔记')).not.toBeInTheDocument();
+  });
+
   test('搜索支持标签名', async () => {
     const user = userEvent.setup();
 
