@@ -532,8 +532,68 @@ h3 {
 }
 
 .tag-list .tag-list {
-  padding-left: 8px;
+  padding-left: 17px;
   margin-top: 2px;
+}
+
+.tag-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 9px;
+}
+
+.tag-row:hover .tag-button {
+  background: var(--jifo-button-hover);
+}
+
+.tag-expander,
+.tag-prefix {
+  width: 18px;
+  min-width: 18px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
+  color: var(--jifo-muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tag-expander {
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.tag-expander:hover,
+.tag-row--expanded .tag-expander {
+  color: var(--jifo-green-dark);
+}
+
+.tag-expander__triangle {
+  display: none;
+  font-size: 10px;
+}
+
+.tag-row--has-children:hover .tag-expander[aria-expanded="false"] .tag-expander__hash {
+  display: none;
+}
+
+.tag-row--has-children:hover .tag-expander[aria-expanded="false"] .tag-expander__triangle--right {
+  display: inline;
+}
+
+.tag-expander[aria-expanded="true"] .tag-expander__hash,
+.tag-expander[aria-expanded="true"] .tag-expander__triangle--right {
+  display: none;
+}
+
+.tag-expander[aria-expanded="true"] .tag-expander__triangle--down {
+  display: inline;
 }
 
 .tag-button,
@@ -558,6 +618,14 @@ h3 {
 .tag-button:hover,
 .nav-pill:hover {
   background: var(--jifo-button-hover);
+}
+
+.tag-row .tag-button {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .tag-button[aria-pressed="true"] {
