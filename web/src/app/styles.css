@@ -492,6 +492,33 @@ h3 {
   cursor: text;
 }
 
+.note-card__tag {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 1px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 5px;
+  color: #7d5ca6;
+  background: #efe7fb;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.note-card__tag:hover,
+.note-card__tag:focus-visible {
+  color: #fff;
+  background: #5f8ee8;
+  box-shadow: 0 2px 8px rgba(95, 142, 232, 0.22);
+}
+
+.notes-stream__sentinel {
+  min-height: 1px;
+}
+
 .note-menu {
   position: relative;
 }

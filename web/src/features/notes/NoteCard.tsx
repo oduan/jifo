@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { MouseEvent, ReactNode, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
 import { NoteBlock, NoteEditor } from './NoteEditor';
@@ -16,7 +16,10 @@ type NoteCardProps = {
   note: Note;
   onDelete: (id: string) => void;
   onUpdate: (id: string, blocks: NoteBlock[]) => void;
+  onTagSelect?: (tagPath: string) => void;
 };
+
+const NOTE_TAG_PATTERN = /#[^\s#]+/g;
 
 function blockText(block: NoteBlock): string {
   if (block.type === 'paragraph') {
@@ -40,7 +43,46 @@ function noteText(blocks: NoteBlock[]): string {
   return blocks.map(blockText).join('\n');
 }
 
-export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
+function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => void): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(NOTE_TAG_PATTERN)) {
+    const tagText = match[0];
+    const index = match.index ?? 0;
+
+    if (index > lastIndex) {
+      nodes.push(text.slice(lastIndex, index));
+    }
+
+    const tagPath = tagText.slice(1);
+    const stopAndSelect = (event: MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      onTagSelect?.(tagPath);
+    };
+
+    nodes.push(
+      <button
+        key={`${tagText}-${index}`}
+        type="button"
+        className="note-card__tag"
+        onClick={stopAndSelect}
+        onDoubleClick={(event) => event.stopPropagation()}
+      >
+        {tagText}
+      </button>
+    );
+    lastIndex = index + tagText.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
+}
+
+export function NoteCard({ note, onDelete, onUpdate, onTagSelect }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -80,7 +122,7 @@ export function NoteCard({ note, onDelete, onUpdate }: NoteCardProps) {
         />
       ) : (
         <div className="note-card__content" onDoubleClick={() => setEditing(true)}>
-          {visibleContent}
+          {renderContentWithTags(visibleContent, onTagSelect)}
         </div>
       )}
 

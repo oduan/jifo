@@ -50,4 +50,33 @@ describe('NoteCard', () => {
 
     expect(onDelete).toHaveBeenCalledWith('n1');
   });
+
+  test('正文标签渲染为可点击的小标签', async () => {
+    const user = userEvent.setup();
+    const onTagSelect = vi.fn();
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '今天处理 #工作/前端 的交互细节' }],
+          tagIds: ['工作/前端']
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        onTagSelect={onTagSelect}
+      />
+    );
+
+    const tag = screen.getByRole('button', { name: '#工作/前端' });
+
+    expect(tag).toHaveClass('note-card__tag');
+    expect(screen.getByText(/今天处理/)).toBeInTheDocument();
+    expect(screen.getByText(/的交互细节/)).toBeInTheDocument();
+
+    await user.click(tag);
+
+    expect(onTagSelect).toHaveBeenCalledWith('工作/前端');
+  });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Heatmap, HeatmapCell } from '../heatmap/Heatmap';
 import { SettingsPopover } from '../settings/SettingsPopover';
@@ -24,6 +24,8 @@ type NotesPageProps = {
   onLogout?: () => void;
 };
 
+const NOTES_BATCH_SIZE = 20;
+
 function noteContains(note: Note, tagsById: Map<string, TagNode>, query: string): boolean {
   if (!query.trim()) {
     return true;
@@ -42,6 +44,11 @@ function noteContains(note: Note, tagsById: Map<string, TagNode>, query: string)
   });
 }
 
+function createdAtTime(note: Note): number {
+  const value = Date.parse(note.createdAt);
+  return Number.isNaN(value) ? 0 : value;
+}
+
 export function NotesPage({
   userName,
   notes,
@@ -58,6 +65,8 @@ export function NotesPage({
 }: NotesPageProps) {
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [visibleNoteCount, setVisibleNoteCount] = useState(NOTES_BATCH_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
@@ -83,13 +92,55 @@ export function NotesPage({
   }, [selectedTagId, tags]);
 
   const filteredNotes = useMemo(() => {
-    return notes.filter((note) => {
-      const tagMatches = selectedTagIds ? note.tagIds.some((tagId) => selectedTagIds.has(tagId)) : true;
-      return tagMatches && noteContains(note, tagsById, query);
-    });
+    return notes
+      .filter((note) => {
+        const tagMatches = selectedTagIds ? note.tagIds.some((tagId) => selectedTagIds.has(tagId)) : true;
+        return tagMatches && noteContains(note, tagsById, query);
+      })
+      .sort((a, b) => createdAtTime(b) - createdAtTime(a));
   }, [notes, query, selectedTagIds, tagsById]);
 
+  const visibleNotes = filteredNotes.slice(0, visibleNoteCount);
+  const hasMoreNotes = visibleNoteCount < filteredNotes.length;
   const selectedTag = selectedTagId ? tagsById.get(selectedTagId) : undefined;
+
+  useEffect(() => {
+    setVisibleNoteCount(NOTES_BATCH_SIZE);
+  }, [query, selectedTagId, notes]);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!hasMoreNotes || !sentinel || typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleNoteCount((count) => Math.min(count + NOTES_BATCH_SIZE, filteredNotes.length));
+        }
+      },
+      { rootMargin: '240px 0px' }
+    );
+
+    observer.observe(sentinel);
+
+    return () => observer.disconnect();
+  }, [filteredNotes.length, hasMoreNotes, visibleNoteCount]);
+
+  const selectAllNotes = () => setSelectedTagId(null);
+
+  const selectTagFromNote = (tagPath: string) => {
+    const normalized = tagPath.trim();
+    const matchedTag =
+      tags.find((tag) => tag.path === normalized) ??
+      tags.find((tag) => tag.id === normalized) ??
+      tags.find((tag) => tag.name === normalized);
+
+    if (matchedTag) {
+      setSelectedTagId(matchedTag.id);
+    }
+  };
 
   return (
     <main className="jifo-shell">
@@ -118,7 +169,7 @@ export function NotesPage({
         </section>
 
         <section className="sidebar-section sidebar-section--primary-filter">
-          <button type="button" className="nav-pill" aria-pressed={selectedTagId === null} aria-label="全部笔记" onClick={() => setSelectedTagId(null)}>
+          <button type="button" className="nav-pill" aria-pressed={selectedTagId === null} aria-label="全部笔记" onClick={selectAllNotes}>
             <span className="nav-pill__label">
               <span className="nav-grid-icon" aria-hidden="true">
                 <span />
@@ -177,14 +228,16 @@ export function NotesPage({
         </section>
 
         <section className="notes-stream" aria-label="笔记流">
-          {filteredNotes.map((note) => (
+          {visibleNotes.map((note) => (
             <NoteCard
               key={note.id}
               note={note}
               onDelete={(id) => onDeleteNote?.(id)}
               onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
+              onTagSelect={selectTagFromNote}
             />
           ))}
+          {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
           {filteredNotes.length === 0 ? <EmptyState title="还没有笔记" description="写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。" /> : null}
         </section>
       </section>

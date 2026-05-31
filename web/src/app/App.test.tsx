@@ -53,7 +53,8 @@ describe('App', () => {
 
     expect(screen.getAllByText('全部笔记').length).toBeGreaterThan(0);
     expect(screen.queryByText('Jifo 主界面（占位）')).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText('#工作 第一条真实笔记')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: '#工作' })).toBeInTheDocument());
+    expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
     fetchMock.mockRestore();
   });
