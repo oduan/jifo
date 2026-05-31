@@ -1162,6 +1162,10 @@ h3 {
     height: auto;
   }
 
+  .sidebar-section--heatmap {
+    display: none;
+  }
+
   .workspace-header {
     align-items: stretch;
     flex-direction: column;
