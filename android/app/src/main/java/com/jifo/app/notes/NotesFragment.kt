@@ -136,13 +136,16 @@ class NotesFragment : Fragment() {
             }
         }
 
-        fun animateTo(target: Float, duration: Long, overshoot: Boolean = false, refreshing: Boolean = false, onEnd: (() -> Unit)? = null) {
+        fun animateTo(target: Float, duration: Long, overshoot: Boolean = false, refreshing: Boolean = false, hideIndicator: Boolean = false, onEnd: (() -> Unit)? = null) {
             pullAnimator?.cancel()
             val from = b.pullRefreshContainer.translationY
             pullAnimator = ValueAnimator.ofFloat(from, target).apply {
                 this.duration = duration
                 interpolator = if (overshoot) OvershootInterpolator(0.55f) else DecelerateInterpolator(1.8f)
-                addUpdateListener { renderPull(it.animatedValue as Float, refreshing) }
+                addUpdateListener {
+                    renderPull(it.animatedValue as Float, refreshing)
+                    if (hideIndicator) b.refreshIndicator.alpha = 0f
+                }
                 doOnEndCompat { onEnd?.invoke() }
                 start()
             }
@@ -174,7 +177,7 @@ class NotesFragment : Fragment() {
                             refreshNow(
                                 settleOffset = settle,
                                 animateSettle = { animateTo(settle, 180L, overshoot = true, refreshing = true) },
-                                animateDone = { animateTo(0f, 260L, refreshing = false) }
+                                animateDone = { animateTo(0f, 260L, refreshing = false, hideIndicator = true) }
                             )
                         } else {
                             animateTo(0f, 220L, refreshing = false)
