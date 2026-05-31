@@ -6,3 +6,5 @@ backend/.env
 web/node_modules/
 web/dist/
 .DS_Store
+
+.worktrees/
