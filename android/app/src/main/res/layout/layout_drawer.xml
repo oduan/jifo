@@ -20,7 +20,7 @@
         android:layout_width="match_parent"
         android:layout_height="56dp"
         android:layout_marginTop="4dp"
-        android:layout_marginBottom="6dp"
+        android:layout_marginBottom="0dp"
         android:orientation="horizontal"
         android:gravity="center">
 
@@ -94,7 +94,8 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/heatmap_recycler"
         android:layout_width="match_parent"
-        android:layout_height="48dp" />
+        android:layout_height="0dp"
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/button_all_notes"

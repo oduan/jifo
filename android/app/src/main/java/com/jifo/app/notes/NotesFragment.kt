@@ -1,9 +1,13 @@
 package com.jifo.app.notes
 
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
 import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
@@ -22,6 +26,7 @@ class NotesFragment : Fragment() {
     private var binding: FragmentNotesBinding? = null
     private var notesJob: Job? = null
     private var selectedTagPath: String? = null
+    private var refreshInFlight = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val next = FragmentNotesBinding.inflate(inflater, container, false)
@@ -67,16 +72,7 @@ class NotesFragment : Fragment() {
                 buttonAllNotes.text = "▦ 全部笔记  ${notes.size}"
             }
         }
-        b.swipeRefresh.setColorSchemeResources(R.color.jifo_green_dark, R.color.jifo_amber)
-        b.swipeRefresh.setDistanceToTriggerSync(dp(96))
-        b.swipeRefresh.setSlingshotDistance(dp(140))
-        b.swipeRefresh.setProgressViewOffset(false, dp(46), dp(104))
-        b.swipeRefresh.setOnRefreshListener {
-            viewLifecycleOwner.lifecycleScope.launch {
-                runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
-                b.swipeRefresh.isRefreshing = false
-            }
-        }
+        installElasticPullToRefresh()
         b.buttonSearch.setOnClickListener {
             parentFragmentManager.beginTransaction()
                 .replace(R.id.main_container, SearchFragment())
@@ -101,6 +97,80 @@ class NotesFragment : Fragment() {
                 }
             }.show(parentFragmentManager, "note-editor")
         }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun installElasticPullToRefresh() {
+        val b = binding ?: return
+        val trigger = dp(92).toFloat()
+        val maxPull = dp(150).toFloat()
+        var startY = 0f
+        var dragging = false
+
+        fun damp(distance: Float): Float {
+            if (distance <= 0f) return 0f
+            val eased = distance * 0.42f
+            return eased.coerceAtMost(maxPull)
+        }
+
+        fun animateBack(onEnd: (() -> Unit)? = null) {
+            val from = b.pullRefreshContainer.translationY
+            ValueAnimator.ofFloat(from, 0f).apply {
+                duration = 240L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { b.pullRefreshContainer.translationY = it.animatedValue as Float }
+                doOnEndCompat { onEnd?.invoke() }
+                start()
+            }
+        }
+
+        b.notesRecycler.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startY = event.rawY
+                    dragging = false
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val distance = event.rawY - startY
+                    val atTop = !b.notesRecycler.canScrollVertically(-1)
+                    if (atTop && distance > 0f && !refreshInFlight) {
+                        dragging = true
+                        b.pullRefreshContainer.translationY = damp(distance)
+                        true
+                    } else false
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) {
+                        val shouldRefresh = b.pullRefreshContainer.translationY >= trigger
+                        animateBack {
+                            if (shouldRefresh) refreshNow()
+                        }
+                        dragging = false
+                        true
+                    } else false
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun refreshNow() {
+        if (refreshInFlight) return
+        refreshInFlight = true
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
+            refreshInFlight = false
+        }
+    }
+
+    private fun ValueAnimator.doOnEndCompat(block: () -> Unit) {
+        addListener(object : android.animation.Animator.AnimatorListener {
+            override fun onAnimationStart(animation: android.animation.Animator) = Unit
+            override fun onAnimationCancel(animation: android.animation.Animator) = Unit
+            override fun onAnimationRepeat(animation: android.animation.Animator) = Unit
+            override fun onAnimationEnd(animation: android.animation.Animator) = block()
+        })
     }
 
     private fun observeNotes() {

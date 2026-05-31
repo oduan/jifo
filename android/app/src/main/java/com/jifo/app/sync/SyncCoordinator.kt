@@ -57,10 +57,12 @@ class SyncCoordinator(
     }
 
     private suspend fun upsertPulledNote(note: ApiNoteDto) {
-        val existing = db.noteDao().getById(note.id)
+        val noteId = note.id.ifBlank { note.noteId.orEmpty() }
+        if (noteId.isBlank()) return
+        val existing = db.noteDao().getById(noteId)
         if (existing?.syncStatus == "PENDING" || existing?.syncStatus == "SYNCING") return
         db.noteDao().upsert(NoteEntity(
-            id = note.id,
+            id = noteId,
             clientId = note.clientId,
             contentJson = NoteNetworkJson.encodeContent(note.content),
             plainText = note.plainText.orEmpty(),
