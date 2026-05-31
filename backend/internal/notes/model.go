@@ -54,3 +54,8 @@ type ListFilter struct {
 	Limit   int
 	Offset  int
 }
+
+type ListResult struct {
+	Items   []Note
+	HasMore bool
+}

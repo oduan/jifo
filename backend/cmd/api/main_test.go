@@ -74,8 +74,8 @@ func (f *fakeNotesService) Create(ctx context.Context, input notes.CreateInput) 
 	return notes.Note{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: input.UserID, ClientID: input.ClientID, Content: input.Content, PlainText: input.PlainText, Version: 1}, nil
 }
 
-func (f *fakeNotesService) List(ctx context.Context, filter notes.ListFilter) ([]notes.Note, error) {
-	return []notes.Note{{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: filter.UserID, ClientID: "c1", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "hello"}}}, PlainText: "hello", Version: 1}}, nil
+func (f *fakeNotesService) List(ctx context.Context, filter notes.ListFilter) (notes.ListResult, error) {
+	return notes.ListResult{Items: []notes.Note{{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: filter.UserID, ClientID: "c1", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "hello"}}}, PlainText: "hello", Version: 1}}}, nil
 }
 
 func (f *fakeNotesService) Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error) {

@@ -37,7 +37,7 @@ type AccessKeyService interface {
 
 type NotesService interface {
 	Create(ctx context.Context, input notes.CreateInput) (notes.Note, error)
-	List(ctx context.Context, filter notes.ListFilter) ([]notes.Note, error)
+	List(ctx context.Context, filter notes.ListFilter) (notes.ListResult, error)
 	Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error)
 	MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
 	Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)

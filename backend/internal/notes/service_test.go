@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +16,48 @@ import (
 	"jifo/backend/internal/platform/testutil"
 	"jifo/backend/internal/tags"
 )
+
+func TestServiceListReturnsHasMoreWhenLimitHasExtraRow(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db, tags.NewService(db))
+	for i := 0; i < 3; i++ {
+		_, err := svc.Create(ctx, CreateInput{
+			UserID:    userID,
+			ClientID:  fmt.Sprintf("client-%d", i),
+			Content:   Content{Blocks: []Block{{Type: "paragraph", Text: fmt.Sprintf("note %d", i)}}},
+			PlainText: fmt.Sprintf("note %d", i),
+		})
+		if err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+	}
+
+	result, err := svc.List(ctx, ListFilter{UserID: userID, Limit: 2, Offset: 0})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(result.Items))
+	}
+	if !result.HasMore {
+		t.Fatalf("HasMore = false, want true")
+	}
+
+	lastPage, err := svc.List(ctx, ListFilter{UserID: userID, Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("List() last page error = %v", err)
+	}
+	if len(lastPage.Items) != 1 {
+		t.Fatalf("last page len = %d, want 1", len(lastPage.Items))
+	}
+	if lastPage.HasMore {
+		t.Fatalf("last page HasMore = true, want false")
+	}
+}
 
 func TestCreateCreatesTagsNoteTagsAndCounts(t *testing.T) {
 	ctx := context.Background()
@@ -137,19 +180,19 @@ func TestMoveToTrashDeletesNoteTagsRecountsAndListsTrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(active) error = %v", err)
 	}
-	if len(activeNotes) != 0 {
-		t.Fatalf("active notes len = %d, want 0", len(activeNotes))
+	if len(activeNotes.Items) != 0 {
+		t.Fatalf("active notes len = %d, want 0", len(activeNotes.Items))
 	}
 
 	trashNotes, err := svc.List(ctx, ListFilter{UserID: userID, Trash: true})
 	if err != nil {
 		t.Fatalf("List(trash) error = %v", err)
 	}
-	if len(trashNotes) != 1 {
-		t.Fatalf("trash notes len = %d, want 1", len(trashNotes))
+	if len(trashNotes.Items) != 1 {
+		t.Fatalf("trash notes len = %d, want 1", len(trashNotes.Items))
 	}
-	if trashNotes[0].ID != created.ID {
-		t.Fatalf("trash note id = %s, want %s", trashNotes[0].ID, created.ID)
+	if trashNotes.Items[0].ID != created.ID {
+		t.Fatalf("trash note id = %s, want %s", trashNotes.Items[0].ID, created.ID)
 	}
 }
 
@@ -207,7 +250,7 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(active) error = %v", err)
 	}
-	if len(activeNotes) != 1 || activeNotes[0].ID != created.ID {
+	if len(activeNotes.Items) != 1 || activeNotes.Items[0].ID != created.ID {
 		t.Fatalf("active notes = %#v, want note %s", activeNotes, created.ID)
 	}
 
@@ -215,8 +258,8 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(trash) error = %v", err)
 	}
-	if len(trashNotes) != 0 {
-		t.Fatalf("trash notes len = %d, want 0", len(trashNotes))
+	if len(trashNotes.Items) != 0 {
+		t.Fatalf("trash notes len = %d, want 0", len(trashNotes.Items))
 	}
 }
 
@@ -374,8 +417,8 @@ func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(
 	if err != nil {
 		t.Fatalf("List(trash) error = %v", err)
 	}
-	if len(trashNotes) != 0 {
-		t.Fatalf("trash notes len = %d, want 0 after permanent deletion", len(trashNotes))
+	if len(trashNotes.Items) != 0 {
+		t.Fatalf("trash notes len = %d, want 0 after permanent deletion", len(trashNotes.Items))
 	}
 }
 
@@ -427,7 +470,7 @@ func TestListSupportsPaginationSearchTagPathAndTrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(search) error = %v", err)
 	}
-	if len(searchNotes) != 1 || searchNotes[0].ID != noteA.ID {
+	if len(searchNotes.Items) != 1 || searchNotes.Items[0].ID != noteA.ID {
 		t.Fatalf("search notes = %#v, want only noteA", searchNotes)
 	}
 
@@ -435,7 +478,7 @@ func TestListSupportsPaginationSearchTagPathAndTrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(tag parent) error = %v", err)
 	}
-	if len(tagNotes) != 2 || tagNotes[0].ID != noteB.ID || tagNotes[1].ID != noteA.ID {
+	if len(tagNotes.Items) != 2 || tagNotes.Items[0].ID != noteB.ID || tagNotes.Items[1].ID != noteA.ID {
 		t.Fatalf("tag notes = %#v, want [noteB, noteA]", tagNotes)
 	}
 
@@ -443,7 +486,7 @@ func TestListSupportsPaginationSearchTagPathAndTrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(pagination) error = %v", err)
 	}
-	if len(pageNotes) != 1 || pageNotes[0].ID != noteA.ID {
+	if len(pageNotes.Items) != 1 || pageNotes.Items[0].ID != noteA.ID {
 		t.Fatalf("page notes = %#v, want [noteA]", pageNotes)
 	}
 
@@ -451,7 +494,7 @@ func TestListSupportsPaginationSearchTagPathAndTrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(trash) error = %v", err)
 	}
-	if len(trashNotes) != 1 || trashNotes[0].ID != noteTrash.ID {
+	if len(trashNotes.Items) != 1 || trashNotes.Items[0].ID != noteTrash.ID {
 		t.Fatalf("trash notes = %#v, want only noteTrash", trashNotes)
 	}
 }

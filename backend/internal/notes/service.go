@@ -304,26 +304,37 @@ func (s *Service) PermanentlyDeleteExpiredTrashTx(ctx context.Context, tx pgx.Tx
 	return int64(len(noteIDs)), nil
 }
 
-func (s *Service) List(ctx context.Context, filter ListFilter) ([]Note, error) {
-	sql, args := buildListQuery(filter)
+func (s *Service) List(ctx context.Context, filter ListFilter) (ListResult, error) {
+	queryFilter := filter
+	if filter.Limit > 0 {
+		queryFilter.Limit = filter.Limit + 1
+	}
+
+	sql, args := buildListQuery(queryFilter)
 	rows, err := s.db.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
 	defer rows.Close()
 
-	notes := make([]Note, 0)
+	items := make([]Note, 0)
 	for rows.Next() {
 		note, err := scanNote(rows)
 		if err != nil {
-			return nil, err
+			return ListResult{}, err
 		}
-		notes = append(notes, note)
+		items = append(items, note)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
-	return notes, nil
+
+	hasMore := false
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		hasMore = true
+		items = items[:filter.Limit]
+	}
+	return ListResult{Items: items, HasMore: hasMore}, nil
 }
 
 func buildListQuery(filter ListFilter) (string, []any) {

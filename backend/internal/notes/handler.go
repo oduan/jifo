@@ -17,7 +17,7 @@ import (
 
 type HandlerService interface {
 	Create(ctx context.Context, input CreateInput) (Note, error)
-	List(ctx context.Context, filter ListFilter) ([]Note, error)
+	List(ctx context.Context, filter ListFilter) (ListResult, error)
 	Update(ctx context.Context, input UpdateInput) (Note, error)
 	MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (Note, error)
 	Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (Note, error)
@@ -51,6 +51,12 @@ type noteDTO struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 	Version   int64      `json:"version"`
+}
+
+type pageDTO struct {
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"hasMore"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -96,17 +102,17 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	trash := parseBool(query.Get("trash"))
 	limit, err := parseInt(query.Get("limit"))
-	if err != nil {
+	if err != nil || limit < 0 {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid limit")
 		return
 	}
 	offset, err := parseInt(query.Get("offset"))
-	if err != nil {
+	if err != nil || offset < 0 {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid offset")
 		return
 	}
 
-	items, err := h.svc.List(r.Context(), ListFilter{
+	result, err := h.svc.List(r.Context(), ListFilter{
 		UserID:  userID,
 		Trash:   trash,
 		Search:  query.Get("search"),
@@ -118,11 +124,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "list notes failed")
 		return
 	}
-	out := make([]noteDTO, 0, len(items))
-	for _, item := range items {
+	out := make([]noteDTO, 0, len(result.Items))
+	for _, item := range result.Items {
 		out = append(out, toNoteDTO(item))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "page": pageDTO{Limit: limit, Offset: offset, HasMore: result.HasMore}})
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
