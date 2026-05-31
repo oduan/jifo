@@ -142,6 +142,19 @@ Authorization: Bearer <accessKey>
 
 - `400 bad_request`：缺少备注或 JSON 无效
 
+### 删除访问密钥
+
+`DELETE /settings/access-keys/{id}`
+
+响应 `204`，无响应体。
+
+说明：删除访问密钥会立即撤销该密钥；使用该密钥的 CLI 或其它程序会在后续请求中认证失败。后端执行软删除，列表不再返回已撤销密钥。
+
+常见错误：
+
+- `400 bad_request`：无效密钥 ID
+- `404 access_key_not_found`：密钥不存在、已撤销，或不属于当前用户
+
 ## Notes
 
 ### 创建笔记

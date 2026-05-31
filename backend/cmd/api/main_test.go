@@ -61,6 +61,10 @@ func (f *fakeAccessKeyService) Create(ctx context.Context, userID uuid.UUID, lab
 	return accesskeys.CreateResult{AccessKey: item, Secret: "jifo_abcdefghijklmnopqrstuvwxyz"}, nil
 }
 
+func (f *fakeAccessKeyService) Revoke(ctx context.Context, userID uuid.UUID, keyID uuid.UUID) error {
+	return nil
+}
+
 func (f *fakeAccessKeyService) Validate(ctx context.Context, rawKey string) (accesskeys.Principal, error) {
 	if rawKey != "api-key-token" {
 		return accesskeys.Principal{}, accesskeys.ErrInvalidAccessKey

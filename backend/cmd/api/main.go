@@ -32,6 +32,7 @@ type AuthService interface {
 type AccessKeyService interface {
 	List(ctx context.Context, userID uuid.UUID) ([]accesskeys.AccessKey, error)
 	Create(ctx context.Context, userID uuid.UUID, label string) (accesskeys.CreateResult, error)
+	Revoke(ctx context.Context, userID uuid.UUID, keyID uuid.UUID) error
 	Validate(ctx context.Context, rawKey string) (accesskeys.Principal, error)
 }
 
@@ -134,6 +135,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			accessKeyHandler := accesskeys.NewHandler(deps.AccessKeys)
 			protected.Get("/settings/access-keys", accessKeyHandler.List)
 			protected.Post("/settings/access-keys", accessKeyHandler.Create)
+			protected.Delete("/settings/access-keys/{keyID}", accessKeyHandler.Delete)
 		})
 	})
 
