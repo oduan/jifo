@@ -1,7 +1,53 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:padding="24dp" android:background="@color/jifo_bg">
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Jifo" android:textColor="@color/jifo_ink" android:textStyle="bold" android:textSize="42sp" />
-    <EditText android:id="@+id/input_email" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="邮箱" android:inputType="textEmailAddress" />
-    <EditText android:id="@+id/input_password" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="密码" android:inputType="textPassword" />
-    <Button android:id="@+id/button_submit" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="登录" />
-    <TextView android:id="@+id/text_error" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/jifo_danger" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="@color/jifo_bg">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Jifo"
+        android:textColor="@color/jifo_ink"
+        android:textStyle="bold"
+        android:textSize="42sp" />
+
+    <EditText
+        android:id="@+id/input_email"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:hint="邮箱"
+        android:inputType="textEmailAddress" />
+
+    <EditText
+        android:id="@+id/input_password"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:hint="密码"
+        android:inputType="textPassword" />
+
+    <Button
+        android:id="@+id/button_submit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="登录" />
+
+    <Button
+        android:id="@+id/button_register"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="注册并登录" />
+
+    <TextView
+        android:id="@+id/text_error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textColor="@color/jifo_danger" />
 </LinearLayout>
