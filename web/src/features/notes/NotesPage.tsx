@@ -5,7 +5,6 @@ import { AccessKeySummary, CreateAccessKeyResult } from '../settings/api';
 import { SettingsModal } from '../settings/SettingsModal';
 import { SettingsPopover } from '../settings/SettingsPopover';
 import { TagNode, TagTree } from '../tags/TagTree';
-import { Button } from '../../shared/ui/Button';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { TextInput } from '../../shared/ui/Input';
 import { Note, NoteCard } from './NoteCard';
@@ -59,10 +58,6 @@ export function NotesPage({
   selectedTagId = null,
   hasMoreNotes = false,
   isLoadingMoreNotes = false,
-  isLoading = false,
-  isMutating = false,
-  error,
-  onRetry,
   onSearchChange,
   onSelectTag,
   onLoadMoreNotes,
@@ -191,20 +186,6 @@ export function NotesPage({
             />
           </div>
         </header>
-
-        {error ? (
-          <div className="error-banner" role="alert">
-            <span>{error}</span>
-            {onRetry ? (
-              <Button type="button" variant="ghost" onClick={onRetry}>
-                重试
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {isMutating ? <div className="sync-banner" aria-live="polite">正在保存更改…</div> : null}
-        {isLoadingMoreNotes ? <div className="sync-banner" aria-live="polite">正在加载更多笔记…</div> : null}
 
         <section className="composer-card" aria-label="新笔记编辑器">
           <NoteEditor onSubmit={(blocks) => onCreateNote?.(blocks)} />

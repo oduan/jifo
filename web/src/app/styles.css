@@ -420,32 +420,6 @@ h3 {
   box-shadow: 0 0 0 2px rgba(232, 184, 91, 0.18);
 }
 
-.error-banner,
-.loading-banner,
-.sync-banner {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 9px;
-  border-radius: var(--jifo-radius-sm);
-  border: 1px solid var(--jifo-line);
-  background: rgba(255, 252, 247, 0.78);
-  color: var(--jifo-muted);
-}
-
-.error-banner {
-  border-color: rgba(176, 82, 64, 0.28);
-  background: rgba(255, 239, 232, 0.82);
-  color: #8e3f31;
-}
-
-.sync-banner {
-  border-color: rgba(88, 132, 75, 0.22);
-  background: rgba(235, 246, 231, 0.78);
-  color: var(--jifo-green-dark);
-}
-
 .composer-card {
   padding: 0;
   border-radius: 0;

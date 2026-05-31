@@ -154,10 +154,26 @@ describe('NotesPage', () => {
     }
   });
 
-  test('加载笔记时不显示全局加载条', () => {
-    render(<NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} isLoading />);
+  test('加载、保存和错误状态都不在编辑器上方插入全局提示条', () => {
+    render(
+      <NotesPage
+        userName="oisin"
+        notes={[]}
+        tags={[]}
+        heatmapCells={[]}
+        isLoading
+        isMutating
+        isLoadingMoreNotes
+        error="请求失败，请稍后重试。"
+        onRetry={vi.fn()}
+      />
+    );
 
     expect(screen.queryByText('正在加载真实笔记数据…')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在保存更改…')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在加载更多笔记…')).not.toBeInTheDocument();
+    expect(screen.queryByText('请求失败，请稍后重试。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
   });
 
