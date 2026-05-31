@@ -300,8 +300,8 @@ func TestPushUpdateVersionConflictCreatesConflictCopy(t *testing.T) {
 	if len(conflictContent.Blocks) < 4 {
 		t.Fatalf("conflict copy blocks len = %d, want >= 4", len(conflictContent.Blocks))
 	}
-	if conflictContent.Blocks[0].Type != "paragraph" || conflictContent.Blocks[0].Text != "这是一条冲突副本，原笔记已在其他设备被更新。" {
-		t.Fatalf("block[0] = %#v, want fixed conflict hint paragraph", conflictContent.Blocks[0])
+	if conflictContent.Blocks[0].Type != "paragraph" || conflictContent.Blocks[0].Text != "此条笔记冲突" {
+		t.Fatalf("block[0] = %#v, want concise conflict hint paragraph", conflictContent.Blocks[0])
 	}
 	if conflictContent.Blocks[1].Type != "divider" {
 		t.Fatalf("block[1] type = %q, want %q", conflictContent.Blocks[1].Type, "divider")
@@ -516,7 +516,7 @@ func TestPushRestoreVersionConflictCreatesConflictCopy(t *testing.T) {
 	if conflictReason == nil || *conflictReason != "version_conflict" {
 		t.Fatalf("conflict_reason = %v, want version_conflict", conflictReason)
 	}
-	if plainText != "这是一条冲突副本，原笔记已在其他设备被更新。\n\n----\n#恢复冲突 客户端恢复内容" {
+	if plainText != "此条笔记冲突\n\n----\n#恢复冲突 客户端恢复内容" {
 		t.Fatalf("plain_text = %q, want conflict hint + divider + client text", plainText)
 	}
 }

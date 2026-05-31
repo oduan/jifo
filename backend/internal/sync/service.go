@@ -15,6 +15,8 @@ import (
 	"jifo/backend/internal/notes"
 )
 
+const conflictCopyPrefix = "此条笔记冲突"
+
 type Service struct {
 	db    *pgxpool.Pool
 	notes *notes.Service
@@ -201,12 +203,12 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 func (s *Service) createConflictCopyTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, originalNoteID uuid.UUID, payload Payload) (PushResult, error) {
 	conflictContent := notes.Content{Blocks: make([]notes.Block, 0, len(payload.Content.Blocks)+2)}
 	conflictContent.Blocks = append(conflictContent.Blocks,
-		notes.Block{Type: "paragraph", Text: "这是一条冲突副本，原笔记已在其他设备被更新。"},
+		notes.Block{Type: "paragraph", Text: conflictCopyPrefix},
 		notes.Block{Type: "divider"},
 	)
 	conflictContent.Blocks = append(conflictContent.Blocks, payload.Content.Blocks...)
 
-	plainText := "这是一条冲突副本，原笔记已在其他设备被更新。\n\n----"
+	plainText := conflictCopyPrefix + "\n\n----"
 	if payload.PlainText != "" {
 		plainText += "\n" + payload.PlainText
 	}
