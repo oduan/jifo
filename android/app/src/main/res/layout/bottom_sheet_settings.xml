@@ -1,0 +1,6 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp" android:background="@drawable/bg_bottom_sheet">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="设置" android:textColor="@color/jifo_ink" android:textSize="18sp" android:textStyle="bold" />
+    <EditText android:id="@+id/input_key_label" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="访问密钥备注" />
+    <Button android:id="@+id/button_create_key" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="创建访问密钥" />
+    <TextView android:id="@+id/text_secret" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/jifo_tag_text" />
+</LinearLayout>
