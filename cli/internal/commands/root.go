@@ -1,13 +1,30 @@
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
 
-type Options struct{}
+	"github.com/spf13/cobra"
+
+	"jifo/cli/internal/config"
+)
+
+type Options struct {
+	ConfigPath string
+}
+
+func (o Options) configPath() (string, error) {
+	if o.ConfigPath != "" {
+		return o.ConfigPath, nil
+	}
+	return config.DefaultPath()
+}
 
 func NewRootCommand(opts Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "jifo",
-		Short: "Jifo command line client",
+		Use:           "jifo",
+		Short:         "Jifo command line client",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 	cmd.AddCommand(newLoginCommand(opts))
 	cmd.AddCommand(newLogoutCommand(opts))
@@ -17,16 +34,8 @@ func NewRootCommand(opts Options) *cobra.Command {
 	return cmd
 }
 
-func newLoginCommand(opts Options) *cobra.Command {
-	return &cobra.Command{Use: "login", Short: "Save Jifo access token"}
-}
-
-func newLogoutCommand(opts Options) *cobra.Command {
-	return &cobra.Command{Use: "logout", Short: "Remove saved Jifo access token"}
-}
-
-func newStatusCommand(opts Options) *cobra.Command {
-	return &cobra.Command{Use: "status", Short: "Show Jifo CLI configuration status"}
+func missingTokenError() error {
+	return fmt.Errorf("missing access token: run `jifo login --token <access-key>` or set JIFO_ACCESS_TOKEN")
 }
 
 func newNotesCommand(opts Options) *cobra.Command {
