@@ -1153,6 +1153,10 @@ h3 {
     width: min(100vw - 28px, 720px);
   }
 
+  .jifo-shell {
+    align-content: start;
+  }
+
   .auth-feature-grid {
     grid-template-columns: 1fr;
   }
