@@ -6,6 +6,7 @@ import com.jifo.app.data.local.NoteEntity
 import com.jifo.app.data.local.SyncStateEntity
 import com.jifo.app.network.ApiNoteDto
 import com.jifo.app.network.PushResultDto
+import com.jifo.app.notes.LocalTagIndex
 
 class SyncCoordinator(
     private val db: JifoDatabase,
@@ -23,6 +24,7 @@ class SyncCoordinator(
         val notes = if (pull.notes.isNotEmpty()) pull.notes else pull.items
         db.withTransaction {
             notes.forEach { note -> upsertPulledNote(note) }
+            LocalTagIndex.rebuild(db)
             val next = pull.cursor ?: pull.nextCursor
             if (next?.updatedAt != null) {
                 db.syncStateDao().put(SyncStateEntity("cursor", next.updatedAt + "|" + (next.id ?: "")))
@@ -33,9 +35,23 @@ class SyncCoordinator(
     private suspend fun applyPushResult(result: PushResultDto) {
         when (result.status) {
             "created", "updated", "deleted", "restored", "duplicate" -> db.withTransaction {
+                val op = db.outboxDao().getByOpId(result.opId)
+                if (op != null && result.noteId != null) {
+                    val local = db.noteDao().getByClientId(op.clientId)
+                    if (local != null) {
+                        if (local.id != result.noteId) {
+                            db.noteDao().deleteById(local.id)
+                        }
+                        db.noteDao().upsert(local.copy(id = result.noteId, version = result.version, syncStatus = "SYNCED", lastError = null))
+                    }
+                }
                 db.outboxDao().deleteByOpId(result.opId)
+                LocalTagIndex.rebuild(db)
             }
-            "conflict_copied", "delete_conflict_ignored" -> db.outboxDao().deleteByOpId(result.opId)
+            "conflict_copied", "delete_conflict_ignored" -> db.withTransaction {
+                db.outboxDao().deleteByOpId(result.opId)
+                LocalTagIndex.rebuild(db)
+            }
             else -> db.outboxDao().updateStatus(result.opId, "failed", "push_status:${result.status}")
         }
     }

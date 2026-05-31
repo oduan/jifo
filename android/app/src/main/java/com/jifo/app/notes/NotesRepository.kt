@@ -46,6 +46,7 @@ class NotesRepository(
                 payloadJson = NoteJson.encodePayload(blocks, plainText),
                 createdAt = now
             ))
+            LocalTagIndex.rebuild(db)
         }
         syncScheduler.scheduleNow()
     }
@@ -73,6 +74,7 @@ class NotesRepository(
                 payloadJson = NoteJson.encodePayload(blocks, plainText),
                 createdAt = now
             ))
+            LocalTagIndex.rebuild(db)
         }
         syncScheduler.scheduleNow()
     }
@@ -93,6 +95,7 @@ class NotesRepository(
                 payloadJson = "{}",
                 createdAt = now
             ))
+            LocalTagIndex.rebuild(db)
         }
         syncScheduler.scheduleNow()
     }

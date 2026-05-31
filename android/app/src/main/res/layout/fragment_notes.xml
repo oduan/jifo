@@ -46,6 +46,19 @@
                 android:src="@drawable/ic_search_24" />
         </LinearLayout>
 
+        <EditText
+            android:id="@+id/input_search"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="44dp"
+            android:visibility="gone"
+            android:singleLine="true"
+            android:hint="搜索笔记"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:background="@color/jifo_bg"
+            android:inputType="text" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/notes_recycler"
             android:layout_width="match_parent"

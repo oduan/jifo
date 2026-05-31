@@ -22,6 +22,7 @@ import com.jifo.app.sync.JifoSyncRemote
 import com.jifo.app.sync.JifoSyncWorker
 import com.jifo.app.sync.SyncCoordinator
 import com.jifo.app.sync.SyncScheduler
+import org.json.JSONObject
 
 object ServiceLocator {
     @Volatile private var db: JifoDatabase? = null
@@ -59,7 +60,7 @@ class WorkManagerSyncScheduler(context: Context) : SyncScheduler {
         val request = OneTimeWorkRequestBuilder<JifoSyncWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        WorkManager.getInstance(appContext).enqueueUniqueWork("jifo-sync", ExistingWorkPolicy.KEEP, request)
+        WorkManager.getInstance(appContext).enqueueUniqueWork("jifo-sync", ExistingWorkPolicy.REPLACE, request)
     }
 }
 
@@ -72,10 +73,28 @@ class RoomTokenStore(private val db: JifoDatabase) : TokenStore, com.jifo.app.au
     }
     override suspend fun clear() = db.authSessionDao().clear()
     override suspend fun current(): com.jifo.app.auth.StoredSession? = db.authSessionDao().current()?.let {
-        com.jifo.app.auth.StoredSession(it.accessToken, it.refreshToken, null, null, it.deviceCode)
+        val user = parseUserJson(it.userJson)
+        com.jifo.app.auth.StoredSession(it.accessToken, it.refreshToken, user.email, user.username, it.deviceCode)
     }
     override suspend fun deviceCode(): String? = db.authSessionDao().current()?.deviceCode
     override suspend fun save(response: AuthResponse, deviceCode: String) {
-        db.authSessionDao().save(AuthSessionEntity(accessToken = response.accessToken, refreshToken = response.refreshToken, userJson = response.user?.email, deviceCode = deviceCode))
+        val userJson = response.user?.let {
+            JSONObject()
+                .put("email", it.email)
+                .put("username", it.username)
+                .toString()
+        }
+        db.authSessionDao().save(AuthSessionEntity(accessToken = response.accessToken, refreshToken = response.refreshToken, userJson = userJson, deviceCode = deviceCode))
     }
+
+    private fun parseUserJson(raw: String?): ParsedUser = when {
+        raw.isNullOrBlank() -> ParsedUser(null, null)
+        raw.trim().startsWith("{") -> runCatching {
+            val json = JSONObject(raw)
+            ParsedUser(json.optString("email").ifBlank { null }, json.optString("username").ifBlank { null })
+        }.getOrDefault(ParsedUser(raw, null))
+        else -> ParsedUser(raw, raw.substringBefore('@').ifBlank { raw })
+    }
+
+    private data class ParsedUser(val email: String?, val username: String?)
 }

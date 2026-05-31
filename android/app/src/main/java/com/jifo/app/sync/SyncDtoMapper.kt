@@ -20,5 +20,14 @@ object SyncDtoMapper {
         }
     )
 
-    private fun jsonObjectToMap(json: JSONObject): Map<String, Any?> = json.keys().asSequence().associateWith { key -> json.get(key) }
+    private fun jsonObjectToMap(json: JSONObject): Map<String, Any?> = json.keys().asSequence().associateWith { key ->
+        toPlainJsonValue(json.get(key))
+    }
+
+    private fun toPlainJsonValue(value: Any?): Any? = when (value) {
+        JSONObject.NULL -> null
+        is JSONObject -> jsonObjectToMap(value)
+        is org.json.JSONArray -> (0 until value.length()).map { index -> toPlainJsonValue(value.get(index)) }
+        else -> value
+    }
 }

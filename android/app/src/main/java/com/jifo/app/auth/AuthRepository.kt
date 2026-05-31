@@ -29,6 +29,8 @@ class AuthRepository(
     private val sessionStore: SessionStore,
     private val idGenerator: IdGenerator
 ) {
+    suspend fun current() = sessionStore.current()
+
     suspend fun login(email: String, password: String) {
         val deviceCode = sessionStore.deviceCode() ?: idGenerator.newDeviceCode("android")
         val response = remote.login(AuthRequest(email = email, password = password, deviceCode = deviceCode))
