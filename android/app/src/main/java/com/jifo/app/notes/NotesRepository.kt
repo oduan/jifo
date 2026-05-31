@@ -1,0 +1,99 @@
+package com.jifo.app.notes
+
+import androidx.room.withTransaction
+import com.jifo.app.core.id.IdGenerator
+import com.jifo.app.core.model.NoteBlock
+import com.jifo.app.core.model.toPlainText
+import com.jifo.app.core.time.Clock
+import com.jifo.app.data.local.JifoDatabase
+import com.jifo.app.data.local.NoteEntity
+import com.jifo.app.data.local.OutboxOperationEntity
+import com.jifo.app.sync.SyncScheduler
+import kotlinx.coroutines.flow.map
+
+class NotesRepository(
+    private val db: JifoDatabase,
+    private val syncScheduler: SyncScheduler,
+    private val idGenerator: IdGenerator,
+    private val clock: Clock
+) {
+    fun observeNotes(search: String?, tagPath: String?) = db.noteDao()
+        .observeNotes(search?.takeIf { it.isNotBlank() }, tagPath?.takeIf { it.isNotBlank() })
+        .map { it }
+
+    suspend fun createNote(blocks: List<NoteBlock>) {
+        val clientId = idGenerator.newClientId("android-note")
+        val opId = idGenerator.newOpId()
+        val now = clock.nowIso()
+        val plainText = blocks.toPlainText()
+        db.withTransaction {
+            db.noteDao().upsert(NoteEntity(
+                id = clientId,
+                clientId = clientId,
+                contentJson = NoteJson.encodeBlocks(blocks),
+                plainText = plainText,
+                createdAt = now,
+                updatedAt = now,
+                version = 0,
+                syncStatus = "PENDING"
+            ))
+            db.outboxDao().insert(OutboxOperationEntity(
+                opId = opId,
+                entity = "note",
+                action = "create",
+                clientId = clientId,
+                baseVersion = 0,
+                payloadJson = NoteJson.encodePayload(blocks, plainText),
+                createdAt = now
+            ))
+        }
+        syncScheduler.scheduleNow()
+    }
+
+    suspend fun updateNote(id: String, blocks: List<NoteBlock>) {
+        val current = db.noteDao().getById(id) ?: return
+        val opId = idGenerator.newOpId()
+        val now = clock.nowIso()
+        val plainText = blocks.toPlainText()
+        db.withTransaction {
+            db.noteDao().upsert(current.copy(
+                contentJson = NoteJson.encodeBlocks(blocks),
+                plainText = plainText,
+                updatedAt = now,
+                syncStatus = "PENDING",
+                lastError = null
+            ))
+            db.outboxDao().insert(OutboxOperationEntity(
+                opId = opId,
+                entity = "note",
+                action = "update",
+                noteId = id,
+                clientId = current.clientId,
+                baseVersion = current.version,
+                payloadJson = NoteJson.encodePayload(blocks, plainText),
+                createdAt = now
+            ))
+        }
+        syncScheduler.scheduleNow()
+    }
+
+    suspend fun deleteNote(id: String) {
+        val current = db.noteDao().getById(id) ?: return
+        val opId = idGenerator.newOpId()
+        val now = clock.nowIso()
+        db.withTransaction {
+            db.noteDao().upsert(current.copy(deletedAt = now, updatedAt = now, syncStatus = "PENDING"))
+            db.outboxDao().insert(OutboxOperationEntity(
+                opId = opId,
+                entity = "note",
+                action = "delete",
+                noteId = id,
+                clientId = current.clientId,
+                baseVersion = current.version,
+                payloadJson = "{}",
+                createdAt = now
+            ))
+        }
+        syncScheduler.scheduleNow()
+    }
+}
