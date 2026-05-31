@@ -5,7 +5,7 @@ import { refreshAuth, submitAuth } from '../features/auth/api';
 import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
-import { createNote, deleteNote, fromApiNote, listNotes, updateNote } from '../features/notes/api';
+import { createNote, deleteNote, fromApiNote, listNoteStats, listNotes, updateNote } from '../features/notes/api';
 import { AccessKeySummary, createAccessKey, CreateAccessKeyResult, deleteAccessKey as deleteAccessKeyAPI, listAccessKeys } from '../features/settings/api';
 import { Note } from '../features/notes/NoteCard';
 import { NoteBlock } from '../features/notes/NoteEditor';
@@ -38,6 +38,7 @@ export function App() {
   const authState = useAuthState();
   const accessToken = authState.accessToken;
   const [notes, setNotes] = useState<Note[]>([]);
+  const [totalNoteCount, setTotalNoteCount] = useState(0);
   const [tags, setTags] = useState<TagNode[]>([]);
   const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
   const [accessKeys, setAccessKeys] = useState<AccessKeySummary[]>([]);
@@ -111,9 +112,10 @@ export function App() {
     setError(null);
     try {
       const nextTags = await listTagTree(client);
-      const [nextNotes, nextHeatmap] = await Promise.all([listNotes(client, noteListOptions(0)), loadHeatmap(client)]);
+      const [nextNotes, nextStats, nextHeatmap] = await Promise.all([listNotes(client, noteListOptions(0)), listNoteStats(client), loadHeatmap(client)]);
       setTags(nextTags);
       setNotes(nextNotes.items.map((note) => fromApiNote(note, nextTags)));
+      setTotalNoteCount(nextStats.total);
       setHasMoreNotes(nextNotes.page.hasMore);
       setHeatmapCells(nextHeatmap);
     } catch (loadError) {
@@ -132,6 +134,7 @@ export function App() {
       void loadWorkspace();
     } else {
       setNotes([]);
+      setTotalNoteCount(0);
       setTags([]);
       setHeatmapCells([]);
       setAccessKeys([]);
@@ -254,6 +257,7 @@ export function App() {
       notes={notes}
       tags={tags}
       heatmapCells={heatmapCells}
+      totalNoteCount={totalNoteCount}
       searchQuery={noteQuery}
       selectedTagId={selectedTagId}
       hasMoreNotes={hasMoreNotes}

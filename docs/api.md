@@ -251,6 +251,20 @@ Authorization: Bearer <accessKey>
 
 `hasMore` 表示使用当前筛选条件继续请求 `offset + limit` 是否可能返回下一页。后端通过多取一条记录计算该字段，不执行额外总数统计。
 
+### 笔记统计
+
+`GET /notes/stats`
+
+响应 `200`：
+
+```json
+{
+  "total": 42
+}
+```
+
+说明：`total` 是当前用户所有未删除、未永久删除的笔记数，不受 `search` / `tagPath` 等列表筛选条件影响。
+
 ### 更新笔记
 
 `PATCH /notes/{id}`（也支持 `PUT /notes/{id}`）

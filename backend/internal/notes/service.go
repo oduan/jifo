@@ -304,6 +304,20 @@ func (s *Service) PermanentlyDeleteExpiredTrashTx(ctx context.Context, tx pgx.Tx
 	return int64(len(noteIDs)), nil
 }
 
+func (s *Service) CountActive(ctx context.Context, userID uuid.UUID) (int64, error) {
+	var total int64
+	if err := s.db.QueryRow(ctx, `
+		SELECT count(*)
+		FROM notes
+		WHERE user_id = $1
+		  AND deleted_at IS NULL
+		  AND permanently_deleted_at IS NULL
+	`, userID).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 func (s *Service) List(ctx context.Context, filter ListFilter) (ListResult, error) {
 	queryFilter := filter
 	if filter.Limit > 0 {

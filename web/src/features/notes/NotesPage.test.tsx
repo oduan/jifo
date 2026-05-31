@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { describe, expect, test, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { NotesPage } from './NotesPage';
@@ -66,6 +66,22 @@ describe('NotesPage', () => {
 
     await user.click(screen.getByRole('button', { name: '全部笔记' }));
     expect(onSelectTag).toHaveBeenCalledWith({ id: null });
+  });
+
+  test('账户统计和全部笔记入口使用全量笔记数而不是当前筛选结果数量', () => {
+    render(
+      <NotesPage
+        userName="oisin"
+        notes={[{ id: 'n1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '筛选结果' }], tagIds: ['work'] }]}
+        totalNoteCount={42}
+        tags={[{ id: 'work', name: '工作', path: '工作', noteCount: 1 }]}
+        heatmapCells={[]}
+        selectedTagId="work"
+      />
+    );
+
+    expect(within(screen.getByLabelText('账户统计')).getByText('42')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全部笔记' })).toHaveTextContent('42');
   });
 
   test('受控选中标签决定标题和标签选中态', () => {

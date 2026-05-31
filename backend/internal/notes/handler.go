@@ -18,6 +18,7 @@ import (
 type HandlerService interface {
 	Create(ctx context.Context, input CreateInput) (Note, error)
 	List(ctx context.Context, filter ListFilter) (ListResult, error)
+	CountActive(ctx context.Context, userID uuid.UUID) (int64, error)
 	Update(ctx context.Context, input UpdateInput) (Note, error)
 	MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (Note, error)
 	Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (Note, error)
@@ -129,6 +130,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toNoteDTO(item))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "page": pageDTO{Limit: limit, Offset: offset, HasMore: result.HasMore}})
+}
+
+func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "notes service not configured")
+		return
+	}
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
+		return
+	}
+	total, err := h.svc.CountActive(r.Context(), userID)
+	if err != nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "count notes failed")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"total": total})
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {

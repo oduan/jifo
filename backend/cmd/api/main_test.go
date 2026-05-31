@@ -93,6 +93,10 @@ func (f *fakeNotesService) List(ctx context.Context, filter notes.ListFilter) (n
 	return notes.ListResult{Items: []notes.Note{{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: filter.UserID, ClientID: "c1", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "hello"}}}, PlainText: "hello", Version: 1}}}, nil
 }
 
+func (f *fakeNotesService) CountActive(ctx context.Context, userID uuid.UUID) (int64, error) {
+	return 42, nil
+}
+
 func (f *fakeNotesService) Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error) {
 	return notes.Note{ID: input.NoteID, UserID: input.UserID, ClientID: "c1", Content: input.Content, PlainText: input.PlainText, Version: 2}, nil
 }
@@ -201,6 +205,11 @@ func TestRouterSmoke(t *testing.T) {
 	listResp := doJSON(t, router, http.MethodGet, "/api/notes?search=hello&tagPath=项目&limit=10&offset=0", nil, "access-token")
 	if listResp.Code != http.StatusOK {
 		t.Fatalf("list notes status = %d, want %d", listResp.Code, http.StatusOK)
+	}
+
+	statsResp := doJSON(t, router, http.MethodGet, "/api/notes/stats", nil, "access-token")
+	if statsResp.Code != http.StatusOK {
+		t.Fatalf("notes stats status = %d body=%s, want %d", statsResp.Code, statsResp.Body.String(), http.StatusOK)
 	}
 
 	updateBody := map[string]any{"plainText": "#项目 updated", "content": map[string]any{"blocks": []map[string]any{{"type": "paragraph", "text": "#项目 updated"}}}}

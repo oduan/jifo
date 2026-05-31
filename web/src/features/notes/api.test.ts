@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { fromApiNote, listNotes, plainTextFromBlocks, toApiBlocks } from './api';
+import { fromApiNote, listNoteStats, listNotes, plainTextFromBlocks, toApiBlocks } from './api';
 
 describe('notes API DTO conversion', () => {
   test('converts UI paragraph blocks to backend text blocks and plain text', () => {
@@ -37,6 +37,19 @@ describe('notes API DTO conversion', () => {
       blocks: [{ type: 'paragraph', content: '#工作/前端 hello' }],
       tagIds: ['tag-frontend']
     });
+  });
+
+  test('listNoteStats returns total user note count', async () => {
+    const calls: string[] = [];
+    const client = {
+      request: async <T>(path: string): Promise<T> => {
+        calls.push(path);
+        return { total: 42 } as T;
+      }
+    };
+
+    await expect(listNoteStats(client)).resolves.toEqual({ total: 42 });
+    expect(calls).toEqual(['/notes/stats']);
   });
 
   test('listNotes sends server-side filters and pagination params', async () => {

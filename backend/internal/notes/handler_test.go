@@ -14,7 +14,8 @@ import (
 )
 
 type fakeHandlerService struct {
-	filter ListFilter
+	filter      ListFilter
+	countUserID uuid.UUID
 }
 
 func (f *fakeHandlerService) Create(ctx context.Context, input CreateInput) (Note, error) {
@@ -35,6 +36,11 @@ func (f *fakeHandlerService) List(ctx context.Context, filter ListFilter) (ListR
 		}},
 		HasMore: true,
 	}, nil
+}
+
+func (f *fakeHandlerService) CountActive(ctx context.Context, userID uuid.UUID) (int64, error) {
+	f.countUserID = userID
+	return 42, nil
 }
 
 func (f *fakeHandlerService) Update(ctx context.Context, input UpdateInput) (Note, error) {
@@ -60,6 +66,13 @@ func serveAuthenticatedList(h *Handler, rr *httptest.ResponseRecorder, req *http
 	handler := httpx.RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {
 		return userID, uuid.Nil, nil
 	})(http.HandlerFunc(h.List))
+	handler.ServeHTTP(rr, req)
+}
+
+func serveAuthenticatedStats(h *Handler, rr *httptest.ResponseRecorder, req *http.Request, userID uuid.UUID) {
+	handler := httpx.RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {
+		return userID, uuid.Nil, nil
+	})(http.HandlerFunc(h.Stats))
 	handler.ServeHTTP(rr, req)
 }
 
@@ -90,6 +103,31 @@ func TestHandlerListReturnsPageMetadata(t *testing.T) {
 	}
 	if len(body.Items) != 1 || body.Page.Limit != 20 || body.Page.Offset != 40 || !body.Page.HasMore {
 		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestHandlerStatsReturnsTotalActiveNotes(t *testing.T) {
+	userID := uuid.New()
+	svc := &fakeHandlerService{}
+	h := NewHandler(svc)
+	rr, req := authenticatedRequest("/notes/stats", userID)
+
+	serveAuthenticatedStats(h, rr, req, userID)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if svc.countUserID != userID {
+		t.Fatalf("count userID = %s, want %s", svc.countUserID, userID)
+	}
+	var body struct {
+		Total int64 `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Total != 42 {
+		t.Fatalf("total = %d, want 42", body.Total)
 	}
 }
 

@@ -29,6 +29,12 @@ function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: stri
     const method = init?.method ?? 'GET';
     requestedUrls.push(path);
 
+    if (path.endsWith('/notes/stats')) {
+      return new Response(JSON.stringify({ total: 42 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
     if (path.endsWith('/settings/access-keys') && method === 'GET') {
       return new Response(JSON.stringify({ items: [{ id: 'k1', label: 'CLI', maskedKey: 'jifo_abcd••••••vwxyz', createdAt: '2026-05-31T00:00:00Z' }] }), {
         status: 200,
@@ -81,6 +87,8 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '#工作' })).toBeInTheDocument());
     expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument();
+    expect(screen.getByLabelText('账户统计')).toHaveTextContent('42');
+    expect(requestedUrls).toContain('/api/notes/stats');
     expect(requestedUrls).toContain('/api/notes?limit=20&offset=0');
   });
 

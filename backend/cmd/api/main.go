@@ -40,6 +40,7 @@ type AccessKeyService interface {
 type NotesService interface {
 	Create(ctx context.Context, input notes.CreateInput) (notes.Note, error)
 	List(ctx context.Context, filter notes.ListFilter) (notes.ListResult, error)
+	CountActive(ctx context.Context, userID uuid.UUID) (int64, error)
 	Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error)
 	MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
 	Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
@@ -116,6 +117,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			notesHandler := notes.NewHandler(deps.Notes)
 			protected.Post("/notes", notesHandler.Create)
 			protected.Get("/notes", notesHandler.List)
+			protected.Get("/notes/stats", notesHandler.Stats)
 			protected.Patch("/notes/{noteID}", notesHandler.Update)
 			protected.Put("/notes/{noteID}", notesHandler.Update)
 			protected.Delete("/notes/{noteID}", notesHandler.Delete)

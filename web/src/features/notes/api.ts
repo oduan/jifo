@@ -35,6 +35,10 @@ export type ListNotesResult = {
   };
 };
 
+export type NoteStats = {
+  total: number;
+};
+
 type ApiItemResponse = {
   item: ApiNote;
 };
@@ -127,6 +131,10 @@ function notePayload(blocks: NoteBlock[], clientId?: string) {
     content: { blocks: toApiBlocks(blocks) },
     plainText: plainTextFromBlocks(blocks)
   };
+}
+
+export function listNoteStats(client: ApiClient): Promise<NoteStats> {
+  return client.request<NoteStats>('/notes/stats');
 }
 
 export async function listNotes(client: ApiClient, options: ListNotesOptions = {}): Promise<ListNotesResult> {

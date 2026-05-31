@@ -20,6 +20,7 @@ type NotesPageProps = {
   notes: Note[];
   tags: TagNode[];
   heatmapCells: HeatmapCell[];
+  totalNoteCount?: number;
   searchQuery?: string;
   selectedTagId?: string | null;
   hasMoreNotes?: boolean;
@@ -54,6 +55,7 @@ export function NotesPage({
   notes,
   tags,
   heatmapCells,
+  totalNoteCount,
   searchQuery = '',
   selectedTagId = null,
   hasMoreNotes = false,
@@ -78,6 +80,7 @@ export function NotesPage({
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
+  const allNotesCount = totalNoteCount ?? notes.length;
   const selectedTag = selectedTagId ? tagsById.get(selectedTagId) : undefined;
   const displayNotes = useMemo(() => [...notes].sort((a, b) => createdAtTime(b) - createdAtTime(a)), [notes]);
 
@@ -129,7 +132,7 @@ export function NotesPage({
 
         <section className="stats-grid" aria-label="账户统计">
           <div className="stat-card">
-            <strong>{notes.length}</strong>
+            <strong>{allNotesCount}</strong>
             <span>笔记</span>
           </div>
           <div className="stat-card">
@@ -157,7 +160,7 @@ export function NotesPage({
               </span>
               <span>全部笔记</span>
             </span>
-            <span className="nav-count">{notes.length}</span>
+            <span className="nav-count">{allNotesCount}</span>
           </button>
         </section>
 
