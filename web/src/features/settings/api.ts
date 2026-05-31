@@ -28,3 +28,7 @@ export function createAccessKey(client: ApiClient, label: string): Promise<Creat
     body: JSON.stringify({ label })
   });
 }
+
+export function deleteAccessKey(client: ApiClient, id: string): Promise<void> {
+  return client.request<void>(`/settings/access-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

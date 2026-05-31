@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 
 import { ApiClient } from '../../shared/api/client';
-import { createAccessKey, listAccessKeys } from './api';
+import { createAccessKey, deleteAccessKey, listAccessKeys } from './api';
 
 function mockClient(response: unknown): ApiClient {
   return {
@@ -27,5 +27,13 @@ describe('settings api', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ label: 'CLI' })
     });
+  });
+
+  test('deleteAccessKey sends DELETE request', async () => {
+    const client = mockClient(undefined);
+
+    await expect(deleteAccessKey(client, 'k1')).resolves.toBeUndefined();
+
+    expect(client.request).toHaveBeenCalledWith('/settings/access-keys/k1', { method: 'DELETE' });
   });
 });
