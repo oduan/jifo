@@ -1,8 +1,6 @@
 package com.jifo.app.notes
 
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -43,6 +41,9 @@ class NotesFragment : Fragment() {
         val repository = ServiceLocator.notesRepository(requireContext())
         val tagRecycler = view.findViewById<RecyclerView>(R.id.tag_recycler)
         val textUserName = view.findViewById<TextView>(R.id.text_user_name)
+        val textNoteCount = view.findViewById<TextView>(R.id.text_note_count)
+        val textTagCount = view.findViewById<TextView>(R.id.text_tag_count)
+        val textRecordDays = view.findViewById<TextView>(R.id.text_record_days)
         val buttonAllNotes = view.findViewById<TextView>(R.id.button_all_notes)
         b.notesRecycler.layoutManager = LinearLayoutManager(requireContext())
         b.notesRecycler.adapter = adapter
@@ -54,23 +55,36 @@ class NotesFragment : Fragment() {
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
-            ServiceLocator.database(requireContext()).tagDao().observeTags().collect { tagAdapter.submitList(it) }
+            ServiceLocator.database(requireContext()).tagDao().observeTags().collect { tags ->
+                tagAdapter.submitList(tags.filter { it.noteCount > 0 })
+                textTagCount.text = tags.count { it.noteCount > 0 }.toString()
+            }
         }
-        fun setSearchVisible(visible: Boolean) {
-            b.inputSearch.visibility = if (visible) View.VISIBLE else View.GONE
-            (b.notesRecycler.layoutParams as ViewGroup.MarginLayoutParams).topMargin = dp(if (visible) 88 else 44)
-            b.notesRecycler.requestLayout()
-            if (visible) b.inputSearch.requestFocus() else b.inputSearch.text?.clear()
+        viewLifecycleOwner.lifecycleScope.launch {
+            repository.observeNotes(search = null, tagPath = null).collect { notes ->
+                textNoteCount.text = notes.size.toString()
+                textRecordDays.text = notes.map { it.createdAt.take(10) }.filter { it.isNotBlank() }.distinct().size.toString()
+                buttonAllNotes.text = "▦ 全部笔记  ${notes.size}"
+            }
         }
-        b.inputSearch.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = observeNotes()
-            override fun afterTextChanged(s: Editable?) = Unit
-        })
-        b.buttonSearch.setOnClickListener { setSearchVisible(b.inputSearch.visibility != View.VISIBLE) }
+        b.swipeRefresh.setColorSchemeResources(R.color.jifo_green_dark, R.color.jifo_amber)
+        b.swipeRefresh.setDistanceToTriggerSync(dp(96))
+        b.swipeRefresh.setSlingshotDistance(dp(140))
+        b.swipeRefresh.setProgressViewOffset(false, dp(46), dp(104))
+        b.swipeRefresh.setOnRefreshListener {
+            viewLifecycleOwner.lifecycleScope.launch {
+                runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
+                b.swipeRefresh.isRefreshing = false
+            }
+        }
+        b.buttonSearch.setOnClickListener {
+            parentFragmentManager.beginTransaction()
+                .replace(R.id.main_container, SearchFragment())
+                .addToBackStack("search")
+                .commit()
+        }
         buttonAllNotes.setOnClickListener {
             selectedTagPath = null
-            b.inputSearch.text?.clear()
             observeNotes()
             b.drawerLayout.closeDrawer(GravityCompat.START)
         }
@@ -96,7 +110,7 @@ class NotesFragment : Fragment() {
         notesJob?.cancel()
         notesJob = viewLifecycleOwner.lifecycleScope.launch {
             repository.observeNotes(
-                search = b.inputSearch.text?.toString(),
+                search = null,
                 tagPath = selectedTagPath
             ).collect { adapter.submitList(it) }
         }

@@ -1,17 +1,32 @@
 package com.jifo.app.notes
 
+import android.content.Context
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.jifo.app.R
 import com.jifo.app.databinding.BottomSheetNoteEditorBinding
 
 class NoteEditorBottomSheet(private val onSubmit: ((String) -> Unit)? = null) : BottomSheetDialogFragment() {
     private var binding: BottomSheetNoteEditorBinding? = null
+
+    override fun onStart() {
+        super.onStart()
+        dialog?.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        (dialog as? BottomSheetDialog)?.behavior?.apply {
+            skipCollapsed = true
+            state = BottomSheetBehavior.STATE_EXPANDED
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val next = BottomSheetNoteEditorBinding.inflate(inflater, container, false)
         binding = next
@@ -32,6 +47,11 @@ class NoteEditorBottomSheet(private val onSubmit: ((String) -> Unit)? = null) : 
         b.buttonSend.setOnClickListener {
             val text = b.editNote.text?.toString().orEmpty()
             if (NoteEditorState(text).canSend) { onSubmit?.invoke(text); dismiss() }
+        }
+        b.editNote.post {
+            b.editNote.requestFocus()
+            val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(b.editNote, InputMethodManager.SHOW_IMPLICIT)
         }
         render()
     }

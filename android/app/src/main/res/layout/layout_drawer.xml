@@ -1,8 +1,112 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="260dp" android:layout_height="match_parent" android:orientation="vertical" android:padding="10dp" android:background="@color/jifo_card_solid">
-    <TextView android:id="@+id/text_user_name" android:layout_width="match_parent" android:layout_height="36dp" android:gravity="center_vertical" android:text="Jifo 用户" android:textColor="@color/jifo_ink" android:textSize="15sp" android:textStyle="bold" />
-    <LinearLayout android:id="@+id/stats_row" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" />
-    <androidx.recyclerview.widget.RecyclerView android:id="@+id/heatmap_recycler" android:layout_width="match_parent" android:layout_height="48dp" />
-    <TextView android:id="@+id/button_all_notes" android:layout_width="match_parent" android:layout_height="32dp" android:gravity="center_vertical" android:text="▦ 全部笔记" android:textColor="@color/jifo_green_dark" />
-    <androidx.recyclerview.widget.RecyclerView android:id="@+id/tag_recycler" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    android:layout_width="260dp"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="10dp"
+    android:background="@color/jifo_card_solid">
+
+    <TextView
+        android:id="@+id/text_user_name"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:gravity="center_vertical"
+        android:text="Jifo 用户"
+        android:textColor="@color/jifo_ink"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:id="@+id/stats_row"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="6dp"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/text_note_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0"
+                android:textColor="@color/jifo_ink"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="笔记"
+                android:textColor="@color/jifo_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/text_tag_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0"
+                android:textColor="@color/jifo_ink"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="标签"
+                android:textColor="@color/jifo_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/text_record_days"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0"
+                android:textColor="@color/jifo_ink"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="记录天数"
+                android:textColor="@color/jifo_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/heatmap_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="48dp" />
+
+    <TextView
+        android:id="@+id/button_all_notes"
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:gravity="center_vertical"
+        android:text="▦ 全部笔记"
+        android:textColor="@color/jifo_green_dark" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/tag_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 </LinearLayout>

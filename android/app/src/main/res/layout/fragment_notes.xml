@@ -46,27 +46,20 @@
                 android:src="@drawable/ic_search_24" />
         </LinearLayout>
 
-        <EditText
-            android:id="@+id/input_search"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="44dp"
-            android:visibility="gone"
-            android:singleLine="true"
-            android:hint="搜索笔记"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:background="@color/jifo_bg"
-            android:inputType="text" />
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/notes_recycler"
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/swipe_refresh"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="44dp"
-            android:clipToPadding="false"
-            android:padding="10dp"
-            android:paddingBottom="88dp" />
+            android:layout_marginTop="44dp">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/notes_recycler"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:padding="10dp"
+                android:paddingBottom="88dp" />
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/button_add_note"
