@@ -45,13 +45,96 @@ describe('NoteCard', () => {
     await user.dblClick(screen.getByText('原内容'));
     expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    const trigger = screen.getByRole('button', { name: '更多操作' });
+    expect(trigger).toHaveClass('note-menu__trigger');
+
+    await user.click(trigger);
     expect(screen.getByRole('button', { name: '编辑' })).toHaveClass('dropdown-menu__item');
     expect(screen.getByRole('button', { name: '删除' })).toHaveClass('dropdown-menu__item');
 
     await user.click(screen.getByRole('button', { name: '删除' }));
 
     expect(onDelete).toHaveBeenCalledWith('n1');
+  });
+
+  test('点击外部区域后关闭三个点菜单', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <div>
+        <NoteCard
+          note={{
+            id: 'n1',
+            createdAt: '2026-05-27',
+            blocks: [{ type: 'paragraph', content: '原内容' }],
+            tagIds: []
+          }}
+          onDelete={vi.fn()}
+          onUpdate={vi.fn()}
+        />
+        <button type="button">外部按钮</button>
+      </div>
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '外部按钮' }));
+
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+  });
+
+  test('按 Escape 后关闭三个点菜单', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '原内容' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+  });
+
+  test('焦点移到外部元素后关闭三个点菜单', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <div>
+        <NoteCard
+          note={{
+            id: 'n1',
+            createdAt: '2026-05-27',
+            blocks: [{ type: 'paragraph', content: '原内容' }],
+            tagIds: []
+          }}
+          onDelete={vi.fn()}
+          onUpdate={vi.fn()}
+        />
+        <button type="button">外部按钮</button>
+      </div>
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument();
+
+    await user.tab();
+    await user.tab();
+    await user.tab();
+
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
   });
 
   test('正文标签渲染为可点击的小标签', async () => {

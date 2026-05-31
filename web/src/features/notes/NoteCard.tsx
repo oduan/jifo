@@ -1,4 +1,4 @@
-import { MouseEvent, ReactNode, useState } from 'react';
+import { FocusEvent, MouseEvent, ReactNode, useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
 import { NoteBlock, NoteEditor } from './NoteEditor';
@@ -86,22 +86,60 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect }: NoteCardProp
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const content = noteText(note.blocks);
   const lines = content.split('\n');
   const shouldCollapse = lines.length > 5;
   const visibleContent = !expanded && shouldCollapse ? lines.slice(0, 5).join('\n') : content;
 
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOnPointerDown);
+    document.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [menuOpen]);
+
+  const closeMenuOnBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setMenuOpen(false);
+    }
+  };
+
+  const startEditing = () => {
+    setMenuOpen(false);
+    setEditing(true);
+  };
+
   return (
     <article className="note-card">
       <header className="note-card__header">
         <time dateTime={note.createdAt}>{note.createdAt}</time>
-        <div className="note-menu">
-          <Button type="button" variant="ghost" aria-label="更多操作" onClick={() => setMenuOpen((open) => !open)}>
+        <div ref={menuRef} className="note-menu" onBlur={closeMenuOnBlur}>
+          <Button type="button" variant="ghost" className="note-menu__trigger" aria-label="更多操作" onClick={() => setMenuOpen((open) => !open)}>
             ⋯
           </Button>
           {menuOpen ? (
             <div className="note-menu__panel" role="menu">
-              <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => setEditing(true)}>
+              <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={startEditing}>
                 编辑
               </Button>
               <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => onDelete(note.id)}>
