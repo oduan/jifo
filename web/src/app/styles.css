@@ -748,7 +748,7 @@ h3 {
 
 .settings-trigger__chevron {
   color: var(--jifo-muted);
-  font-size: 15px;
+  font-size: 18px;
   line-height: 1;
   transform: translateY(1px);
 }
@@ -780,7 +780,6 @@ h3 {
   font-size: 12px;
 }
 
-.settings-popover:hover .settings-panel,
 .settings-popover[open] .settings-panel {
   display: grid;
 }
