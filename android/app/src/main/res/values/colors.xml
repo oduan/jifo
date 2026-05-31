@@ -1,0 +1,14 @@
+<resources>
+    <color name="jifo_bg">#F5F0E8</color>
+    <color name="jifo_bg_soft">#FBF7EF</color>
+    <color name="jifo_ink">#201B16</color>
+    <color name="jifo_muted">#817568</color>
+    <color name="jifo_line">#1A201B16</color>
+    <color name="jifo_card_solid">#FFFDF8</color>
+    <color name="jifo_green">#3D7C4A</color>
+    <color name="jifo_green_dark">#26382B</color>
+    <color name="jifo_amber">#E8B85B</color>
+    <color name="jifo_danger">#A94438</color>
+    <color name="jifo_tag_text">#7D5CA6</color>
+    <color name="jifo_tag_bg">#EFE7FB</color>
+</resources>

@@ -1,0 +1,5 @@
+<resources>
+    <dimen name="jifo_top_bar_height">44dp</dimen>
+    <dimen name="jifo_radius_lg">18dp</dimen>
+    <dimen name="jifo_fab_size">48dp</dimen>
+</resources>

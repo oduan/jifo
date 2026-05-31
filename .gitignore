@@ -8,3 +8,5 @@ web/dist/
 .DS_Store
 
 .worktrees/
+
+.gradle-local/

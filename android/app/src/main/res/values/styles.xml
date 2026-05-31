@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Jifo" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/jifo_bg</item>
+        <item name="android:navigationBarColor">@color/jifo_bg</item>
+        <item name="colorPrimary">@color/jifo_green_dark</item>
+        <item name="colorSecondary">@color/jifo_amber</item>
+    </style>
+</resources>
