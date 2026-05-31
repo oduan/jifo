@@ -152,6 +152,9 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 	defer database.Close()
+	if err := db.RunMigrations(ctx, database); err != nil {
+		log.Fatalf("run migrations: %v", err)
+	}
 
 	tagSvc := tags.NewService(database)
 	noteSvc := notes.NewService(database, tagSvc)

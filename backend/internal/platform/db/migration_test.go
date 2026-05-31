@@ -36,6 +36,37 @@ func TestInitMigrationEnforcesTenantConsistency(t *testing.T) {
 	}
 }
 
+func TestMigrationVersionUsesSQLFilename(t *testing.T) {
+	version, err := migrationVersion("002_access_keys.sql")
+	if err != nil {
+		t.Fatalf("migrationVersion returned error: %v", err)
+	}
+	if version != "002_access_keys" {
+		t.Fatalf("version = %q, want %q", version, "002_access_keys")
+	}
+}
+
+func TestLoadMigrationFilesSortsByVersion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "002_second.sql"), []byte("SELECT 2;"), 0o644); err != nil {
+		t.Fatalf("write migration: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "001_first.sql"), []byte("SELECT 1;"), 0o644); err != nil {
+		t.Fatalf("write migration: %v", err)
+	}
+
+	files, err := loadMigrationFiles(dir)
+	if err != nil {
+		t.Fatalf("loadMigrationFiles returned error: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("len(files) = %d, want 2", len(files))
+	}
+	if files[0].Version != "001_first" || files[1].Version != "002_second" {
+		t.Fatalf("files not sorted by version: %#v", files)
+	}
+}
+
 func TestInitMigrationExecutesAndCreatesConstraintsWhenDatabaseAvailable(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -49,7 +80,7 @@ func TestInitMigrationExecutesAndCreatesConstraintsWhenDatabaseAvailable(t *test
 	}
 	t.Cleanup(pool.Close)
 
-	dropSQL := "DROP TABLE IF EXISTS sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
+	dropSQL := "DROP TABLE IF EXISTS schema_migrations, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
 	if _, err := pool.Exec(ctx, dropSQL); err != nil {
 		t.Fatalf("drop existing tables: %v", err)
 	}
@@ -69,6 +100,62 @@ func TestInitMigrationExecutesAndCreatesConstraintsWhenDatabaseAvailable(t *test
 	assertConstraintContains(t, ctx, pool, "note_tags", "f", "FOREIGN KEY (tag_id, user_id) REFERENCES tags(id, user_id)")
 	assertConstraintContains(t, ctx, pool, "sync_operations", "u", "UNIQUE (user_id, op_id)")
 	assertIndexContains(t, ctx, pool, "sync_operations", "idx_sync_operations_user_created", "(user_id, created_at)")
+}
+
+func TestRunMigrationsExecutesAndSkipsWhenDatabaseAvailable(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	dropSQL := "DROP TABLE IF EXISTS schema_migrations, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
+	if _, err := pool.Exec(ctx, dropSQL); err != nil {
+		t.Fatalf("drop existing tables: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, dropSQL)
+	})
+
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("run migrations first time: %v", err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("run migrations second time: %v", err)
+	}
+
+	assertTableExists(t, ctx, pool, "users")
+	assertTableExists(t, ctx, pool, "access_keys")
+	assertMigrationRecorded(t, ctx, pool, "001_init")
+	assertMigrationRecorded(t, ctx, pool, "002_access_keys")
+}
+
+func assertTableExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool, table string) {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil {
+		t.Fatalf("query table %s: %v", table, err)
+	}
+	if !exists {
+		t.Fatalf("table %s does not exist", table)
+	}
+}
+
+func assertMigrationRecorded(t *testing.T, ctx context.Context, pool *pgxpool.Pool, version string) {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&exists); err != nil {
+		t.Fatalf("query schema_migrations for %s: %v", version, err)
+	}
+	if !exists {
+		t.Fatalf("migration %s not recorded", version)
+	}
 }
 
 func assertConstraintContains(t *testing.T, ctx context.Context, pool *pgxpool.Pool, table string, ctype string, required string) {

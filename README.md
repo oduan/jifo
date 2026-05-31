@@ -27,6 +27,10 @@ npm run dev
 
 默认后端监听 `:8080`；Web dev server 由 Vite 输出本地地址。
 
+后端启动时会自动执行 `backend/migrations/*.sql` 中尚未记录的数据库迁移，并写入 `schema_migrations`。全新数据库只需启动 backend，会按顺序执行 `001_init.sql`、`002_access_keys.sql` 等迁移。
+
+> 存量旧数据库注意：迁移执行器不做旧结构“认领”。如果旧环境已经人工执行过 `001_init.sql`，升级前需要手动创建 `schema_migrations` 并插入已执行版本；否则新版后端会尝试重新执行 `001_init.sql` 并因表已存在而失败。
+
 ## 测试
 
 后端：
