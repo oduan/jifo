@@ -56,13 +56,13 @@
             <LinearLayout
                 android:id="@+id/refresh_indicator"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="28dp"
                 android:layout_gravity="top|center_horizontal"
                 android:alpha="0"
-                android:background="@drawable/bg_refresh_pill"
+                android:background="@android:color/transparent"
                 android:gravity="center"
                 android:orientation="horizontal"
-                android:translationY="-44dp">
+                android:translationY="-28dp">
 
                 <ProgressBar
                     android:id="@+id/refresh_progress"

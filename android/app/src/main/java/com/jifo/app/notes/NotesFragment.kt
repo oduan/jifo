@@ -125,7 +125,7 @@ class NotesFragment : Fragment() {
             b.pullRefreshContainer.translationY = offset
             val progress = (offset / trigger).coerceIn(0f, 1f)
             b.refreshIndicator.alpha = (progress * 1.15f).coerceIn(0f, 1f)
-            b.refreshIndicator.translationY = -dp(42).toFloat() + offset * 0.72f
+            b.refreshIndicator.translationY = (offset * 0.5f - dp(14)).coerceAtLeast(dp(6).toFloat())
             b.refreshIndicator.scaleX = 0.88f + progress * 0.12f
             b.refreshIndicator.scaleY = 0.88f + progress * 0.12f
             b.refreshProgress.visibility = if (refreshing) View.VISIBLE else View.GONE
@@ -196,9 +196,7 @@ class NotesFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             val startedAt = SystemClock.elapsedRealtime()
             runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
-            val count = runCatching { ServiceLocator.database(requireContext()).noteDao().activeNotes().size }.getOrDefault(0)
             binding?.refreshProgress?.visibility = View.GONE
-            binding?.textRefreshStatus?.text = "共 ${count} 条笔记"
             val elapsed = SystemClock.elapsedRealtime() - startedAt
             if (elapsed < 1000L) delay(1000L - elapsed)
             refreshInFlight = false
