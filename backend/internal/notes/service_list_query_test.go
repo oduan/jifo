@@ -60,8 +60,8 @@ func TestBuildListQueryEscapesTagPathLikeWildcards(t *testing.T) {
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	sql, args := buildListQuery(ListFilter{UserID: userID, TagPath: `项目%_\A`})
 
-	if !strings.Contains(sql, `LIKE $3 ESCAPE '\\'`) {
-		t.Fatalf("sql should use ESCAPE for tag LIKE, got: %s", sql)
+	if !strings.Contains(sql, `LIKE $3 ESCAPE E'\\'`) {
+		t.Fatalf("sql should use an explicit single-character PostgreSQL ESCAPE for tag LIKE, got: %s", sql)
 	}
 	if len(args) != 3 {
 		t.Fatalf("args len = %d, want 3", len(args))

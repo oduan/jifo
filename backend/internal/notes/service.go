@@ -361,7 +361,7 @@ func buildListQuery(filter ListFilter) (string, []any) {
 			JOIN tags t ON t.user_id = nt.user_id AND t.id = nt.tag_id
 			WHERE nt.user_id = n.user_id
 			  AND nt.note_id = n.id
-			  AND (t.path = $%d OR t.path LIKE $%d ESCAPE '\\')
+			  AND (t.path = $%d OR t.path LIKE $%d ESCAPE E'\\')
 		)`, argIndex, argIndex+1))
 		escapedTagPath := escapeLikePattern(tagPath)
 		args = append(args, tagPath, escapedTagPath+"/%")
