@@ -208,9 +208,16 @@ Authorization: Bearer <accessKey>
       "updatedAt": "2026-05-27T...Z",
       "version": 1
     }
-  ]
+  ],
+  "page": {
+    "limit": 20,
+    "offset": 0,
+    "hasMore": false
+  }
 }
 ```
+
+`hasMore` 表示使用当前筛选条件继续请求 `offset + limit` 是否可能返回下一页。后端通过多取一条记录计算该字段，不执行额外总数统计。
 
 ### 更新笔记
 
