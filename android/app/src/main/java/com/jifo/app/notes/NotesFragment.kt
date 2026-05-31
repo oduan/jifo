@@ -3,6 +3,7 @@ package com.jifo.app.notes
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -22,6 +23,7 @@ import com.jifo.app.core.model.NoteBlock
 import com.jifo.app.databinding.FragmentNotesBinding
 import com.jifo.app.drawer.TagAdapter
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class NotesFragment : Fragment() {
@@ -192,7 +194,13 @@ class NotesFragment : Fragment() {
         refreshInFlight = true
         animateSettle?.invoke()
         viewLifecycleOwner.lifecycleScope.launch {
+            val startedAt = SystemClock.elapsedRealtime()
             runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
+            val count = runCatching { ServiceLocator.database(requireContext()).noteDao().activeNotes().size }.getOrDefault(0)
+            binding?.refreshProgress?.visibility = View.GONE
+            binding?.textRefreshStatus?.text = "共 ${count} 条笔记"
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            if (elapsed < 1000L) delay(1000L - elapsed)
             refreshInFlight = false
             if (settleOffset > 0f) animateDone?.invoke()
         }
