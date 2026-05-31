@@ -5,9 +5,10 @@ import { Button } from '../../shared/ui/Button';
 type SettingsPopoverProps = {
   userName: string;
   onLogout?: () => void;
+  onOpenSettings?: () => void;
 };
 
-export function SettingsPopover({ userName, onLogout }: SettingsPopoverProps) {
+export function SettingsPopover({ userName, onLogout, onOpenSettings }: SettingsPopoverProps) {
   const [isOpen, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDetailsElement>(null);
 
@@ -48,6 +49,11 @@ export function SettingsPopover({ userName, onLogout }: SettingsPopoverProps) {
     }
   };
 
+  const openSettings = () => {
+    setOpen(false);
+    onOpenSettings?.();
+  };
+
   return (
     <details ref={popoverRef} className="settings-popover" open={isOpen} onBlur={closeOnBlur}>
       <summary className="settings-trigger" role="button" aria-label={`${userName} 设置菜单`} aria-expanded={isOpen} title="设置" onClick={toggleMenu}>
@@ -57,6 +63,9 @@ export function SettingsPopover({ userName, onLogout }: SettingsPopoverProps) {
       {isOpen ? (
         <div className="settings-panel">
           <span className="settings-panel__user">{userName}</span>
+          <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={openSettings}>
+            设置
+          </Button>
           {onLogout ? (
             <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={onLogout}>
               退出登录

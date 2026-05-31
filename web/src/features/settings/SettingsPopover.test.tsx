@@ -8,8 +8,9 @@ describe('SettingsPopover', () => {
   test('点击用户名触发器会打开设置面板', async () => {
     const user = userEvent.setup();
 
-    render(<SettingsPopover userName="oisin" onLogout={vi.fn()} />);
+    render(<SettingsPopover userName="oisin" onLogout={vi.fn()} onOpenSettings={vi.fn()} />);
 
+    expect(screen.queryByRole('button', { name: '设置' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '退出登录' })).not.toBeInTheDocument();
 
     const trigger = screen.getByRole('button', { name: 'oisin 设置菜单' });
@@ -18,8 +19,22 @@ describe('SettingsPopover', () => {
 
     await user.click(trigger);
 
+    expect(screen.getByRole('button', { name: '设置' })).toHaveClass('dropdown-menu__item');
     expect(screen.getByRole('button', { name: '退出登录' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '退出登录' })).toHaveClass('dropdown-menu__item');
+  });
+
+  test('点击设置后关闭菜单并触发打开设置', async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+
+    render(<SettingsPopover userName="oisin" onOpenSettings={onOpenSettings} />);
+
+    await user.click(screen.getByRole('button', { name: 'oisin 设置菜单' }));
+    await user.click(screen.getByRole('button', { name: '设置' }));
+
+    expect(onOpenSettings).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '设置' })).not.toBeInTheDocument();
   });
 
   test('点击外部区域后关闭设置面板', async () => {
@@ -66,6 +81,7 @@ describe('SettingsPopover', () => {
     await user.click(screen.getByRole('button', { name: 'oisin 设置菜单' }));
     expect(screen.getByRole('button', { name: '退出登录' })).toBeInTheDocument();
 
+    await user.tab();
     await user.tab();
     await user.tab();
 

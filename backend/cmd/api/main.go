@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"jifo/backend/internal/accesskeys"
 	"jifo/backend/internal/auth"
 	"jifo/backend/internal/heatmap"
 	"jifo/backend/internal/media"
@@ -26,6 +27,12 @@ type AuthService interface {
 	Register(ctx context.Context, input auth.RegisterInput) (*auth.AuthResult, error)
 	Login(ctx context.Context, input auth.LoginInput) (*auth.AuthResult, error)
 	ValidateAccessToken(ctx context.Context, tokenString string) (*auth.AccessTokenClaims, error)
+}
+
+type AccessKeyService interface {
+	List(ctx context.Context, userID uuid.UUID) ([]accesskeys.AccessKey, error)
+	Create(ctx context.Context, userID uuid.UUID, label string) (accesskeys.CreateResult, error)
+	Validate(ctx context.Context, rawKey string) (accesskeys.Principal, error)
 }
 
 type NotesService interface {
@@ -55,12 +62,13 @@ type MediaService interface {
 }
 
 type Dependencies struct {
-	Auth    AuthService
-	Notes   NotesService
-	Tags    TagsService
-	Heatmap HeatmapService
-	Sync    SyncService
-	Media   MediaService
+	Auth       AuthService
+	AccessKeys AccessKeyService
+	Notes      NotesService
+	Tags       TagsService
+	Heatmap    HeatmapService
+	Sync       SyncService
+	Media      MediaService
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -81,17 +89,25 @@ func NewRouter(deps Dependencies) http.Handler {
 
 		api.Group(func(protected chi.Router) {
 			protected.Use(httpx.RequireAuth(func(ctx context.Context, tokenString string) (uuid.UUID, uuid.UUID, error) {
-				if deps.Auth == nil {
-					return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
-				}
-				claims, err := deps.Auth.ValidateAccessToken(ctx, tokenString)
-				if err != nil {
-					if errors.Is(err, auth.ErrInvalidAccessToken) {
-						return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
+				if deps.Auth != nil {
+					claims, err := deps.Auth.ValidateAccessToken(ctx, tokenString)
+					if err == nil {
+						return claims.UserID, claims.SessionID, nil
 					}
-					return uuid.Nil, uuid.Nil, err
+					if !errors.Is(err, auth.ErrInvalidAccessToken) {
+						return uuid.Nil, uuid.Nil, err
+					}
 				}
-				return claims.UserID, claims.SessionID, nil
+				if deps.AccessKeys != nil {
+					principal, err := deps.AccessKeys.Validate(ctx, tokenString)
+					if err == nil {
+						return principal.UserID, uuid.Nil, nil
+					}
+					if !errors.Is(err, accesskeys.ErrInvalidAccessKey) {
+						return uuid.Nil, uuid.Nil, err
+					}
+				}
+				return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
 			}))
 
 			notesHandler := notes.NewHandler(deps.Notes)
@@ -114,6 +130,10 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			syncHandler := sync.NewHandler(deps.Sync)
 			syncHandler.RegisterRoutes(protected)
+
+			accessKeyHandler := accesskeys.NewHandler(deps.AccessKeys)
+			protected.Get("/settings/access-keys", accessKeyHandler.List)
+			protected.Post("/settings/access-keys", accessKeyHandler.Create)
 		})
 	})
 
@@ -142,8 +162,9 @@ func main() {
 	mediaSvc := media.NewService(database, cfg.MediaRoot)
 	syncSvc := sync.NewService(database, noteSvc)
 	heatmapSvc := heatmap.NewService(database)
+	accessKeySvc := accesskeys.NewService(database)
 
-	router := NewRouter(Dependencies{Auth: authSvc, Notes: noteSvc, Tags: tagSvc, Heatmap: heatmapSvc, Sync: syncSvc, Media: mediaSvc})
+	router := NewRouter(Dependencies{Auth: authSvc, AccessKeys: accessKeySvc, Notes: noteSvc, Tags: tagSvc, Heatmap: heatmapSvc, Sync: syncSvc, Media: mediaSvc})
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"

@@ -8,6 +8,14 @@ Base URL：`http://localhost:8080/api`
 Authorization: Bearer <accessToken>
 ```
 
+也可以使用设置中生成的访问密钥作为 Bearer token：
+
+```http
+Authorization: Bearer <accessKey>
+```
+
+访问密钥用于 CLI 或其它程序访问当前用户资源。它与网页登录的 JWT 使用同一个 `Authorization: Bearer ...` 通道；后端会先尝试验证 JWT，失败后再尝试验证访问密钥。访问密钥验证成功后拥有当前用户的受保护 API 访问权限。
+
 错误响应统一为 JSON，`requestId` 位于 `error` 内：
 
 ```json
@@ -77,6 +85,62 @@ Authorization: Bearer <accessToken>
 常见错误：
 
 - `401 invalid_credentials`
+
+## Settings
+
+### 访问密钥列表
+
+`GET /settings/access-keys`
+
+响应 `200`：
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "label": "Mac CLI",
+      "maskedKey": "jifo_abcd••••••••••vwxyz",
+      "createdAt": "2026-05-31T00:00:00Z",
+      "lastUsedAt": "2026-05-31T01:00:00Z"
+    }
+  ]
+}
+```
+
+说明：列表永远只返回打码后的 `maskedKey`，不会返回完整密钥。
+
+### 创建访问密钥
+
+`POST /settings/access-keys`
+
+请求：
+
+```json
+{
+  "label": "Mac CLI"
+}
+```
+
+响应 `201`：
+
+```json
+{
+  "item": {
+    "id": "uuid",
+    "label": "Mac CLI",
+    "maskedKey": "jifo_abcd••••••••••vwxyz",
+    "createdAt": "2026-05-31T00:00:00Z"
+  },
+  "secret": "jifo_abcd..."
+}
+```
+
+说明：`secret` 只会在创建响应中返回一次。后端只保存密钥 hash，不保存原始密钥；关闭创建结果后无法再次查看完整密钥。
+
+常见错误：
+
+- `400 bad_request`：缺少备注或 JSON 无效
 
 ## Notes
 

@@ -6,6 +6,7 @@ import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
 import { createNote, deleteNote, fromApiNote, listNotes, updateNote } from '../features/notes/api';
+import { AccessKeySummary, createAccessKey, CreateAccessKeyResult, listAccessKeys } from '../features/settings/api';
 import { Note } from '../features/notes/NoteCard';
 import { NoteBlock } from '../features/notes/NoteEditor';
 import { NotesPage } from '../features/notes/NotesPage';
@@ -37,9 +38,13 @@ export function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [tags, setTags] = useState<TagNode[]>([]);
   const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
+  const [accessKeys, setAccessKeys] = useState<AccessKeySummary[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [isMutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [isLoadingAccessKeys, setLoadingAccessKeys] = useState(false);
+  const [isCreatingAccessKey, setCreatingAccessKey] = useState(false);
 
   const client = useMemo(
     () =>
@@ -81,13 +86,49 @@ export function App() {
       setNotes([]);
       setTags([]);
       setHeatmapCells([]);
+      setAccessKeys([]);
       setError(null);
+      setSettingsError(null);
     }
   }, [accessToken, loadWorkspace]);
 
   const submitLogin = useCallback(
     async (payload: LoginPayload): Promise<LoginResult> => {
       return submitAuth(client, payload);
+    },
+    [client]
+  );
+
+  const loadAccessKeys = useCallback(async () => {
+    if (!authStore.getAccessToken()) {
+      return;
+    }
+
+    setLoadingAccessKeys(true);
+    setSettingsError(null);
+    try {
+      setAccessKeys(await listAccessKeys(client));
+    } catch (loadError) {
+      setSettingsError(errorMessage(loadError));
+    } finally {
+      setLoadingAccessKeys(false);
+    }
+  }, [client]);
+
+  const createNewAccessKey = useCallback(
+    async (label: string): Promise<CreateAccessKeyResult> => {
+      setCreatingAccessKey(true);
+      setSettingsError(null);
+      try {
+        const result = await createAccessKey(client, label);
+        setAccessKeys((current) => [result.item, ...current]);
+        return result;
+      } catch (createError) {
+        setSettingsError(errorMessage(createError));
+        throw createError;
+      } finally {
+        setCreatingAccessKey(false);
+      }
     },
     [client]
   );
@@ -141,6 +182,12 @@ export function App() {
         await deleteNote(client, id);
       })}
       onLogout={() => authStore.clear()}
+      accessKeys={accessKeys}
+      isLoadingAccessKeys={isLoadingAccessKeys}
+      isCreatingAccessKey={isCreatingAccessKey}
+      settingsError={settingsError}
+      onLoadAccessKeys={loadAccessKeys}
+      onCreateAccessKey={createNewAccessKey}
     />
   );
 }

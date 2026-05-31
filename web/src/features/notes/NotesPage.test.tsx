@@ -264,6 +264,30 @@ describe('NotesPage', () => {
     }
   });
 
+  test('从用户名菜单打开设置弹窗并加载密钥', async () => {
+    const user = userEvent.setup();
+    const onLoadAccessKeys = vi.fn();
+
+    render(
+      <NotesPage
+        userName="oisin"
+        notes={[]}
+        tags={[]}
+        heatmapCells={[]}
+        accessKeys={[{ id: 'k1', label: 'CLI', maskedKey: 'jifo_abcd••••vwxyz', createdAt: '2026-05-31T00:00:00Z' }]}
+        onLoadAccessKeys={onLoadAccessKeys}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'oisin 设置菜单' }));
+    await user.click(screen.getByRole('button', { name: '设置' }));
+
+    expect(screen.getByRole('dialog', { name: '设置' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '密钥' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('jifo_abcd••••vwxyz')).toBeInTheDocument();
+    expect(onLoadAccessKeys).toHaveBeenCalled();
+  });
+
   test('顶部直接展示新笔记输入框并可提交', async () => {
     const user = userEvent.setup();
     const onCreateNote = vi.fn();

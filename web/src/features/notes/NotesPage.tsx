@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Heatmap, HeatmapCell } from '../heatmap/Heatmap';
+import { AccessKeySummary, CreateAccessKeyResult } from '../settings/api';
+import { SettingsModal } from '../settings/SettingsModal';
 import { SettingsPopover } from '../settings/SettingsPopover';
 import { TagNode, TagTree } from '../tags/TagTree';
 import { Button } from '../../shared/ui/Button';
@@ -22,6 +24,12 @@ type NotesPageProps = {
   onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
   onDeleteNote?: (id: string) => void | Promise<void>;
   onLogout?: () => void;
+  accessKeys?: AccessKeySummary[];
+  isLoadingAccessKeys?: boolean;
+  isCreatingAccessKey?: boolean;
+  settingsError?: string | null;
+  onLoadAccessKeys?: () => void | Promise<void>;
+  onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
 };
 
 const NOTES_BATCH_SIZE = 20;
@@ -61,11 +69,18 @@ export function NotesPage({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
-  onLogout
+  onLogout,
+  accessKeys = [],
+  isLoadingAccessKeys = false,
+  isCreatingAccessKey = false,
+  settingsError,
+  onLoadAccessKeys,
+  onCreateAccessKey
 }: NotesPageProps) {
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [visibleNoteCount, setVisibleNoteCount] = useState(NOTES_BATCH_SIZE);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
@@ -146,7 +161,7 @@ export function NotesPage({
     <main className="jifo-shell">
       <aside className="jifo-sidebar" aria-label="Jifo 侧边栏">
         <header className="sidebar-user">
-          <SettingsPopover userName={userName} onLogout={onLogout} />
+          <SettingsPopover userName={userName} onLogout={onLogout} onOpenSettings={() => setSettingsOpen(true)} />
         </header>
 
         <section className="stats-grid" aria-label="账户统计">
@@ -241,6 +256,17 @@ export function NotesPage({
           {filteredNotes.length === 0 ? <EmptyState title="还没有笔记" description="写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。" /> : null}
         </section>
       </section>
+
+      <SettingsModal
+        open={settingsOpen}
+        accessKeys={accessKeys}
+        isLoading={isLoadingAccessKeys}
+        isCreating={isCreatingAccessKey}
+        error={settingsError}
+        onClose={() => setSettingsOpen(false)}
+        onLoadAccessKeys={onLoadAccessKeys}
+        onCreateAccessKey={onCreateAccessKey}
+      />
     </main>
   );
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"jifo/backend/internal/accesskeys"
 	"jifo/backend/internal/auth"
 	"jifo/backend/internal/heatmap"
 	"jifo/backend/internal/media"
@@ -45,6 +46,26 @@ func (f *fakeAuthService) ValidateAccessToken(ctx context.Context, token string)
 		return nil, auth.ErrInvalidAccessToken
 	}
 	return &auth.AccessTokenClaims{UserID: f.userID, SessionID: uuid.MustParse("22222222-2222-2222-2222-222222222222")}, nil
+}
+
+type fakeAccessKeyService struct {
+	userID uuid.UUID
+}
+
+func (f *fakeAccessKeyService) List(ctx context.Context, userID uuid.UUID) ([]accesskeys.AccessKey, error) {
+	return []accesskeys.AccessKey{{ID: uuid.MustParse("66666666-6666-6666-6666-666666666666"), UserID: userID, Label: "CLI", MaskedKey: "jifo_abcd••••••••••vwxyz", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}}, nil
+}
+
+func (f *fakeAccessKeyService) Create(ctx context.Context, userID uuid.UUID, label string) (accesskeys.CreateResult, error) {
+	item := accesskeys.AccessKey{ID: uuid.MustParse("66666666-6666-6666-6666-666666666666"), UserID: userID, Label: label, MaskedKey: "jifo_abcd••••••••••vwxyz", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}
+	return accesskeys.CreateResult{AccessKey: item, Secret: "jifo_abcdefghijklmnopqrstuvwxyz"}, nil
+}
+
+func (f *fakeAccessKeyService) Validate(ctx context.Context, rawKey string) (accesskeys.Principal, error) {
+	if rawKey != "api-key-token" {
+		return accesskeys.Principal{}, accesskeys.ErrInvalidAccessKey
+	}
+	return accesskeys.Principal{UserID: f.userID, KeyID: uuid.MustParse("66666666-6666-6666-6666-666666666666")}, nil
 }
 
 type fakeNotesService struct{}
@@ -121,13 +142,15 @@ func (f *fakeMediaService) Upload(ctx context.Context, input media.UploadInput) 
 }
 
 func TestRouterSmoke(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	router := NewRouter(Dependencies{
-		Auth:    &fakeAuthService{userID: uuid.MustParse("11111111-1111-1111-1111-111111111111")},
-		Notes:   &fakeNotesService{},
-		Tags:    &fakeTagsService{},
-		Heatmap: &fakeHeatmapService{},
-		Sync:    &fakeSyncService{},
-		Media:   &fakeMediaService{},
+		Auth:       &fakeAuthService{userID: userID},
+		AccessKeys: &fakeAccessKeyService{userID: userID},
+		Notes:      &fakeNotesService{},
+		Tags:       &fakeTagsService{},
+		Heatmap:    &fakeHeatmapService{},
+		Sync:       &fakeSyncService{},
+		Media:      &fakeMediaService{},
 	})
 
 	registerBody := map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev"}
@@ -198,6 +221,26 @@ func TestRouterSmoke(t *testing.T) {
 	mediaGetResp := doJSON(t, router, http.MethodGet, "/api/media/55555555-5555-5555-5555-555555555555", nil, "access-token")
 	if mediaGetResp.Code != http.StatusOK {
 		t.Fatalf("media get status = %d, want %d", mediaGetResp.Code, http.StatusOK)
+	}
+
+	keyListResp := doJSON(t, router, http.MethodGet, "/api/settings/access-keys", nil, "access-token")
+	if keyListResp.Code != http.StatusOK {
+		t.Fatalf("access key list status = %d, want %d", keyListResp.Code, http.StatusOK)
+	}
+
+	keyCreateResp := doJSON(t, router, http.MethodPost, "/api/settings/access-keys", map[string]any{"label": "CLI"}, "access-token")
+	if keyCreateResp.Code != http.StatusCreated {
+		t.Fatalf("access key create status = %d, want %d", keyCreateResp.Code, http.StatusCreated)
+	}
+
+	keyAuthNotesResp := doJSON(t, router, http.MethodGet, "/api/notes", nil, "api-key-token")
+	if keyAuthNotesResp.Code != http.StatusOK {
+		t.Fatalf("access key auth notes status = %d, want %d", keyAuthNotesResp.Code, http.StatusOK)
+	}
+
+	keyAuthPushResp := doJSON(t, router, http.MethodPost, "/api/sync/push", pushBody, "api-key-token")
+	if keyAuthPushResp.Code != http.StatusOK {
+		t.Fatalf("access key auth sync push status = %d, want %d", keyAuthPushResp.Code, http.StatusOK)
 	}
 }
 

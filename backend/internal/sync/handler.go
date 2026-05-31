@@ -98,7 +98,11 @@ func (h *Handler) Push(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
 		return
 	}
-	sessionID, _ := httpx.SessionIDFromContext(r.Context())
+	sessionID, hasSessionID := httpx.SessionIDFromContext(r.Context())
+	var sessionIDPtr *uuid.UUID
+	if hasSessionID && sessionID != uuid.Nil {
+		sessionIDPtr = &sessionID
+	}
 
 	var req pushRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -117,7 +121,7 @@ func (h *Handler) Push(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		result, err := h.svc.Push(r.Context(), userID, &sessionID, op)
+		result, err := h.svc.Push(r.Context(), userID, sessionIDPtr, op)
 		if err != nil {
 			if errors.Is(err, notes.ErrNoteNotFound) {
 				httpx.WriteError(w, r, http.StatusNotFound, "note_not_found", "note not found")
