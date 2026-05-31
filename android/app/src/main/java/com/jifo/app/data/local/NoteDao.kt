@@ -1,0 +1,28 @@
+package com.jifo.app.data.local
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface NoteDao {
+    @Query("""
+        SELECT * FROM notes
+        WHERE deletedAt IS NULL
+          AND (:search IS NULL OR plainText LIKE '%' || :search || '%')
+          AND (:tagPath IS NULL OR plainText LIKE '%#' || :tagPath || '%')
+        ORDER BY createdAt DESC
+    """)
+    fun observeNotes(search: String?, tagPath: String?): Flow<List<NoteEntity>>
+
+    @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): NoteEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(note: NoteEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(notes: List<NoteEntity>)
+}
