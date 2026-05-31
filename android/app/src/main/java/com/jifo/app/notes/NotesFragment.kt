@@ -6,8 +6,10 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.exp
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.TextView
 import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
@@ -27,6 +29,7 @@ class NotesFragment : Fragment() {
     private var notesJob: Job? = null
     private var selectedTagPath: String? = null
     private var refreshInFlight = false
+    private var pullAnimator: ValueAnimator? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val next = FragmentNotesBinding.inflate(inflater, container, false)
@@ -102,23 +105,42 @@ class NotesFragment : Fragment() {
     @SuppressLint("ClickableViewAccessibility")
     private fun installElasticPullToRefresh() {
         val b = binding ?: return
-        val trigger = dp(92).toFloat()
-        val maxPull = dp(150).toFloat()
+        val trigger = dp(84).toFloat()
+        val maxPull = dp(138).toFloat()
+        val settle = dp(54).toFloat()
         var startY = 0f
         var dragging = false
+        var intercepted = false
 
         fun damp(distance: Float): Float {
             if (distance <= 0f) return 0f
-            val eased = distance * 0.42f
-            return eased.coerceAtMost(maxPull)
+            val normalized = distance / dp(220).toFloat()
+            val eased = maxPull * (1f - exp(-normalized * 1.55f))
+            return eased.coerceIn(0f, maxPull)
         }
 
-        fun animateBack(onEnd: (() -> Unit)? = null) {
+        fun renderPull(offset: Float, refreshing: Boolean = false) {
+            b.pullRefreshContainer.translationY = offset
+            val progress = (offset / trigger).coerceIn(0f, 1f)
+            b.refreshIndicator.alpha = (progress * 1.15f).coerceIn(0f, 1f)
+            b.refreshIndicator.translationY = -dp(42).toFloat() + offset * 0.72f
+            b.refreshIndicator.scaleX = 0.88f + progress * 0.12f
+            b.refreshIndicator.scaleY = 0.88f + progress * 0.12f
+            b.refreshProgress.visibility = if (refreshing) View.VISIBLE else View.GONE
+            b.textRefreshStatus.text = when {
+                refreshing -> "正在刷新"
+                offset >= trigger -> "松开刷新"
+                else -> "下拉刷新"
+            }
+        }
+
+        fun animateTo(target: Float, duration: Long, overshoot: Boolean = false, refreshing: Boolean = false, onEnd: (() -> Unit)? = null) {
+            pullAnimator?.cancel()
             val from = b.pullRefreshContainer.translationY
-            ValueAnimator.ofFloat(from, 0f).apply {
-                duration = 240L
-                interpolator = DecelerateInterpolator()
-                addUpdateListener { b.pullRefreshContainer.translationY = it.animatedValue as Float }
+            pullAnimator = ValueAnimator.ofFloat(from, target).apply {
+                this.duration = duration
+                interpolator = if (overshoot) OvershootInterpolator(0.55f) else DecelerateInterpolator(1.8f)
+                addUpdateListener { renderPull(it.animatedValue as Float, refreshing) }
                 doOnEndCompat { onEnd?.invoke() }
                 start()
             }
@@ -127,26 +149,36 @@ class NotesFragment : Fragment() {
         b.notesRecycler.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    pullAnimator?.cancel()
                     startY = event.rawY
                     dragging = false
+                    intercepted = false
                     false
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val distance = event.rawY - startY
                     val atTop = !b.notesRecycler.canScrollVertically(-1)
-                    if (atTop && distance > 0f && !refreshInFlight) {
+                    if (atTop && distance > dp(4) && !refreshInFlight) {
                         dragging = true
-                        b.pullRefreshContainer.translationY = damp(distance)
+                        intercepted = true
+                        renderPull(damp(distance), refreshing = false)
                         true
-                    } else false
+                    } else intercepted
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (dragging) {
                         val shouldRefresh = b.pullRefreshContainer.translationY >= trigger
-                        animateBack {
-                            if (shouldRefresh) refreshNow()
+                        if (shouldRefresh) {
+                            refreshNow(
+                                settleOffset = settle,
+                                animateSettle = { animateTo(settle, 180L, overshoot = true, refreshing = true) },
+                                animateDone = { animateTo(0f, 260L, refreshing = false) }
+                            )
+                        } else {
+                            animateTo(0f, 220L, refreshing = false)
                         }
                         dragging = false
+                        intercepted = false
                         true
                     } else false
                 }
@@ -155,12 +187,14 @@ class NotesFragment : Fragment() {
         }
     }
 
-    private fun refreshNow() {
+    private fun refreshNow(settleOffset: Float = 0f, animateSettle: (() -> Unit)? = null, animateDone: (() -> Unit)? = null) {
         if (refreshInFlight) return
         refreshInFlight = true
+        animateSettle?.invoke()
         viewLifecycleOwner.lifecycleScope.launch {
             runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
             refreshInFlight = false
+            if (settleOffset > 0f) animateDone?.invoke()
         }
     }
 

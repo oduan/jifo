@@ -47,18 +47,54 @@
         </LinearLayout>
 
         <FrameLayout
-            android:id="@+id/pull_refresh_container"
+            android:id="@+id/refresh_scene"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="44dp">
+            android:layout_marginTop="44dp"
+            android:clipToPadding="false">
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/notes_recycler"
+            <LinearLayout
+                android:id="@+id/refresh_indicator"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_gravity="top|center_horizontal"
+                android:alpha="0"
+                android:background="@drawable/bg_refresh_pill"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:translationY="-44dp">
+
+                <ProgressBar
+                    android:id="@+id/refresh_progress"
+                    style="?android:attr/progressBarStyleSmall"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:indeterminate="true"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/text_refresh_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:text="下拉刷新"
+                    android:textColor="@color/jifo_green_dark"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/pull_refresh_container"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clipToPadding="false"
-                android:padding="10dp"
-                android:paddingBottom="88dp" />
+                android:layout_height="match_parent">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/notes_recycler"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:padding="10dp"
+                    android:paddingBottom="88dp" />
+            </FrameLayout>
         </FrameLayout>
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
