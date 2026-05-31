@@ -44,11 +44,13 @@ function newId(prefix: string) {
   return `${prefix}-${randomId}`;
 }
 
-function displayDate(value: string | undefined) {
-  if (!value) {
-    return new Date().toISOString().slice(0, 10);
+function displayTimestamp(value: string | undefined) {
+  const timestamp = value ?? new Date().toISOString();
+  const match = timestamp.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})/);
+  if (match) {
+    return `${match[1]} ${match[2]}`;
   }
-  return value.slice(0, 10);
+  return timestamp.slice(0, 19).replace('T', ' ');
 }
 
 export function toApiBlocks(blocks: NoteBlock[]): ApiNoteBlock[] {
@@ -111,7 +113,7 @@ function tagIdsForNote(note: ApiNote, tags: TagNode[]) {
 export function fromApiNote(note: ApiNote, tags: TagNode[] = []): Note {
   return {
     id: note.id,
-    createdAt: displayDate(note.createdAt),
+    createdAt: displayTimestamp(note.createdAt),
     updatedAt: note.updatedAt,
     version: note.version,
     blocks: fromApiBlocks(note.content?.blocks, note.plainText),

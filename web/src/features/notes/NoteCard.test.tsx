@@ -5,6 +5,23 @@ import userEvent from '@testing-library/user-event';
 import { NoteCard } from './NoteCard';
 
 describe('NoteCard', () => {
+  test('显示精确到秒的创建时间', () => {
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-30 01:02:03',
+          blocks: [{ type: 'paragraph', content: '时间测试' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('2026-05-30 01:02:03')).toBeInTheDocument();
+  });
+
   test('默认折叠并可展开/收起', async () => {
     const user = userEvent.setup();
 

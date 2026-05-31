@@ -32,7 +32,7 @@ describe('notes API DTO conversion', () => {
 
     expect(note).toMatchObject({
       id: 'note-1',
-      createdAt: '2026-05-30',
+      createdAt: '2026-05-30 01:02:03',
       version: 2,
       blocks: [{ type: 'paragraph', content: '#工作/前端 hello' }],
       tagIds: ['tag-frontend']
