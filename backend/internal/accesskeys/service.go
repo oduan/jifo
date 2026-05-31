@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	ErrInvalidAccessKey = errors.New("invalid access key")
-	ErrInvalidLabel     = errors.New("invalid access key label")
+	ErrInvalidAccessKey  = errors.New("invalid access key")
+	ErrInvalidLabel      = errors.New("invalid access key label")
+	ErrAccessKeyNotFound = errors.New("access key not found")
 )
 
 type Service struct {
@@ -117,6 +118,26 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, label string) (C
 		}
 	}
 	return CreateResult{}, errors.New("generate unique access key failed")
+}
+
+func (s *Service) Revoke(ctx context.Context, userID uuid.UUID, keyID uuid.UUID) error {
+	if userID == uuid.Nil || keyID == uuid.Nil {
+		return ErrAccessKeyNotFound
+	}
+	tag, err := s.db.Exec(ctx, `
+		UPDATE access_keys
+		SET revoked_at = now()
+		WHERE user_id = $1
+		  AND id = $2
+		  AND revoked_at IS NULL
+	`, userID, keyID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAccessKeyNotFound
+	}
+	return nil
 }
 
 func (s *Service) Validate(ctx context.Context, rawKey string) (Principal, error) {
