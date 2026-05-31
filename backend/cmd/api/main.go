@@ -26,6 +26,7 @@ import (
 type AuthService interface {
 	Register(ctx context.Context, input auth.RegisterInput) (*auth.AuthResult, error)
 	Login(ctx context.Context, input auth.LoginInput) (*auth.AuthResult, error)
+	Refresh(ctx context.Context, refreshToken string) (*auth.AuthResult, error)
 	ValidateAccessToken(ctx context.Context, tokenString string) (*auth.AccessTokenClaims, error)
 }
 
@@ -87,6 +88,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		authHandler := auth.NewHandler(deps.Auth)
 		api.Post("/auth/register", authHandler.Register)
 		api.Post("/auth/login", authHandler.Login)
+		api.Post("/auth/refresh", authHandler.Refresh)
 
 		api.Group(func(protected chi.Router) {
 			protected.Use(httpx.RequireAuth(func(ctx context.Context, tokenString string) (uuid.UUID, uuid.UUID, error) {

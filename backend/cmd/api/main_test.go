@@ -41,6 +41,17 @@ func (f *fakeAuthService) Login(ctx context.Context, input auth.LoginInput) (*au
 	}, nil
 }
 
+func (f *fakeAuthService) Refresh(ctx context.Context, refreshToken string) (*auth.AuthResult, error) {
+	if refreshToken != "refresh-token-2" {
+		return nil, auth.ErrInvalidRefreshToken
+	}
+	return &auth.AuthResult{
+		AccessToken:  "access-token-refreshed",
+		RefreshToken: "refresh-token-3",
+		User:         auth.User{ID: f.userID, Email: "a@example.com", Username: "u"},
+	}, nil
+}
+
 func (f *fakeAuthService) ValidateAccessToken(ctx context.Context, token string) (*auth.AccessTokenClaims, error) {
 	if token != "access-token" {
 		return nil, auth.ErrInvalidAccessToken
@@ -167,6 +178,18 @@ func TestRouterSmoke(t *testing.T) {
 	loginResp := doJSON(t, router, http.MethodPost, "/api/auth/login", loginBody, "")
 	if loginResp.Code != http.StatusOK {
 		t.Fatalf("login status = %d, want %d", loginResp.Code, http.StatusOK)
+	}
+
+	refreshResp := doJSON(t, router, http.MethodPost, "/api/auth/refresh", map[string]any{"refreshToken": "refresh-token-2"}, "")
+	if refreshResp.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d body=%s, want %d", refreshResp.Code, refreshResp.Body.String(), http.StatusOK)
+	}
+	var refreshBody map[string]any
+	if err := json.Unmarshal(refreshResp.Body.Bytes(), &refreshBody); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+	if refreshBody["accessToken"] != "access-token-refreshed" || refreshBody["refreshToken"] != "refresh-token-3" {
+		t.Fatalf("refresh response = %+v, want rotated tokens", refreshBody)
 	}
 
 	createBody := map[string]any{"clientId": "n1", "plainText": "#项目 hello", "content": map[string]any{"blocks": []map[string]any{{"type": "paragraph", "text": "#项目 hello"}}}}

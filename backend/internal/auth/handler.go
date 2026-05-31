@@ -13,6 +13,7 @@ import (
 type HandlerService interface {
 	Register(ctx context.Context, input RegisterInput) (*AuthResult, error)
 	Login(ctx context.Context, input LoginInput) (*AuthResult, error)
+	Refresh(ctx context.Context, refreshToken string) (*AuthResult, error)
 }
 
 type Handler struct {
@@ -28,6 +29,10 @@ type authRequest struct {
 	Password   string `json:"password"`
 	Username   string `json:"username"`
 	DeviceCode string `json:"deviceCode"`
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
 }
 
 type authResponse struct {
@@ -80,6 +85,34 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 		default:
 			httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "login failed")
+		}
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toAuthResponse(result))
+}
+
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "auth service not configured")
+		return
+	}
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid json body")
+		return
+	}
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+	if req.RefreshToken == "" {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "refreshToken is required")
+		return
+	}
+	result, err := h.svc.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidRefreshToken):
+			httpx.WriteError(w, r, http.StatusUnauthorized, "invalid_refresh_token", "invalid refresh token")
+		default:
+			httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "refresh failed")
 		}
 		return
 	}

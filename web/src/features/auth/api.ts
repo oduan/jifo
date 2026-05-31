@@ -40,3 +40,11 @@ export async function submitAuth(client: ApiClient, payload: LoginPayload): Prom
     })
   });
 }
+
+export async function refreshAuth(client: ApiClient, refreshToken: string): Promise<LoginResult> {
+  return client.request<LoginResult>('/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken })
+  });
+}

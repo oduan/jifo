@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { LoginPage, LoginPayload, LoginResult } from '../features/auth/LoginPage';
-import { submitAuth } from '../features/auth/api';
+import { refreshAuth, submitAuth } from '../features/auth/api';
 import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
@@ -54,14 +54,38 @@ export function App() {
   const [hasMoreNotes, setHasMoreNotes] = useState(false);
   const [isLoadingMoreNotes, setLoadingMoreNotes] = useState(false);
 
-  const client = useMemo(
-    () =>
-      createApiClient({
-        baseUrl: apiBaseUrl(),
-        getAccessToken: authStore.getAccessToken
-      }),
-    []
-  );
+  const client = useMemo(() => {
+    const baseUrl = apiBaseUrl();
+    const refreshClient = createApiClient({
+      baseUrl,
+      getAccessToken: () => null
+    });
+
+    return createApiClient({
+      baseUrl,
+      getAccessToken: authStore.getAccessToken,
+      refreshAccessToken: async () => {
+        const current = authStore.getState();
+        if (!current.refreshToken) {
+          authStore.clear();
+          return null;
+        }
+
+        try {
+          const refreshed = await refreshAuth(refreshClient, current.refreshToken);
+          authStore.setSession({
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken ?? null,
+            user: refreshed.user ?? current.user ?? null
+          });
+          return refreshed.accessToken;
+        } catch {
+          authStore.clear();
+          return null;
+        }
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedNoteQuery(noteQuery), 300);

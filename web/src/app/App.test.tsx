@@ -61,9 +61,9 @@ function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: stri
   });
 }
 
-function authenticateAndRender() {
+function authenticateAndRender(session = { accessToken: 'demo-token', refreshToken: null as string | null, user: { id: 'u1', email: 'oisin@example.com', username: 'oisin' } }) {
   const view = render(<App />);
-  authStore.setSession({ accessToken: 'demo-token', user: { id: 'u1', email: 'oisin@example.com', username: 'oisin' } });
+  authStore.setSession(session);
   view.rerender(<App />);
   return view;
 }
@@ -82,6 +82,62 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '#工作' })).toBeInTheDocument());
     expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument();
     expect(requestedUrls).toContain('/api/notes?limit=20&offset=0');
+  });
+
+  test('access token 过期时自动刷新并继续加载工作区', async () => {
+    const requestedUrls: string[] = [];
+    const authHeaders: Record<string, string[]> = {};
+    let tagTreeCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const path = url.replace(/^https?:\/\/[^/]+/, '');
+      requestedUrls.push(path);
+      const headers = new Headers(init?.headers ?? undefined);
+      authHeaders[path] = [...(authHeaders[path] ?? []), headers.get('Authorization') ?? ''];
+
+      if (path.endsWith('/tags/tree')) {
+        tagTreeCalls += 1;
+        if (tagTreeCalls === 1) {
+          return new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'expired' } }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify({ items: [{ id: 'tag-work', name: '工作', path: '工作', noteCount: 1 }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.endsWith('/auth/refresh')) {
+        return new Response(JSON.stringify({ accessToken: 'fresh-token', refreshToken: 'refresh-token-2', user: { id: 'u1', email: 'oisin@example.com', username: 'oisin' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.includes('/notes')) {
+        return new Response(JSON.stringify({ items: [note('note-1', '#工作 刷新后笔记')], page: { limit: 20, offset: 0, hasMore: false } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.includes('/heatmap')) {
+        return new Response(JSON.stringify({ days: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    authenticateAndRender({ accessToken: 'expired-token', refreshToken: 'refresh-token-1', user: { id: 'u1', email: 'oisin@example.com', username: 'oisin' } });
+
+    await waitFor(() => expect(screen.getByText(/刷新后笔记/)).toBeInTheDocument());
+    expect(requestedUrls).toContain('/api/auth/refresh');
+    expect(authStore.getState().accessToken).toBe('fresh-token');
+    expect(authStore.getState().refreshToken).toBe('refresh-token-2');
+    expect(authHeaders['/api/tags/tree'][0]).toBe('Bearer expired-token');
+    expect(authHeaders['/api/tags/tree']).toContain('Bearer fresh-token');
   });
 
   test('搜索笔记时请求后端 search 参数', async () => {

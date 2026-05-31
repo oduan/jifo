@@ -86,6 +86,25 @@ Authorization: Bearer <accessKey>
 
 - `401 invalid_credentials`
 
+### 刷新登录令牌
+
+`POST /auth/refresh`
+
+请求：
+
+```json
+{
+  "refreshToken": "..."
+}
+```
+
+响应 `200` 同登录，会返回新的 `accessToken` 和轮换后的 `refreshToken`。旧 refresh token 会立即失效。
+
+常见错误：
+
+- `400 bad_request`：JSON 无效或缺少 `refreshToken`
+- `401 invalid_refresh_token`：refresh token 无效、已轮换或 session 已撤销
+
 ## Settings
 
 ### 访问密钥列表
