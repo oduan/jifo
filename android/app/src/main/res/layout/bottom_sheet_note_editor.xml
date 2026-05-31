@@ -1,0 +1,4 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="8dp" android:background="@drawable/bg_bottom_sheet">
+    <EditText android:id="@+id/edit_note" android:layout_width="match_parent" android:layout_height="132dp" android:background="@android:color/transparent" android:gravity="top|start" android:hint="@string/note_placeholder" android:inputType="textMultiLine|textCapSentences" android:padding="8dp" android:textColor="@color/jifo_ink" android:textColorHint="@color/jifo_muted" />
+    <ImageButton android:id="@+id/button_send" android:layout_width="34dp" android:layout_height="34dp" android:layout_gravity="end" android:background="@drawable/bg_send_button_disabled" android:contentDescription="发送笔记" android:enabled="false" android:src="@drawable/ic_send_24" />
+</LinearLayout>
