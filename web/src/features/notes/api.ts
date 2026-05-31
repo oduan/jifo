@@ -18,8 +18,21 @@ export type ApiNote = {
   version?: number;
 };
 
-type ApiListResponse = {
+export type ListNotesOptions = {
+  trash?: boolean;
+  search?: string;
+  tagPath?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type ListNotesResult = {
   items: ApiNote[];
+  page: {
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
 };
 
 type ApiItemResponse = {
@@ -114,13 +127,28 @@ function notePayload(blocks: NoteBlock[], clientId?: string) {
   };
 }
 
-export async function listNotes(client: ApiClient, options: { trash?: boolean } = {}) {
+export async function listNotes(client: ApiClient, options: ListNotesOptions = {}): Promise<ListNotesResult> {
   const params = new URLSearchParams();
   if (options.trash) {
     params.set('trash', 'true');
   }
-  const response = await client.request<ApiListResponse>(`/notes${params.size ? `?${params.toString()}` : ''}`);
-  return response.items;
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim());
+  }
+  if (options.tagPath?.trim()) {
+    params.set('tagPath', options.tagPath.trim());
+  }
+  if (typeof options.limit === 'number') {
+    params.set('limit', String(options.limit));
+  }
+  if (typeof options.offset === 'number') {
+    params.set('offset', String(options.offset));
+  }
+  const response = await client.request<ListNotesResult>(`/notes${params.size ? `?${params.toString()}` : ''}`);
+  return {
+    items: response.items,
+    page: response.page ?? { limit: options.limit ?? 0, offset: options.offset ?? 0, hasMore: false }
+  };
 }
 
 export async function createNote(client: ApiClient, blocks: NoteBlock[]) {

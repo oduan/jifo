@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { fromApiNote, plainTextFromBlocks, toApiBlocks } from './api';
+import { fromApiNote, listNotes, plainTextFromBlocks, toApiBlocks } from './api';
 
 describe('notes API DTO conversion', () => {
   test('converts UI paragraph blocks to backend text blocks and plain text', () => {
@@ -37,5 +37,20 @@ describe('notes API DTO conversion', () => {
       blocks: [{ type: 'paragraph', content: '#工作/前端 hello' }],
       tagIds: ['tag-frontend']
     });
+  });
+
+  test('listNotes sends server-side filters and pagination params', async () => {
+    const calls: string[] = [];
+    const client = {
+      request: async <T>(path: string): Promise<T> => {
+        calls.push(path);
+        return { items: [], page: { limit: 20, offset: 40, hasMore: true } } as T;
+      }
+    };
+
+    const result = await listNotes(client, { search: '会议', tagPath: '工作/会议', limit: 20, offset: 40 });
+
+    expect(calls).toEqual(['/notes?search=%E4%BC%9A%E8%AE%AE&tagPath=%E5%B7%A5%E4%BD%9C%2F%E4%BC%9A%E8%AE%AE&limit=20&offset=40']);
+    expect(result.page.hasMore).toBe(true);
   });
 });
