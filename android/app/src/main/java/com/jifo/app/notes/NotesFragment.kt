@@ -6,8 +6,12 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.jifo.app.ServiceLocator
+import com.jifo.app.core.model.NoteBlock
 import com.jifo.app.databinding.FragmentNotesBinding
+import kotlinx.coroutines.launch
 
 class NotesFragment : Fragment() {
     private var binding: FragmentNotesBinding? = null
@@ -20,10 +24,21 @@ class NotesFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
+        val adapter = NoteAdapter()
+        val repository = ServiceLocator.notesRepository(requireContext())
         b.notesRecycler.layoutManager = LinearLayoutManager(requireContext())
-        b.notesRecycler.adapter = NoteAdapter()
+        b.notesRecycler.adapter = adapter
+        viewLifecycleOwner.lifecycleScope.launch {
+            repository.observeNotes(search = null, tagPath = null).collect { adapter.submitList(it) }
+        }
         b.buttonMenu.setOnClickListener { b.drawerLayout.openDrawer(GravityCompat.START) }
-        b.buttonAddNote.setOnClickListener { NoteEditorBottomSheet().show(parentFragmentManager, "note-editor") }
+        b.buttonAddNote.setOnClickListener {
+            NoteEditorBottomSheet { text ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    repository.createNote(listOf(NoteBlock.Paragraph(text.trim())))
+                }
+            }.show(parentFragmentManager, "note-editor")
+        }
     }
 
     override fun onDestroyView() {
