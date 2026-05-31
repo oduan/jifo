@@ -15,7 +15,16 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://10.0.2.2:8080/api\"")
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://10.1.13.2:8080/api/\"")
+        }
+        release {
+            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://jifo.connor.run/api/\"")
+            isMinifyEnabled = false
+        }
     }
 
     compileOptions {

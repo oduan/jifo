@@ -30,4 +30,4 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 ./gradlew assembleDebug
 ```
 
-The emulator default API URL is `http://10.0.2.2:8080/api`.
+Debug builds use `http://10.1.13.2:8080/api/` and allow HTTP cleartext traffic. Release builds use `https://jifo.connor.run/api/` and do not enable debug cleartext configuration.
