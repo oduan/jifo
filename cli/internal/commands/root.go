@@ -77,10 +77,3 @@ func NewRootCommand(opts Options) *cobra.Command {
 func missingTokenError() error {
 	return fmt.Errorf("missing access token: run `jifo login --token <access-key>` or set JIFO_ACCESS_TOKEN")
 }
-
-func newTagsCommand(opts Options) *cobra.Command {
-	cmd := &cobra.Command{Use: "tags", Short: "Work with tags"}
-	cmd.AddCommand(&cobra.Command{Use: "list", Short: "List tags"})
-	cmd.AddCommand(&cobra.Command{Use: "tree", Short: "Show tag tree"})
-	return cmd
-}
