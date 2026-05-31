@@ -14,16 +14,17 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class TagAdapterTest {
-    @Test fun hidesCountsAndShowsOnlyRootUntilExpanded() {
+    @Test fun hidesCountsAndShowsChildDirectlyBelowExpandedParent() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val parent = FrameLayout(context)
         val adapter = TagAdapter {}
         adapter.submitList(listOf(
             TagEntity(id = "work", name = "work", path = "work", parentId = null, depth = 0, noteCount = 2),
+            TagEntity(id = "z-other", name = "z-other", path = "z-other", parentId = null, depth = 0, noteCount = 1),
             TagEntity(id = "work/project", name = "project", path = "work/project", parentId = "work", depth = 1, noteCount = 1)
         ))
 
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
         val rootHolder = adapter.onCreateViewHolder(parent, 0)
         adapter.onBindViewHolder(rootHolder, 0)
         assertEquals("work", rootHolder.itemView.findViewById<android.widget.TextView>(com.jifo.app.R.id.text_tag_name).text.toString())
@@ -31,9 +32,12 @@ class TagAdapterTest {
         assertEquals(View.VISIBLE, rootHolder.itemView.findViewById<View>(com.jifo.app.R.id.button_expand_tag).visibility)
 
         rootHolder.itemView.findViewById<View>(com.jifo.app.R.id.button_expand_tag).performClick()
-        assertEquals(2, adapter.itemCount)
+        assertEquals(3, adapter.itemCount)
         val childHolder = adapter.onCreateViewHolder(parent, 0)
         adapter.onBindViewHolder(childHolder, 1)
         assertEquals("project", childHolder.itemView.findViewById<android.widget.TextView>(com.jifo.app.R.id.text_tag_name).text.toString())
+        val otherRootHolder = adapter.onCreateViewHolder(parent, 0)
+        adapter.onBindViewHolder(otherRootHolder, 2)
+        assertEquals("z-other", otherRootHolder.itemView.findViewById<android.widget.TextView>(com.jifo.app.R.id.text_tag_name).text.toString())
     }
 }

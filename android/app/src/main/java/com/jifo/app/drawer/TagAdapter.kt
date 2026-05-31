@@ -39,21 +39,21 @@ class TagAdapter(private val onClick: (TagEntity) -> Unit) : RecyclerView.Adapte
 
     private fun rebuildVisibleItems() {
         visibleItems.clear()
-        allItems.forEach { item ->
-            if (item.depth == 0 || ancestorsExpanded(item)) {
+        val childrenByParent = allItems
+            .groupBy { it.parentId }
+            .mapValues { (_, children) -> children.sortedBy { it.path } }
+
+        fun appendBranch(parentId: String?) {
+            childrenByParent[parentId].orEmpty().forEach { item ->
                 visibleItems.add(item)
+                if (expandedPaths.contains(item.path)) {
+                    appendBranch(item.path)
+                }
             }
         }
-        notifyDataSetChanged()
-    }
 
-    private fun ancestorsExpanded(item: TagEntity): Boolean {
-        var parent = item.parentId
-        while (parent != null) {
-            if (!expandedPaths.contains(parent)) return false
-            parent = allItems.firstOrNull { it.path == parent }?.parentId
-        }
-        return true
+        appendBranch(parentId = null)
+        notifyDataSetChanged()
     }
 
     inner class ViewHolder(private val binding: ItemDrawerTagBinding) : RecyclerView.ViewHolder(binding.root) {
