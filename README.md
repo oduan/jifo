@@ -27,6 +27,39 @@ npm run dev
 
 默认后端监听 `:8080`；Web dev server 由 Vite 输出本地地址。
 
+## CLI
+
+Jifo 也包含一个独立 Go CLI，位于 `cli/`。
+
+```bash
+cd cli
+go test ./...
+go run ./cmd/jifo --help
+```
+
+使用 Web 设置中创建的访问密钥配置 CLI：
+
+```bash
+go run ./cmd/jifo login --token <access-key> --base-url http://localhost:8080/api
+go run ./cmd/jifo status
+```
+
+环境变量可以覆盖已保存配置，适合脚本和 AI agent：
+
+```bash
+JIFO_ACCESS_TOKEN=<access-key> JIFO_BASE_URL=http://localhost:8080/api go run ./cmd/jifo notes list --json
+```
+
+常用命令：
+
+```bash
+go run ./cmd/jifo notes list --search "关键词" --limit 20 --offset 0 --json
+go run ./cmd/jifo notes list --tag "思考" --json
+go run ./cmd/jifo notes create --text "今天的想法 #思考" --json
+go run ./cmd/jifo tags list --json
+go run ./cmd/jifo tags tree --json
+```
+
 后端启动时会自动执行 `backend/migrations/*.sql` 中尚未记录的数据库迁移，并写入 `schema_migrations`。全新数据库只需启动 backend，会按顺序执行 `001_init.sql`、`002_access_keys.sql` 等迁移。
 
 > 存量旧数据库注意：迁移执行器不做旧结构“认领”。如果旧环境已经人工执行过 `001_init.sql`，升级前需要手动创建 `schema_migrations` 并插入已执行版本；否则新版后端会尝试重新执行 `001_init.sql` 并因表已存在而失败。

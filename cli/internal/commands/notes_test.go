@@ -25,8 +25,12 @@ func (f *fakeNotesAPI) CreateTextNote(ctx context.Context, text string) (api.Not
 	created := time.Date(2026, 5, 31, 9, 10, 0, 0, time.UTC)
 	return api.NoteResponse{Item: api.Note{ID: "created-note", PlainText: text, CreatedAt: created, UpdatedAt: created, Version: 1}}, nil
 }
-func (f *fakeNotesAPI) ListTags(ctx context.Context) (api.TagsResponse, error) { return api.TagsResponse{}, nil }
-func (f *fakeNotesAPI) TagTree(ctx context.Context) (api.TagTreeResponse, error) { return api.TagTreeResponse{}, nil }
+func (f *fakeNotesAPI) ListTags(ctx context.Context) (api.TagsResponse, error) {
+	return api.TagsResponse{}, nil
+}
+func (f *fakeNotesAPI) TagTree(ctx context.Context) (api.TagTreeResponse, error) {
+	return api.TagTreeResponse{}, nil
+}
 
 func TestNotesListPassesFiltersAndWritesJSON(t *testing.T) {
 	fake := &fakeNotesAPI{}
@@ -64,8 +68,10 @@ func TestNotesCreateRequiresExactlyOneInput(t *testing.T) {
 func TestNotesCreateText(t *testing.T) {
 	fake := &fakeNotesAPI{}
 	out, err := executeForTest(t, Options{
-		LoadConfig: func() (config.Config, error) { return config.Config{BaseURL: "http://x/api", AccessToken: "token"}, nil },
-		NewAPI:     func(cfg config.Config) API { return fake },
+		LoadConfig: func() (config.Config, error) {
+			return config.Config{BaseURL: "http://x/api", AccessToken: "token"}, nil
+		},
+		NewAPI: func(cfg config.Config) API { return fake },
 	}, "notes", "create", "--text", "new note #tag", "--json")
 	if err != nil {
 		t.Fatalf("notes create error = %v output=%s", err, out)
