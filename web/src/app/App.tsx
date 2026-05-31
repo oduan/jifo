@@ -6,7 +6,7 @@ import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
 import { createNote, deleteNote, fromApiNote, listNotes, updateNote } from '../features/notes/api';
-import { AccessKeySummary, createAccessKey, CreateAccessKeyResult, listAccessKeys } from '../features/settings/api';
+import { AccessKeySummary, createAccessKey, CreateAccessKeyResult, deleteAccessKey as deleteAccessKeyAPI, listAccessKeys } from '../features/settings/api';
 import { Note } from '../features/notes/NoteCard';
 import { NoteBlock } from '../features/notes/NoteEditor';
 import { NotesPage } from '../features/notes/NotesPage';
@@ -163,6 +163,20 @@ export function App() {
     [client]
   );
 
+  const deleteExistingAccessKey = useCallback(
+    async (id: string): Promise<void> => {
+      setSettingsError(null);
+      try {
+        await deleteAccessKeyAPI(client, id);
+        setAccessKeys((current) => current.filter((item) => item.id !== id));
+      } catch (deleteError) {
+        setSettingsError(errorMessage(deleteError));
+        throw deleteError;
+      }
+    },
+    [client]
+  );
+
   const withMutation = useCallback(
     async (operation: () => Promise<void>) => {
       setMutating(true);
@@ -252,6 +266,7 @@ export function App() {
       settingsError={settingsError}
       onLoadAccessKeys={loadAccessKeys}
       onCreateAccessKey={createNewAccessKey}
+      onDeleteAccessKey={deleteExistingAccessKey}
     />
   );
 }

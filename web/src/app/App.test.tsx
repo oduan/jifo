@@ -23,11 +23,21 @@ function note(id: string, text: string) {
 }
 
 function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: string) => { items: unknown[]; hasMore: boolean }) {
-  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input);
     const path = url.replace(/^https?:\/\/[^/]+/, '');
+    const method = init?.method ?? 'GET';
     requestedUrls.push(path);
 
+    if (path.endsWith('/settings/access-keys') && method === 'GET') {
+      return new Response(JSON.stringify({ items: [{ id: 'k1', label: 'CLI', maskedKey: 'jifo_abcd••••••vwxyz', createdAt: '2026-05-31T00:00:00Z' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (path.includes('/settings/access-keys/') && method === 'DELETE') {
+      return new Response(null, { status: 204 });
+    }
     if (path.endsWith('/tags/tree')) {
       return new Response(JSON.stringify({ items: [{ id: 'tag-work', name: '工作', path: '工作', noteCount: 1 }] }), {
         status: 200,
@@ -100,6 +110,25 @@ describe('App', () => {
 
     await waitFor(() => expect(requestedUrls.some((url) => url.includes('/api/notes?tagPath=%E5%B7%A5%E4%BD%9C&limit=20&offset=0'))).toBe(true));
     await waitFor(() => expect(screen.getByText(/标签结果/)).toBeInTheDocument());
+  });
+
+  test('在设置弹窗删除访问密钥时调用后端并从列表移除', async () => {
+    const user = userEvent.setup();
+    const requestedUrls: string[] = [];
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockWorkspaceFetch(requestedUrls);
+
+    authenticateAndRender();
+    await waitFor(() => expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'oisin 设置菜单' }));
+    await user.click(screen.getByRole('button', { name: '设置' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '删除 CLI 访问密钥' })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '删除 CLI 访问密钥' }));
+
+    await waitFor(() => expect(requestedUrls).toContain('/api/settings/access-keys/k1'));
+    await waitFor(() => expect(screen.queryByText('jifo_abcd••••••vwxyz')).not.toBeInTheDocument());
   });
 
   test('滚动到底时根据 hasMore 请求下一页并追加', async () => {

@@ -991,8 +991,46 @@ h3 {
   gap: 8px;
 }
 
+.access-key-create__row {
+  flex-wrap: wrap;
+}
+
 .access-key-create__row .jifo-input {
-  flex: 1 1 auto;
+  flex: 1 1 220px;
+}
+
+.access-key-action {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.access-key-action--primary {
+  border-color: var(--jifo-green-line);
+  background: var(--jifo-green-tint);
+  color: var(--jifo-green-dark);
+}
+
+.access-key-action--primary:hover:not(:disabled) {
+  background: var(--jifo-green-soft);
+}
+
+.access-key-action--ghost {
+  background: rgba(255, 252, 247, 0.48);
+}
+
+.access-key-action--danger {
+  border-color: rgba(169, 68, 56, 0.22);
+  background: rgba(255, 246, 241, 0.72);
+  color: var(--jifo-danger);
+}
+
+.access-key-action--danger:hover:not(:disabled) {
+  border-color: rgba(169, 68, 56, 0.34);
+  background: rgba(255, 236, 228, 0.92);
 }
 
 .access-key-secret {
@@ -1034,9 +1072,17 @@ h3 {
   background: rgba(255, 252, 247, 0.76);
 }
 
-.access-key-list__item div {
+.access-key-list__meta {
   display: grid;
+  min-width: 0;
   gap: 3px;
+}
+
+.access-key-list__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .access-key-list__item span,

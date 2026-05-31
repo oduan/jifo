@@ -42,6 +42,7 @@ type NotesPageProps = {
   settingsError?: string | null;
   onLoadAccessKeys?: () => void | Promise<void>;
   onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
+  onDeleteAccessKey?: (id: string) => Promise<void>;
 };
 
 function createdAtTime(note: Note): number {
@@ -74,7 +75,8 @@ export function NotesPage({
   isCreatingAccessKey = false,
   settingsError,
   onLoadAccessKeys,
-  onCreateAccessKey
+  onCreateAccessKey,
+  onDeleteAccessKey
 }: NotesPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -233,6 +235,7 @@ export function NotesPage({
         onClose={() => setSettingsOpen(false)}
         onLoadAccessKeys={onLoadAccessKeys}
         onCreateAccessKey={onCreateAccessKey}
+        onDeleteAccessKey={onDeleteAccessKey}
       />
     </main>
   );

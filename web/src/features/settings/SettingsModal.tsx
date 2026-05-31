@@ -13,6 +13,7 @@ type SettingsModalProps = {
   onClose: () => void;
   onLoadAccessKeys?: () => void | Promise<void>;
   onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
+  onDeleteAccessKey?: (id: string) => Promise<void>;
 };
 
 function formatDate(value: string) {
@@ -23,7 +24,7 @@ function formatDate(value: string) {
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 
-export function SettingsModal({ open, accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey }: SettingsModalProps) {
+export function SettingsModal({ open, accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey, onDeleteAccessKey }: SettingsModalProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [label, setLabel] = useState('');
   const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
@@ -77,6 +78,13 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
     setCopied(true);
   };
 
+  const deleteKey = async (key: AccessKeySummary) => {
+    if (!window.confirm('确定要删除这个访问密钥吗？删除后使用该密钥的 CLI 或程序会立即失效。')) {
+      return;
+    }
+    await onDeleteAccessKey?.(key.id);
+  };
+
   return (
     <div className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div className="settings-modal__backdrop" aria-hidden="true" />
@@ -109,10 +117,10 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
                 <label htmlFor="access-key-label">密钥备注</label>
                 <div className="access-key-create__row">
                   <TextInput id="access-key-label" name="access-key-label" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="例如：Mac CLI" />
-                  <Button type="submit" variant="primary" disabled={isCreating || !label.trim()}>
+                  <Button type="submit" variant="primary" className="access-key-action access-key-action--primary" disabled={isCreating || !label.trim()}>
                     生成密钥
                   </Button>
-                  <Button type="button" variant="ghost" onClick={() => setShowCreateForm(false)}>
+                  <Button type="button" variant="ghost" className="access-key-action access-key-action--ghost" onClick={() => setShowCreateForm(false)}>
                     取消
                   </Button>
                 </div>
@@ -142,11 +150,16 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
               <ul className="access-key-list" aria-label="已生成的密钥">
                 {accessKeys.map((key) => (
                   <li key={key.id} className="access-key-list__item">
-                    <div>
+                    <div className="access-key-list__meta">
                       <strong>{key.label}</strong>
                       <span>{key.maskedKey}</span>
                     </div>
-                    <time dateTime={key.createdAt}>{formatDate(key.createdAt)}</time>
+                    <div className="access-key-list__actions">
+                      <time dateTime={key.createdAt}>{formatDate(key.createdAt)}</time>
+                      <Button type="button" variant="ghost" className="access-key-action access-key-action--danger" aria-label={`删除 ${key.label} 访问密钥`} onClick={() => void deleteKey(key)}>
+                        删除
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
