@@ -30,6 +30,7 @@ class NotesFragment : Fragment() {
     private var binding: FragmentNotesBinding? = null
     private var notesJob: Job? = null
     private var selectedTagPath: String? = null
+    private var visibleLimit = PAGE_SIZE
     private var refreshInFlight = false
     private var pullAnimator: ValueAnimator? = null
 
@@ -45,6 +46,7 @@ class NotesFragment : Fragment() {
         lateinit var tagAdapter: TagAdapter
         tagAdapter = TagAdapter { tag ->
             selectedTagPath = tag.path
+            resetPaging()
             observeNotes()
             b.drawerLayout.closeDrawer(GravityCompat.START)
         }
@@ -55,8 +57,20 @@ class NotesFragment : Fragment() {
         val textTagCount = view.findViewById<TextView>(R.id.text_tag_count)
         val textRecordDays = view.findViewById<TextView>(R.id.text_record_days)
         val buttonAllNotes = view.findViewById<TextView>(R.id.button_all_notes)
-        b.notesRecycler.layoutManager = LinearLayoutManager(requireContext())
+        val notesLayoutManager = LinearLayoutManager(requireContext())
+        b.notesRecycler.layoutManager = notesLayoutManager
         b.notesRecycler.adapter = adapter
+        b.notesRecycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (dy <= 0) return
+                val total = notesLayoutManager.itemCount
+                val lastVisible = notesLayoutManager.findLastVisibleItemPosition()
+                if (total > 0 && lastVisible >= total - 8 && total >= visibleLimit) {
+                    visibleLimit += PAGE_SIZE
+                    observeNotes()
+                }
+            }
+        })
         tagRecycler.layoutManager = LinearLayoutManager(requireContext())
         tagRecycler.adapter = tagAdapter
         viewLifecycleOwner.lifecycleScope.launch {
@@ -86,6 +100,7 @@ class NotesFragment : Fragment() {
         }
         buttonAllNotes.setOnClickListener {
             selectedTagPath = null
+            resetPaging()
             observeNotes()
             b.drawerLayout.closeDrawer(GravityCompat.START)
         }
@@ -224,12 +239,21 @@ class NotesFragment : Fragment() {
         notesJob = viewLifecycleOwner.lifecycleScope.launch {
             repository.observeNotes(
                 search = null,
-                tagPath = selectedTagPath
+                tagPath = selectedTagPath,
+                limit = visibleLimit
             ).collect { adapter.submitList(it) }
         }
     }
 
+    private fun resetPaging() {
+        visibleLimit = PAGE_SIZE
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val PAGE_SIZE = 50
+    }
 
     override fun onDestroyView() {
         notesJob?.cancel()

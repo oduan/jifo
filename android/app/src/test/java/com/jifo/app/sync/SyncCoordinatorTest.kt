@@ -38,6 +38,24 @@ class SyncCoordinatorTest {
         assertEquals(1, synced.version)
     }
 
+    @Test fun pullLoopsUntilAllPagesAreFetched() = runTest {
+        val db = database()
+        val api = FakeSyncApi(
+            pushResults = emptyList(),
+            pullNotes = listOf(
+                ApiNoteDto(id = "11111111-1111-1111-1111-111111111111", clientId = "client-1", plainText = "first", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 1),
+                ApiNoteDto(id = "22222222-2222-2222-2222-222222222222", clientId = "client-2", plainText = "second", createdAt = "2026-05-31T09:00:00Z", updatedAt = "2026-05-31T09:00:00Z", version = 1)
+            )
+        )
+        val sync = SyncCoordinator(db, api)
+
+        sync.runOnce()
+
+        assertEquals(3, api.pullCalls.size)
+        assertNotNull(db.noteDao().getById("11111111-1111-1111-1111-111111111111"))
+        assertNotNull(db.noteDao().getById("22222222-2222-2222-2222-222222222222"))
+    }
+
     @Test fun conflictCopiedClearsOutboxAndDoesNotOverwriteOriginalNote() = runTest {
         val db = database()
         db.noteDao().upsert(NoteEntity(id = "note-1", clientId = "client-1", contentJson = "[]", plainText = "远端原始", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 2))

@@ -32,7 +32,7 @@ class NoteDaoTest {
             NoteEntity(id = "2", clientId = "c2", contentJson = "[]", plainText = "香蕉 #食物", createdAt = "2026-05-31T01:00:00Z", updatedAt = "2026-05-31T01:00:00Z", version = 1)
         ))
 
-        val rows = db.noteDao().observeNotes(search = "香蕉", tagPath = null).first()
+        val rows = db.noteDao().observeNotes(search = "香蕉", tagPath = null, limit = 50).first()
 
         assertEquals(listOf("2"), rows.map { it.id })
     }

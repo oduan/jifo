@@ -17,8 +17,8 @@ class NotesRepository(
     private val idGenerator: IdGenerator,
     private val clock: Clock
 ) {
-    fun observeNotes(search: String?, tagPath: String?) = db.noteDao()
-        .observeNotes(search?.takeIf { it.isNotBlank() }, tagPath?.takeIf { it.isNotBlank() })
+    fun observeNotes(search: String?, tagPath: String?, limit: Int = 50) = db.noteDao()
+        .observeNotes(search?.takeIf { it.isNotBlank() }, tagPath?.takeIf { it.isNotBlank() }, limit.coerceAtLeast(1))
         .map { it }
 
     suspend fun createNote(blocks: List<NoteBlock>) {

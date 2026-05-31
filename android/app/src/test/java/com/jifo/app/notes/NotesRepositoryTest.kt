@@ -33,7 +33,7 @@ class NotesRepositoryTest {
 
         repo.createNote(listOf(NoteBlock.Paragraph("本地记录 #Android")))
 
-        val notes = db.noteDao().observeNotes(null, null).first()
+        val notes = db.noteDao().observeNotes(null, null, limit = 50).first()
         val outbox = db.outboxDao().pendingOrFailed()
         assertEquals("本地记录 #Android", notes.single().plainText)
         assertEquals("PENDING", notes.single().syncStatus)

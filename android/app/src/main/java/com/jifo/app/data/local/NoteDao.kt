@@ -14,8 +14,9 @@ interface NoteDao {
           AND (:search IS NULL OR plainText LIKE '%' || :search || '%')
           AND (:tagPath IS NULL OR plainText LIKE '%#' || :tagPath || '%')
         ORDER BY createdAt DESC
+        LIMIT :limit
     """)
-    fun observeNotes(search: String?, tagPath: String?): Flow<List<NoteEntity>>
+    fun observeNotes(search: String?, tagPath: String?, limit: Int): Flow<List<NoteEntity>>
 
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): NoteEntity?

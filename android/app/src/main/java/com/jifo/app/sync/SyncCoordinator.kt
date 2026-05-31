@@ -18,17 +18,28 @@ class SyncCoordinator(
             val response = remote.push(SyncDtoMapper.toPushRequest(operations))
             response.results.forEach { result -> applyPushResult(result) }
         }
-        val cursor = db.syncStateDao().get("cursor")
-        val parts = cursor?.value?.split('|') ?: emptyList()
-        val pull = remote.pull(parts.getOrNull(0), parts.getOrNull(1), 100)
-        val notes = if (pull.notes.isNotEmpty()) pull.notes else pull.items
-        db.withTransaction {
-            notes.forEach { note -> upsertPulledNote(note) }
-            LocalTagIndex.rebuild(db)
-            val next = pull.cursor ?: pull.nextCursor
-            if (next?.updatedAt != null) {
-                db.syncStateDao().put(SyncStateEntity("cursor", next.updatedAt + "|" + (next.id ?: "")))
+        pullAllPages()
+    }
+
+    private suspend fun pullAllPages() {
+        var cursor = db.syncStateDao().get("cursor")
+        var parts = cursor?.value?.split('|') ?: emptyList()
+        repeat(100) {
+            val pull = remote.pull(parts.getOrNull(0), parts.getOrNull(1), 100)
+            val notes = if (pull.notes.isNotEmpty()) pull.notes else pull.items
+            var nextValue: String? = null
+            db.withTransaction {
+                notes.forEach { note -> upsertPulledNote(note) }
+                LocalTagIndex.rebuild(db)
+                val next = pull.cursor ?: pull.nextCursor
+                if (next?.updatedAt != null) {
+                    nextValue = next.updatedAt + "|" + (next.id ?: "")
+                    db.syncStateDao().put(SyncStateEntity("cursor", nextValue!!))
+                }
             }
+            if (notes.isEmpty() || nextValue == null || nextValue == cursor?.value) return
+            cursor = SyncStateEntity("cursor", nextValue!!)
+            parts = nextValue!!.split('|')
         }
     }
 
