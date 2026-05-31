@@ -19,6 +19,7 @@ describe('SettingsPopover', () => {
     await user.click(trigger);
 
     expect(screen.getByRole('button', { name: '退出登录' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '退出登录' })).toHaveClass('dropdown-menu__item');
   });
 
   test('点击外部区域后关闭设置面板', async () => {

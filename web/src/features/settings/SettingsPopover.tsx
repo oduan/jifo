@@ -58,7 +58,7 @@ export function SettingsPopover({ userName, onLogout }: SettingsPopoverProps) {
         <div className="settings-panel">
           <span className="settings-panel__user">{userName}</span>
           {onLogout ? (
-            <Button type="button" variant="ghost" onClick={onLogout}>
+            <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={onLogout}>
               退出登录
             </Button>
           ) : null}

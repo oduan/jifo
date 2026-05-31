@@ -101,10 +101,10 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect }: NoteCardProp
           </Button>
           {menuOpen ? (
             <div className="note-menu__panel" role="menu">
-              <Button type="button" variant="ghost" onClick={() => setEditing(true)}>
+              <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => setEditing(true)}>
                 编辑
               </Button>
-              <Button type="button" variant="ghost" onClick={() => onDelete(note.id)}>
+              <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => onDelete(note.id)}>
                 删除
               </Button>
             </div>

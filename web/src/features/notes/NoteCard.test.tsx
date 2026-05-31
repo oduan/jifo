@@ -46,6 +46,9 @@ describe('NoteCard', () => {
     expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '更多操作' }));
+    expect(screen.getByRole('button', { name: '编辑' })).toHaveClass('dropdown-menu__item');
+    expect(screen.getByRole('button', { name: '删除' })).toHaveClass('dropdown-menu__item');
+
     await user.click(screen.getByRole('button', { name: '删除' }));
 
     expect(onDelete).toHaveBeenCalledWith('n1');
