@@ -203,7 +203,6 @@ export function NotesPage({
           </div>
         ) : null}
 
-        {isLoading && notes.length === 0 ? <div className="loading-banner" aria-live="polite">正在加载真实笔记数据…</div> : null}
         {isMutating ? <div className="sync-banner" aria-live="polite">正在保存更改…</div> : null}
         {isLoadingMoreNotes ? <div className="sync-banner" aria-live="polite">正在加载更多笔记…</div> : null}
 

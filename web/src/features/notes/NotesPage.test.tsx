@@ -154,16 +154,8 @@ describe('NotesPage', () => {
     }
   });
 
-  test('已有笔记时重新加载筛选结果不显示会挤动输入框的全局加载条', () => {
-    render(
-      <NotesPage
-        userName="oisin"
-        notes={[{ id: 'n1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '已有笔记' }], tagIds: [] }]}
-        tags={[]}
-        heatmapCells={[]}
-        isLoading
-      />
-    );
+  test('加载笔记时不显示全局加载条', () => {
+    render(<NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} isLoading />);
 
     expect(screen.queryByText('正在加载真实笔记数据…')).not.toBeInTheDocument();
     expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
