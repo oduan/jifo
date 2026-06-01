@@ -16,7 +16,7 @@ object NoteActionPopup {
         val popup = PopupWindow(context)
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.TRANSPARENT)
+            setBackgroundColor(Color.WHITE)
             addView(row(context, "复制") { popup.dismiss(); onCopy() })
             addView(row(context, "编辑") { popup.dismiss(); onEdit() })
             addView(row(context, "删除") { popup.dismiss(); onDelete() })
@@ -27,7 +27,7 @@ object NoteActionPopup {
         popup.isFocusable = true
         popup.isOutsideTouchable = true
         popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        popup.elevation = 0f
+        popup.elevation = dp(anchor, 8).toFloat()
         popup.showAsDropDown(anchor, -dp(anchor, 88), 0, Gravity.NO_GRAVITY)
     }
 
