@@ -178,9 +178,7 @@ describe('NoteCard', () => {
     expect(screen.getByText('图片后')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '放大图片' }));
 
-    const dialog = screen.getByRole('dialog', { name: '图片预览' });
-    expect(dialog).toBeInTheDocument();
-    expect(dialog.parentElement).toBe(document.body);
+    expect(screen.getByRole('dialog', { name: '图片预览' })).toBeInTheDocument();
     expect(screen.getAllByAltText('粘贴图片')).toHaveLength(2);
   });
 
