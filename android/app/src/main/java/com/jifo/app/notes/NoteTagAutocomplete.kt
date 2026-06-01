@@ -1,6 +1,7 @@
 package com.jifo.app.notes
 
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.TextWatcher
@@ -181,7 +182,8 @@ class NoteTagAutocomplete(
         suggestions.forEachIndexed { index, item ->
             container.addView(row(item, index == focusedIndex) { choose(item) })
         }
-        val scroll = MaxHeightScrollView(context, dp(210)).apply {
+        val placement = popupPlacement()
+        val scroll = MaxHeightScrollView(context, placement.maxHeight).apply {
             isFillViewport = false
             addView(container, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
@@ -191,6 +193,7 @@ class NoteTagAutocomplete(
         if (existing == null) {
             popup = PopupWindow(scroll, width, height, false).apply {
                 isOutsideTouchable = true
+                isClippingEnabled = false
                 elevation = dp(8).toFloat()
             }
         } else {
@@ -199,11 +202,10 @@ class NoteTagAutocomplete(
             existing.height = height
         }
         val p = popup ?: return
-        val (x, y) = popupLocation()
         if (p.isShowing) {
-            p.update(x, y, width, height)
+            p.update(placement.x, placement.y, width, height)
         } else {
-            p.showAtLocation(editText.rootView, Gravity.NO_GRAVITY, x, y)
+            p.showAtLocation(editText.rootView, Gravity.NO_GRAVITY, placement.x, placement.y)
         }
     }
 
@@ -239,22 +241,42 @@ class NoteTagAutocomplete(
         return row
     }
 
-    private fun popupLocation(): Pair<Int, Int> {
+    private fun popupPlacement(): PopupPlacement {
         val activeTrigger = trigger
         val layout = editText.layout
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
+        val visibleFrame = Rect()
+        editText.rootView.getWindowVisibleDisplayFrame(visibleFrame)
         if (activeTrigger == null || layout == null) {
-            return location[0] to location[1] + editText.height
+            val fallbackY = location[1] + editText.height
+            return PopupPlacement(
+                x = location[0],
+                y = fallbackY,
+                maxHeight = availableDropdownHeight(fallbackY, visibleFrame)
+            )
         }
-        val line = layout.getLineForOffset(activeTrigger.hashStart.coerceIn(0, editText.text?.length ?: 0))
-        val caretX = layout.getPrimaryHorizontal(activeTrigger.hashStart).toInt()
+        val offset = activeTrigger.hashStart.coerceIn(0, editText.text?.length ?: 0)
+        val line = layout.getLineForOffset(offset)
+        val caretX = layout.getPrimaryHorizontal(offset).toInt()
         val lineBottom = layout.getLineBottom(line)
         val x = location[0] + editText.totalPaddingLeft + caretX - editText.scrollX
         val y = location[1] + editText.totalPaddingTop + lineBottom - editText.scrollY + dp(4)
         val maxX = editText.resources.displayMetrics.widthPixels - dp(188)
-        return max(0, x.coerceAtMost(maxX)) to max(0, y)
+        return PopupPlacement(
+            x = max(0, x.coerceAtMost(maxX)),
+            y = max(0, y),
+            maxHeight = availableDropdownHeight(y, visibleFrame)
+        )
     }
+
+    private fun availableDropdownHeight(y: Int, visibleFrame: Rect): Int {
+        val visibleBottom = if (visibleFrame.bottom > 0) visibleFrame.bottom else editText.resources.displayMetrics.heightPixels
+        val availableBelow = visibleBottom - y - dp(8)
+        return availableBelow.coerceIn(dp(48), dp(210))
+    }
+
+    private data class PopupPlacement(val x: Int, val y: Int, val maxHeight: Int)
 
     private fun dismiss() {
         popup?.dismiss()
