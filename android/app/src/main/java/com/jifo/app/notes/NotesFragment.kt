@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import kotlin.math.exp
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
@@ -119,7 +120,16 @@ class NotesFragment : Fragment() {
         }
         b.buttonMenu.setOnClickListener { b.drawerLayout.openDrawer(GravityCompat.START) }
         b.buttonAddNote.setOnClickListener {
-            NoteEditorBottomSheet(tags = currentTags) { text ->
+            val previousSoftInputMode = requireActivity().window.attributes.softInputMode
+            b.buttonAddNote.visibility = View.INVISIBLE
+            requireActivity().window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+            NoteEditorBottomSheet(
+                tags = currentTags,
+                onDismissed = {
+                    activity?.window?.setSoftInputMode(previousSoftInputMode)
+                    binding?.buttonAddNote?.postDelayed({ binding?.buttonAddNote?.visibility = View.VISIBLE }, 220L)
+                }
+            ) { text ->
                 viewLifecycleOwner.lifecycleScope.launch {
                     repository.createNote(listOf(NoteBlock.Paragraph(text.trim())))
                     runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
