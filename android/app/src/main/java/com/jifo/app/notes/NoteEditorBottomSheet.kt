@@ -27,7 +27,7 @@ class NoteEditorBottomSheet(
 
     override fun onStart() {
         super.onStart()
-        dialog?.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog?.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         (dialog as? BottomSheetDialog)?.behavior?.apply {
             skipCollapsed = true
             state = BottomSheetBehavior.STATE_EXPANDED
@@ -56,11 +56,12 @@ class NoteEditorBottomSheet(
             val text = b.editNote.text?.toString().orEmpty()
             if (NoteEditorState(text).canSend) { onSubmit?.invoke(text); dismiss() }
         }
-        b.editNote.post {
-            b.editNote.requestFocus()
+        b.editNote.postDelayed({
+            val current = binding ?: return@postDelayed
+            current.editNote.requestFocus()
             val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(b.editNote, InputMethodManager.SHOW_IMPLICIT)
-        }
+            imm.showSoftInput(current.editNote, InputMethodManager.SHOW_IMPLICIT)
+        }, 180L)
         render()
     }
     override fun onDismiss(dialog: DialogInterface) {
