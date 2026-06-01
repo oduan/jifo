@@ -12,7 +12,11 @@ interface NoteDao {
         SELECT * FROM notes
         WHERE deletedAt IS NULL
           AND (:search IS NULL OR plainText LIKE '%' || :search || '%')
-          AND (:tagPath IS NULL OR plainText LIKE '%#' || :tagPath || '%')
+          AND (
+              :tagPath IS NULL
+              OR (' ' || replace(replace(replace(plainText, char(10), ' '), char(13), ' '), char(9), ' ') || ' ') LIKE '% #' || :tagPath || ' %'
+              OR (' ' || replace(replace(replace(plainText, char(10), ' '), char(13), ' '), char(9), ' ') || ' ') LIKE '% #' || :tagPath || '/%'
+          )
         ORDER BY createdAt DESC
         LIMIT :limit
     """)

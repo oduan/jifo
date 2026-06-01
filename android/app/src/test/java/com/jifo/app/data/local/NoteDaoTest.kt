@@ -37,6 +37,20 @@ class NoteDaoTest {
         assertEquals(listOf("2"), rows.map { it.id })
     }
 
+    @Test fun tagFilterMatchesExactTagAndChildrenOnly() = runTest {
+        db.noteDao().upsertAll(listOf(
+            NoteEntity(id = "exact", clientId = "c1", contentJson = "[]", plainText = "#测试 精准标签", createdAt = "2026-05-31T01:00:00Z", updatedAt = "2026-05-31T01:00:00Z", version = 1),
+            NoteEntity(id = "child", clientId = "c2", contentJson = "[]", plainText = "#测试/子标签 子标签", createdAt = "2026-05-31T02:00:00Z", updatedAt = "2026-05-31T02:00:00Z", version = 1),
+            NoteEntity(id = "suffix-one", clientId = "c3", contentJson = "[]", plainText = "#测试1 不应该匹配", createdAt = "2026-05-31T03:00:00Z", updatedAt = "2026-05-31T03:00:00Z", version = 1),
+            NoteEntity(id = "suffix-three", clientId = "c4", contentJson = "[]", plainText = "#测试三 不应该匹配", createdAt = "2026-05-31T04:00:00Z", updatedAt = "2026-05-31T04:00:00Z", version = 1),
+            NoteEntity(id = "newline", clientId = "c5", contentJson = "[]", plainText = "换行后\n#测试", createdAt = "2026-05-31T05:00:00Z", updatedAt = "2026-05-31T05:00:00Z", version = 1)
+        ))
+
+        val rows = db.noteDao().observeNotes(search = null, tagPath = "测试", limit = 50).first()
+
+        assertEquals(listOf("newline", "child", "exact"), rows.map { it.id })
+    }
+
     @Test fun outboxOrdersPendingOperationsByLocalSeq() = runTest {
         db.outboxDao().insert(OutboxOperationEntity(opId = "op-2", entity = "note", action = "update", clientId = "c", baseVersion = 1, payloadJson = "{}", createdAt = "2026-05-31T02:00:00Z"))
         db.outboxDao().insert(OutboxOperationEntity(opId = "op-1", entity = "note", action = "create", clientId = "c", baseVersion = 0, payloadJson = "{}", createdAt = "2026-05-31T01:00:00Z"))
