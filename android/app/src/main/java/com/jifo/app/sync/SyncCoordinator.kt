@@ -3,10 +3,12 @@ package com.jifo.app.sync
 import androidx.room.withTransaction
 import com.jifo.app.data.local.JifoDatabase
 import com.jifo.app.data.local.NoteEntity
+import com.jifo.app.data.local.OutboxOperationEntity
 import com.jifo.app.data.local.SyncStateEntity
 import com.jifo.app.network.ApiNoteDto
 import com.jifo.app.network.PushResultDto
 import com.jifo.app.notes.LocalTagIndex
+import retrofit2.HttpException
 import java.util.UUID
 
 class SyncCoordinator(
@@ -16,11 +18,63 @@ class SyncCoordinator(
     suspend fun runOnce() {
         repairPendingCreateMutations()
         val operations = db.outboxDao().pendingOrFailed()
-        if (operations.isNotEmpty()) {
-            val response = remote.push(SyncDtoMapper.toPushRequest(operations))
-            response.results.forEach { result -> applyPushResult(result) }
+        for (op in operations) {
+            pushOperation(op)
         }
         pullAllPages()
+    }
+
+    private suspend fun pushOperation(op: OutboxOperationEntity) {
+        try {
+            val response = remote.push(SyncDtoMapper.toPushRequest(listOf(op)))
+            response.results.forEach { result -> applyPushResult(result) }
+        } catch (error: HttpException) {
+            if (error.code() == 404) {
+                handlePushNotFound(op)
+            } else {
+                throw error
+            }
+        }
+    }
+
+    private suspend fun handlePushNotFound(op: OutboxOperationEntity) {
+        when (op.action) {
+            "update", "restore" -> rescueMissingRemoteUpdate(op)
+            "delete" -> db.withTransaction {
+                db.outboxDao().deleteByOpId(op.opId)
+                op.noteId?.let { id -> db.noteDao().getById(id)?.let { note -> db.noteDao().upsert(note.copy(syncStatus = "SYNCED", lastError = null)) } }
+                LocalTagIndex.rebuild(db)
+            }
+            else -> db.outboxDao().updateStatus(op.opId, "blocked", "note_not_found")
+        }
+    }
+
+    private suspend fun rescueMissingRemoteUpdate(op: OutboxOperationEntity) {
+        val local = op.noteId?.let { db.noteDao().getById(it) } ?: db.noteDao().getByClientId(op.clientId)
+        if (local == null) {
+            db.outboxDao().updateStatus(op.opId, "blocked", "note_not_found")
+            return
+        }
+        val rescueClientId = "android-note-${UUID.randomUUID()}"
+        val rescueOp = OutboxOperationEntity(
+            opId = "op-${UUID.randomUUID()}",
+            entity = "note",
+            action = "create",
+            clientId = rescueClientId,
+            baseVersion = 0,
+            payloadJson = op.payloadJson,
+            createdAt = op.createdAt
+        )
+        db.withTransaction {
+            if (local.id != rescueClientId) {
+                db.noteDao().deleteById(local.id)
+            }
+            db.noteDao().upsert(local.copy(id = rescueClientId, clientId = rescueClientId, version = 0, deletedAt = null, syncStatus = "PENDING", lastError = null))
+            db.outboxDao().deleteByOpId(op.opId)
+            db.outboxDao().insert(rescueOp)
+            LocalTagIndex.rebuild(db)
+        }
+        pushOperation(rescueOp)
     }
 
     private suspend fun repairPendingCreateMutations() {

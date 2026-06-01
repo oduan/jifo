@@ -5,6 +5,9 @@ import com.jifo.app.data.local.OutboxOperationEntity
 import com.jifo.app.network.*
 import com.jifo.app.test.TestDatabaseFactory
 import kotlinx.coroutines.test.runTest
+import okhttp3.ResponseBody.Companion.toResponseBody
+import retrofit2.HttpException
+import retrofit2.Response
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -69,6 +72,32 @@ class SyncCoordinatorTest {
         assertEquals(listOf("op-create"), api.pushedOpIds)
         assertNull(db.outboxDao().getByOpId("op-update"))
         assertNull(db.outboxDao().getByOpId("op-create"))
+    }
+
+    @Test fun missingRemoteUpdateIsRescuedAsCreateAndDoesNotBlockOutbox() = runTest {
+        val db = database()
+        val oldId = "ec5a954d-b3de-419f-95b3-dc0cee91e5bc"
+        db.noteDao().upsert(NoteEntity(id = oldId, clientId = "web-note-old", contentJson = "[]", plainText = "edited stale note", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-06-01T02:24:04Z", version = 1, syncStatus = "PENDING"))
+        db.outboxDao().insert(OutboxOperationEntity(opId = "op-stale-update", entity = "note", action = "update", noteId = oldId, clientId = "web-note-old", baseVersion = 1, payloadJson = """{"content":{"blocks":[{"type":"paragraph","text":"edited stale note"}]},"plainText":"edited stale note"}""", createdAt = "2026-06-01T02:24:04Z"))
+        db.outboxDao().insert(OutboxOperationEntity(opId = "op-new-create", entity = "note", action = "create", clientId = "android-note-new", baseVersion = 0, payloadJson = """{"content":{"blocks":[{"type":"paragraph","text":"new note"}]},"plainText":"new note"}""", createdAt = "2026-06-01T02:25:00Z"))
+        val remote = object : SyncRemote {
+            val pushedActions = mutableListOf<String>()
+            override suspend fun push(body: SyncPushRequest): SyncPushResponse {
+                val op = body.operations.single()
+                pushedActions += op.action
+                if (op.opId == "op-stale-update") throw HttpException(Response.error<String>(404, "{}".toResponseBody()))
+                return SyncPushResponse(listOf(PushResultDto(op.opId, "created", "11111111-1111-1111-1111-111111111111", 1)))
+            }
+            override suspend fun pull(updatedAt: String?, id: String?, limit: Int): SyncPullResponse = SyncPullResponse()
+        }
+        val sync = SyncCoordinator(db, remote)
+
+        sync.runOnce()
+
+        assertEquals(listOf("update", "create", "create"), remote.pushedActions)
+        assertEquals(emptyList<String>(), db.outboxDao().pendingOrFailed().map { it.action })
+        assertNull(db.noteDao().getById(oldId))
+        assertNotNull(db.noteDao().getById("11111111-1111-1111-1111-111111111111"))
     }
 
     @Test fun conflictCopiedClearsOutboxAndDoesNotOverwriteOriginalNote() = runTest {
