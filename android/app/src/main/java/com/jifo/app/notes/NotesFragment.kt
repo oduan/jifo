@@ -49,14 +49,12 @@ class NotesFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
-        val adapter = NoteAdapter { note, anchor -> showNoteActions(note, anchor) }
+        val adapter = NoteAdapter(
+            onMoreClick = { note, anchor -> showNoteActions(note, anchor) },
+            onTagClick = { tagPath -> selectTag(tagPath) }
+        )
         lateinit var tagAdapter: TagAdapter
-        tagAdapter = TagAdapter { tag ->
-            selectedTagPath = tag.path
-            resetPaging()
-            observeNotes()
-            b.drawerLayout.closeDrawer(GravityCompat.START)
-        }
+        tagAdapter = TagAdapter { tag -> selectTag(tag.path, closeDrawer = true) }
         val repository = ServiceLocator.notesRepository(requireContext())
         val tagRecycler = view.findViewById<RecyclerView>(R.id.tag_recycler)
         val textUserName = view.findViewById<TextView>(R.id.text_user_name)
@@ -107,6 +105,7 @@ class NotesFragment : Fragment() {
         }
         buttonAllNotes.setOnClickListener {
             selectedTagPath = null
+            adapter.selectedTagPath = null
             resetPaging()
             observeNotes()
             b.drawerLayout.closeDrawer(GravityCompat.START)
@@ -238,6 +237,15 @@ class NotesFragment : Fragment() {
         })
     }
 
+    private fun selectTag(tagPath: String, closeDrawer: Boolean = false) {
+        val b = binding ?: return
+        selectedTagPath = tagPath
+        (b.notesRecycler.adapter as? NoteAdapter)?.selectedTagPath = tagPath
+        resetPaging()
+        observeNotes()
+        if (closeDrawer) b.drawerLayout.closeDrawer(GravityCompat.START)
+    }
+
     private fun showNoteActions(note: NoteEntity, anchor: View) {
         NoteActionPopup.show(
             anchor = anchor,
@@ -277,6 +285,7 @@ class NotesFragment : Fragment() {
         val b = binding ?: return
         val repository = ServiceLocator.notesRepository(requireContext())
         val adapter = b.notesRecycler.adapter as? NoteAdapter ?: return
+        adapter.selectedTagPath = selectedTagPath
         notesJob?.cancel()
         notesJob = viewLifecycleOwner.lifecycleScope.launch {
             repository.observeNotes(
