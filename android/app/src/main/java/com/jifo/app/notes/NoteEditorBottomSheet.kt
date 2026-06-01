@@ -2,6 +2,7 @@ package com.jifo.app.notes
 
 import android.content.Context
 import android.content.DialogInterface
+import android.graphics.Rect
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -27,6 +28,7 @@ class NoteEditorBottomSheet(
 ) : BottomSheetDialogFragment() {
     private var binding: BottomSheetNoteEditorBinding? = null
     private var tagAutocomplete: NoteTagAutocomplete? = null
+    private var imeTarget: View? = null
 
     override fun onStart() {
         super.onStart()
@@ -76,32 +78,60 @@ class NoteEditorBottomSheet(
     override fun onDestroyView() {
         tagAutocomplete?.detach()
         tagAutocomplete = null
+        imeTarget?.translationY = 0f
+        imeTarget = null
         binding?.root?.translationY = 0f
         binding = null
         super.onDestroyView()
     }
 
     private fun installImeFollower() {
+        val window = dialog?.window ?: return
+        val decor = window.decorView
         val target = (dialog as? BottomSheetDialog)?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
             ?: binding?.root
             ?: return
+        imeTarget = target
 
         fun applyImeOffset(insets: WindowInsetsCompat): WindowInsetsCompat {
-            val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            val navBottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-            target.translationY = -(imeBottom - navBottom).coerceAtLeast(0).toFloat()
+            val imeTop = imeTopOnScreen(decor, insets)
+            val targetLocation = IntArray(2)
+            target.getLocationOnScreen(targetLocation)
+            val targetBaseBottom = targetLocation[1] + target.height - target.translationY
+            val overlap = (targetBaseBottom - imeTop + dp(8)).coerceAtLeast(0f)
+            target.translationY = -overlap
             return insets
         }
 
-        ViewCompat.setOnApplyWindowInsetsListener(target) { _, insets -> applyImeOffset(insets) }
+        ViewCompat.setOnApplyWindowInsetsListener(decor) { _, insets -> applyImeOffset(insets) }
         ViewCompat.setWindowInsetsAnimationCallback(
-            target,
+            decor,
             object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
                 override fun onProgress(insets: WindowInsetsCompat, runningAnimations: MutableList<WindowInsetsAnimationCompat>): WindowInsetsCompat {
                     return applyImeOffset(insets)
                 }
             }
         )
-        ViewCompat.requestApplyInsets(target)
+        ViewCompat.requestApplyInsets(decor)
     }
+
+    private fun imeTopOnScreen(decor: View, insets: WindowInsetsCompat): Float {
+        val decorLocation = IntArray(2)
+        decor.getLocationOnScreen(decorLocation)
+        val decorBottom = decorLocation[1] + decor.height
+        val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        if (imeBottom > 0) {
+            return (decorBottom - imeBottom).toFloat()
+        }
+
+        val visibleFrame = Rect()
+        decor.getWindowVisibleDisplayFrame(visibleFrame)
+        return if (visibleFrame.bottom > 0 && visibleFrame.bottom < decorBottom) {
+            visibleFrame.bottom.toFloat()
+        } else {
+            decorBottom.toFloat()
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }
