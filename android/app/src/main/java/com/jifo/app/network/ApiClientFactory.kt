@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
@@ -23,6 +24,7 @@ object ApiClientFactory {
             .build()
             .create(JifoApi::class.java)
 
+        val refreshLock = Any()
         val authClient = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val token = runBlocking { tokenStore.accessToken() }
@@ -32,10 +34,25 @@ object ApiClientFactory {
             .authenticator(object : Authenticator {
                 override fun authenticate(route: Route?, response: Response): Request? {
                     if (responseCount(response) >= 2) return null
-                    val refresh = runBlocking { tokenStore.refreshToken() } ?: return null
-                    val refreshed = runBlocking { refreshApi.refresh(RefreshRequest(refresh)) }
-                    runBlocking { tokenStore.save(refreshed.accessToken, refreshed.refreshToken) }
-                    return response.request.newBuilder().header("Authorization", "Bearer ${refreshed.accessToken}").build()
+                    val requestToken = response.request.header("Authorization")?.removePrefix("Bearer ")
+                    return synchronized(refreshLock) {
+                        val latestToken = runBlocking { tokenStore.accessToken() }
+                        if (!latestToken.isNullOrBlank() && latestToken != requestToken) {
+                            return@synchronized response.request.newBuilder().header("Authorization", "Bearer $latestToken").build()
+                        }
+
+                        val refresh = runBlocking { tokenStore.refreshToken() } ?: return@synchronized null
+                        val refreshed = try {
+                            runBlocking { refreshApi.refresh(RefreshRequest(refresh)) }
+                        } catch (error: HttpException) {
+                            if (error.code() == 401) runBlocking { tokenStore.clear() }
+                            return@synchronized null
+                        } catch (_: Exception) {
+                            return@synchronized null
+                        }
+                        runBlocking { tokenStore.save(refreshed.accessToken, refreshed.refreshToken) }
+                        response.request.newBuilder().header("Authorization", "Bearer ${refreshed.accessToken}").build()
+                    }
                 }
             })
             .build()

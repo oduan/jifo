@@ -69,7 +69,7 @@ class RoomTokenStore(private val db: JifoDatabase) : TokenStore, com.jifo.app.au
     override suspend fun refreshToken(): String? = db.authSessionDao().current()?.refreshToken
     override suspend fun save(accessToken: String, refreshToken: String?) {
         val current = db.authSessionDao().current()
-        db.authSessionDao().save(AuthSessionEntity(accessToken = accessToken, refreshToken = refreshToken, userJson = current?.userJson, deviceCode = current?.deviceCode ?: "android"))
+        db.authSessionDao().save(AuthSessionEntity(accessToken = accessToken, refreshToken = refreshToken ?: current?.refreshToken, userJson = current?.userJson, deviceCode = current?.deviceCode ?: "android"))
     }
     override suspend fun clear() = db.authSessionDao().clear()
     override suspend fun current(): com.jifo.app.auth.StoredSession? = db.authSessionDao().current()?.let {

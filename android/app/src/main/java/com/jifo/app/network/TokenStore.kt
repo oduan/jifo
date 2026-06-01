@@ -15,7 +15,7 @@ class InMemoryTokenStore(
     override suspend fun refreshToken() = refreshToken
     override suspend fun save(accessToken: String, refreshToken: String?) {
         this.accessToken = accessToken
-        this.refreshToken = refreshToken
+        this.refreshToken = refreshToken ?: this.refreshToken
     }
     override suspend fun clear() {
         accessToken = null
