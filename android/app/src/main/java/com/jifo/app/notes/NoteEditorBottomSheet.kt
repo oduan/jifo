@@ -52,6 +52,9 @@ class NoteEditorBottomSheet(
             override fun afterTextChanged(s: Editable?) = Unit
         })
         tagAutocomplete = NoteTagAutocomplete(b.editNote, tags)
+        b.buttonInsertTag.setOnClickListener {
+            insertHashAtCursor()
+        }
         b.buttonSend.setOnClickListener {
             val text = b.editNote.text?.toString().orEmpty()
             if (NoteEditorState(text).canSend) { onSubmit?.invoke(text); dismiss() }
@@ -64,6 +67,21 @@ class NoteEditorBottomSheet(
         }, 180L)
         render()
     }
+    private fun insertHashAtCursor() {
+        val b = binding ?: return
+        val editText = b.editNote
+        val editable = editText.text ?: return
+        val start = editText.selectionStart.coerceAtLeast(0)
+        val end = editText.selectionEnd.coerceAtLeast(0)
+        val replaceStart = minOf(start, end)
+        val replaceEnd = maxOf(start, end)
+        editable.replace(replaceStart, replaceEnd, "#")
+        editText.requestFocus()
+        editText.setSelection(replaceStart + 1)
+        val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+    }
+
     override fun onDismiss(dialog: DialogInterface) {
         super.onDismiss(dialog)
         onDismissed?.invoke()
