@@ -22,6 +22,10 @@ function note(id: string, text: string) {
   };
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: string) => { items: unknown[]; hasMore: boolean }) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input);
@@ -146,6 +150,69 @@ describe('App', () => {
     expect(authStore.getState().refreshToken).toBe('refresh-token-2');
     expect(authHeaders['/api/tags/tree'][0]).toBe('Bearer expired-token');
     expect(authHeaders['/api/tags/tree']).toContain('Bearer fresh-token');
+  });
+
+  test('多个并发请求同时 401 时只刷新一次并继续保持登录', async () => {
+    let refreshCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const path = url.replace(/^https?:\/\/[^/]+/, '');
+      const token = new Headers(init?.headers ?? undefined).get('Authorization') ?? '';
+
+      if (path.endsWith('/tags/tree')) {
+        return new Response(JSON.stringify({ items: [{ id: 'tag-work', name: '工作', path: '工作', noteCount: 1 }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.endsWith('/auth/refresh')) {
+        refreshCalls += 1;
+        await delay(10);
+        if (refreshCalls > 1) {
+          return new Response(JSON.stringify({ error: { code: 'invalid_refresh_token' } }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify({ accessToken: 'fresh-token', refreshToken: 'refresh-token-2', user: { id: 'u1', email: 'oisin@example.com', username: 'oisin' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (token === 'Bearer expired-token') {
+        return new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'expired' } }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.endsWith('/notes/stats')) {
+        return new Response(JSON.stringify({ total: 1 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.includes('/notes')) {
+        return new Response(JSON.stringify({ items: [note('note-1', '#工作 并发刷新后笔记')], page: { limit: 20, offset: 0, hasMore: false } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.includes('/heatmap')) {
+        return new Response(JSON.stringify({ days: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    authenticateAndRender({ accessToken: 'expired-token', refreshToken: 'refresh-token-1', user: { id: 'u1', email: 'oisin@example.com', username: 'oisin' } });
+
+    await waitFor(() => expect(screen.getByText(/并发刷新后笔记/)).toBeInTheDocument());
+    expect(refreshCalls).toBe(1);
+    expect(authStore.getState().accessToken).toBe('fresh-token');
+    expect(authStore.getState().refreshToken).toBe('refresh-token-2');
   });
 
   test('搜索笔记时请求后端 search 参数', async () => {

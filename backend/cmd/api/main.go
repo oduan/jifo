@@ -164,7 +164,7 @@ func main() {
 
 	tagSvc := tags.NewService(database)
 	noteSvc := notes.NewService(database, tagSvc)
-	authSvc, err := auth.NewService(database, cfg.JWTSecret, time.Hour)
+	authSvc, err := auth.NewService(database, cfg.JWTSecret, 7*24*time.Hour)
 	if err != nil {
 		log.Fatalf("init auth service: %v", err)
 	}

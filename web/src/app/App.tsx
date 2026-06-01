@@ -15,6 +15,8 @@ import { TagNode } from '../features/tags/TagTree';
 import { ApiError, createApiClient } from '../shared/api/client';
 
 const NOTES_PAGE_SIZE = 20;
+const ACCESS_TOKEN_RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+const ACCESS_TOKEN_RENEWAL_CHECK_MS = 30 * 60 * 1000;
 
 function useAuthState() {
   return useSyncExternalStore(authStore.subscribe, authStore.getSnapshot, authStore.getSnapshot);
@@ -22,6 +24,29 @@ function useAuthState() {
 
 function apiBaseUrl() {
   return import.meta.env.VITE_API_BASE_URL ?? '/api';
+}
+
+function secondsUntilJwtExpiry(token: string | null, now = Date.now()): number | null {
+  if (!token) {
+    return null;
+  }
+  const [, payload] = token.split('.');
+  if (!payload) {
+    return null;
+  }
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const decoded = JSON.parse(atob(padded)) as { exp?: unknown };
+    return typeof decoded.exp === 'number' ? decoded.exp - Math.floor(now / 1000) : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRenewAccessToken(token: string | null, thresholdMs = ACCESS_TOKEN_RENEWAL_THRESHOLD_MS) {
+  const secondsLeft = secondsUntilJwtExpiry(token);
+  return secondsLeft !== null && secondsLeft * 1000 <= thresholdMs;
 }
 
 function errorMessage(error: unknown) {
@@ -55,20 +80,22 @@ export function App() {
   const [hasMoreNotes, setHasMoreNotes] = useState(false);
   const [isLoadingMoreNotes, setLoadingMoreNotes] = useState(false);
 
-  const client = useMemo(() => {
+  const authApi = useMemo(() => {
     const baseUrl = apiBaseUrl();
     const refreshClient = createApiClient({
       baseUrl,
       getAccessToken: () => null
     });
+    let refreshInFlight: Promise<string | null> | null = null;
 
-    return createApiClient({
-      baseUrl,
-      getAccessToken: authStore.getAccessToken,
-      refreshAccessToken: async () => {
+    const refreshSession = () => {
+      if (refreshInFlight) {
+        return refreshInFlight;
+      }
+
+      refreshInFlight = (async () => {
         const current = authStore.getState();
         if (!current.refreshToken) {
-          authStore.clear();
           return null;
         }
 
@@ -80,18 +107,50 @@ export function App() {
             user: refreshed.user ?? current.user ?? null
           });
           return refreshed.accessToken;
-        } catch {
-          authStore.clear();
+        } catch (refreshError) {
+          if (refreshError instanceof ApiError && refreshError.status === 401) {
+            authStore.clear();
+          }
           return null;
+        } finally {
+          refreshInFlight = null;
         }
-      }
+      })();
+
+      return refreshInFlight;
+    };
+
+    const client = createApiClient({
+      baseUrl,
+      getAccessToken: authStore.getAccessToken,
+      refreshAccessToken: refreshSession
     });
+
+    return { client, refreshSession };
   }, []);
+  const client = authApi.client;
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedNoteQuery(noteQuery), 300);
     return () => window.clearTimeout(timer);
   }, [noteQuery]);
+
+  useEffect(() => {
+    if (!accessToken || !authStore.getState().refreshToken) {
+      return;
+    }
+
+    const renewIfNeeded = () => {
+      const current = authStore.getState();
+      if (current.accessToken && current.refreshToken && shouldRenewAccessToken(current.accessToken)) {
+        void authApi.refreshSession();
+      }
+    };
+
+    renewIfNeeded();
+    const timer = window.setInterval(renewIfNeeded, ACCESS_TOKEN_RENEWAL_CHECK_MS);
+    return () => window.clearInterval(timer);
+  }, [accessToken, authApi]);
 
   const noteListOptions = useCallback(
     (offset: number) => ({
@@ -121,7 +180,7 @@ export function App() {
     } catch (loadError) {
       const message = errorMessage(loadError);
       setError(message);
-      if (loadError instanceof ApiError && loadError.status === 401) {
+      if (loadError instanceof ApiError && loadError.status === 401 && !authStore.getState().refreshToken) {
         authStore.clear();
       }
     } finally {
