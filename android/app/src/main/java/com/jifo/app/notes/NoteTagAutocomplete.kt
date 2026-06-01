@@ -182,13 +182,15 @@ class NoteTagAutocomplete(
         suggestions.forEachIndexed { index, item ->
             container.addView(row(item, index == focusedIndex) { choose(item) })
         }
-        val placement = popupPlacement()
-        val scroll = MaxHeightScrollView(context, placement.maxHeight).apply {
+        val width = dp(180)
+        val anchor = popupAnchor()
+        val maxHeight = availableDropdownHeightAbove(anchor.lineTop)
+        val scroll = MaxHeightScrollView(context, maxHeight).apply {
             isFillViewport = false
             addView(container, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        val width = dp(180)
-        val height = ViewGroup.LayoutParams.WRAP_CONTENT
+        val height = measurePopupHeight(scroll, width, maxHeight)
+        val placement = popupPlacementAbove(anchor, height)
         val existing = popup
         if (existing == null) {
             popup = PopupWindow(scroll, width, height, false).apply {
@@ -241,42 +243,50 @@ class NoteTagAutocomplete(
         return row
     }
 
-    private fun popupPlacement(): PopupPlacement {
+    private fun popupAnchor(): PopupAnchor {
         val activeTrigger = trigger
         val layout = editText.layout
         val location = IntArray(2)
         editText.getLocationOnScreen(location)
-        val visibleFrame = Rect()
-        editText.rootView.getWindowVisibleDisplayFrame(visibleFrame)
         if (activeTrigger == null || layout == null) {
-            val fallbackY = location[1] + editText.height
-            return PopupPlacement(
-                x = location[0],
-                y = fallbackY,
-                maxHeight = availableDropdownHeight(fallbackY, visibleFrame)
-            )
+            return PopupAnchor(x = location[0], lineTop = location[1])
         }
         val offset = activeTrigger.hashStart.coerceIn(0, editText.text?.length ?: 0)
         val line = layout.getLineForOffset(offset)
-        val caretX = layout.getPrimaryHorizontal(offset).toInt()
-        val lineBottom = layout.getLineBottom(line)
-        val x = location[0] + editText.totalPaddingLeft + caretX - editText.scrollX
-        val y = location[1] + editText.totalPaddingTop + lineBottom - editText.scrollY + dp(4)
+        val hashX = layout.getPrimaryHorizontal(offset).toInt()
+        val lineTop = layout.getLineTop(line)
+        val x = location[0] + editText.totalPaddingLeft + hashX - editText.scrollX
+        val y = location[1] + editText.totalPaddingTop + lineTop - editText.scrollY
         val maxX = editText.resources.displayMetrics.widthPixels - dp(188)
-        return PopupPlacement(
-            x = max(0, x.coerceAtMost(maxX)),
-            y = max(0, y),
-            maxHeight = availableDropdownHeight(y, visibleFrame)
+        return PopupAnchor(x = max(0, x.coerceAtMost(maxX)), lineTop = max(0, y))
+    }
+
+    private fun popupPlacementAbove(anchor: PopupAnchor, popupHeight: Int): PopupPlacement {
+        val visibleFrame = Rect()
+        editText.rootView.getWindowVisibleDisplayFrame(visibleFrame)
+        val visibleTop = if (visibleFrame.top > 0) visibleFrame.top else 0
+        val y = (anchor.lineTop - popupHeight - dp(4)).coerceAtLeast(visibleTop + dp(8))
+        return PopupPlacement(x = anchor.x, y = y)
+    }
+
+    private fun availableDropdownHeightAbove(lineTop: Int): Int {
+        val visibleFrame = Rect()
+        editText.rootView.getWindowVisibleDisplayFrame(visibleFrame)
+        val visibleTop = if (visibleFrame.top > 0) visibleFrame.top else 0
+        val availableAbove = lineTop - visibleTop - dp(12)
+        return availableAbove.coerceIn(dp(48), dp(210))
+    }
+
+    private fun measurePopupHeight(view: View, width: Int, maxHeight: Int): Int {
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST)
         )
+        return view.measuredHeight.coerceIn(dp(1), maxHeight)
     }
 
-    private fun availableDropdownHeight(y: Int, visibleFrame: Rect): Int {
-        val visibleBottom = if (visibleFrame.bottom > 0) visibleFrame.bottom else editText.resources.displayMetrics.heightPixels
-        val availableBelow = visibleBottom - y - dp(8)
-        return availableBelow.coerceIn(dp(48), dp(210))
-    }
-
-    private data class PopupPlacement(val x: Int, val y: Int, val maxHeight: Int)
+    private data class PopupAnchor(val x: Int, val lineTop: Int)
+    private data class PopupPlacement(val x: Int, val y: Int)
 
     private fun dismiss() {
         popup?.dismiss()
