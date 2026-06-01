@@ -69,4 +69,19 @@ class NotesRepositoryTest {
         assertEquals("delete", op.action)
         assertEquals(4, op.baseVersion)
     }
+
+    @Test fun undoDeleteRestoresNoteAndRemovesPendingDelete() = runTest {
+        val db = database()
+        val original = NoteEntity(id = "note-1", clientId = "client-1", contentJson = "[]", plainText = "old", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 4)
+        db.noteDao().upsert(original)
+        val repo = NotesRepository(db, FakeSyncScheduler(), FixedIdGenerator("client-unused", "op-delete"), FixedClock("2026-05-31T09:00:00Z"))
+
+        repo.deleteNote("note-1")
+        repo.undoDeleteNote(original)
+
+        val note = db.noteDao().getById("note-1")!!
+        assertEquals(null, note.deletedAt)
+        assertEquals("old", note.plainText)
+        assertEquals(emptyList<String>(), db.outboxDao().pendingOrFailed().map { it.action })
+    }
 }

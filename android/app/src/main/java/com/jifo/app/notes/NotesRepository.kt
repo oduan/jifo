@@ -21,6 +21,8 @@ class NotesRepository(
         .observeNotes(search?.takeIf { it.isNotBlank() }, tagPath?.takeIf { it.isNotBlank() }, limit.coerceAtLeast(1))
         .map { it }
 
+    suspend fun getNote(id: String): NoteEntity? = db.noteDao().getById(id)
+
     suspend fun createNote(blocks: List<NoteBlock>) {
         val clientId = idGenerator.newClientId("android-note")
         val opId = idGenerator.newOpId()
@@ -98,5 +100,14 @@ class NotesRepository(
             LocalTagIndex.rebuild(db)
         }
         syncScheduler.scheduleNow()
+    }
+
+    suspend fun undoDeleteNote(snapshot: NoteEntity) {
+        val now = clock.nowIso()
+        db.withTransaction {
+            db.outboxDao().deletePendingDeleteForNote(snapshot.id, snapshot.clientId)
+            db.noteDao().upsert(snapshot.copy(deletedAt = null, updatedAt = now, syncStatus = if (snapshot.version > 0) "SYNCED" else "PENDING", lastError = null))
+            LocalTagIndex.rebuild(db)
+        }
     }
 }

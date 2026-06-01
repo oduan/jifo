@@ -2,6 +2,10 @@ package com.jifo.app.notes
 
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.LayoutInflater
@@ -12,6 +16,7 @@ import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -21,6 +26,8 @@ import com.jifo.app.R
 import com.jifo.app.ServiceLocator
 import com.jifo.app.core.model.NoteBlock
 import com.jifo.app.databinding.FragmentNotesBinding
+import com.google.android.material.snackbar.Snackbar
+import com.jifo.app.data.local.NoteEntity
 import com.jifo.app.drawer.TagAdapter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,7 +49,7 @@ class NotesFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
-        val adapter = NoteAdapter()
+        val adapter = NoteAdapter { note, anchor -> showNoteActions(note, anchor) }
         lateinit var tagAdapter: TagAdapter
         tagAdapter = TagAdapter { tag ->
             selectedTagPath = tag.path
@@ -229,6 +236,41 @@ class NotesFragment : Fragment() {
             override fun onAnimationRepeat(animation: android.animation.Animator) = Unit
             override fun onAnimationEnd(animation: android.animation.Animator) = block()
         })
+    }
+
+    private fun showNoteActions(note: NoteEntity, anchor: View) {
+        NoteActionPopup.show(
+            anchor = anchor,
+            onCopy = { copyNote(note) },
+            onEdit = { openEdit(note) },
+            onDelete = { deleteNote(note) }
+        )
+    }
+
+    private fun copyNote(note: NoteEntity) {
+        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Jifo note", note.plainText))
+    }
+
+    private fun openEdit(note: NoteEntity) {
+        parentFragmentManager.beginTransaction()
+            .replace(R.id.main_container, NoteEditFragment.newInstance(note.id))
+            .addToBackStack("note-edit")
+            .commit()
+    }
+
+    private fun deleteNote(note: NoteEntity) {
+        val repository = ServiceLocator.notesRepository(requireContext())
+        viewLifecycleOwner.lifecycleScope.launch {
+            repository.deleteNote(note.id)
+            val snackbar = Snackbar.make(requireView(), "已删除笔记", Snackbar.LENGTH_LONG)
+                .setAction("撤销") {
+                    viewLifecycleOwner.lifecycleScope.launch { repository.undoDeleteNote(note) }
+                }
+                .setActionTextColor(ContextCompat.getColor(requireContext(), R.color.jifo_green))
+            snackbar.view.setBackgroundColor(Color.BLACK)
+            snackbar.show()
+        }
     }
 
     private fun observeNotes() {
