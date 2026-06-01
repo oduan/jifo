@@ -8,7 +8,7 @@ import { TagNode, TagTree } from '../tags/TagTree';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { TextInput } from '../../shared/ui/Input';
 import { Note, NoteCard } from './NoteCard';
-import { NoteBlock, NoteEditor, UploadedImage } from './NoteEditor';
+import { NoteBlock, NoteEditor } from './NoteEditor';
 
 type SelectedTag = {
   id: string | null;
@@ -35,7 +35,6 @@ type NotesPageProps = {
   onCreateNote?: (blocks: NoteBlock[]) => void | Promise<void>;
   onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
   onDeleteNote?: (id: string) => void | Promise<void>;
-  onUploadImage?: (file: File) => Promise<UploadedImage>;
   onLogout?: () => void;
   accessKeys?: AccessKeySummary[];
   isLoadingAccessKeys?: boolean;
@@ -67,7 +66,6 @@ export function NotesPage({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
-  onUploadImage,
   onLogout,
   accessKeys = [],
   isLoadingAccessKeys = false,
@@ -193,7 +191,7 @@ export function NotesPage({
         </header>
 
         <section className="composer-card" aria-label="新笔记编辑器">
-          <NoteEditor onUploadImage={onUploadImage} onSubmit={(blocks) => onCreateNote?.(blocks)} />
+          <NoteEditor onSubmit={(blocks) => onCreateNote?.(blocks)} />
         </section>
 
         <section className="notes-stream" aria-label="笔记流">
@@ -204,7 +202,6 @@ export function NotesPage({
               onDelete={(id) => onDeleteNote?.(id)}
               onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
               onTagSelect={selectTagFromNote}
-              onUploadImage={onUploadImage}
             />
           ))}
           {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}

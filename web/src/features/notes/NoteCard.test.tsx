@@ -154,34 +154,6 @@ describe('NoteCard', () => {
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
   });
 
-  test('按笔记 block 顺序混排图片，点击图片后放大显示', async () => {
-    const user = userEvent.setup();
-
-    render(
-      <NoteCard
-        note={{
-          id: 'n1',
-          createdAt: '2026-05-27',
-          blocks: [
-            { type: 'paragraph', content: '图片前' },
-            { type: 'image', url: 'blob:image-1', alt: '粘贴图片' },
-            { type: 'paragraph', content: '图片后' }
-          ],
-          tagIds: []
-        }}
-        onDelete={vi.fn()}
-        onUpdate={vi.fn()}
-      />
-    );
-
-    expect(screen.getByText('图片前')).toBeInTheDocument();
-    expect(screen.getByText('图片后')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '放大图片' }));
-
-    expect(screen.getByRole('dialog', { name: '图片预览' })).toBeInTheDocument();
-    expect(screen.getAllByAltText('粘贴图片')).toHaveLength(2);
-  });
-
   test('正文标签渲染为可点击的小标签', async () => {
     const user = userEvent.setup();
     const onTagSelect = vi.fn();

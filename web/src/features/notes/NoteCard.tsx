@@ -1,8 +1,7 @@
 import { FocusEvent, MouseEvent, ReactNode, useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
-import { authStore } from '../auth/authStore';
-import { NoteBlock, NoteEditor, UploadedImage } from './NoteEditor';
+import { NoteBlock, NoteEditor } from './NoteEditor';
 
 export type Note = {
   id: string;
@@ -18,7 +17,6 @@ type NoteCardProps = {
   onDelete: (id: string) => void;
   onUpdate: (id: string, blocks: NoteBlock[]) => void;
   onTagSelect?: (tagPath: string) => void;
-  onUploadImage?: (file: File) => Promise<UploadedImage>;
 };
 
 const NOTE_TAG_PATTERN = /#[^\s#]+/g;
@@ -30,12 +28,19 @@ function blockText(block: NoteBlock): string {
   return block.alt ? `[图片] ${block.alt}` : `[图片] ${block.url}`;
 }
 
-function noteText(blocks: NoteBlock[]): string {
-  return blocks.map(blockText).join('\n');
+function paragraphText(blocks: NoteBlock[]): string {
+  return blocks
+    .filter((block): block is Extract<NoteBlock, { type: 'paragraph' }> => block.type === 'paragraph')
+    .map((block) => block.content)
+    .join('\n\n');
 }
 
-function hasImage(blocks: NoteBlock[]) {
-  return blocks.some((block) => block.type === 'image');
+function imageBlocks(blocks: NoteBlock[]): Extract<NoteBlock, { type: 'image' }>[] {
+  return blocks.filter((block): block is Extract<NoteBlock, { type: 'image' }> => block.type === 'image');
+}
+
+function noteText(blocks: NoteBlock[]): string {
+  return blocks.map(blockText).join('\n');
 }
 
 function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => void): ReactNode[] {
@@ -77,57 +82,14 @@ function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => 
   return nodes.length > 0 ? nodes : [text];
 }
 
-function AuthenticatedImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
-  const [resolvedSrc, setResolvedSrc] = useState(src);
-
-  useEffect(() => {
-    if (!src.startsWith('/api/media/')) {
-      setResolvedSrc(src);
-      return;
-    }
-
-    const token = authStore.getAccessToken();
-    if (!token) {
-      setResolvedSrc(src);
-      return;
-    }
-
-    let objectUrl: string | undefined;
-    const controller = new AbortController();
-    fetch(src, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error('load media failed');
-        }
-        return response.blob();
-      })
-      .then((blob) => {
-        objectUrl = URL.createObjectURL(blob);
-        setResolvedSrc(objectUrl);
-      })
-      .catch(() => setResolvedSrc(src));
-
-    return () => {
-      controller.abort();
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [src]);
-
-  return <img src={resolvedSrc} alt={alt} className={className} />;
-}
-
-export function NoteCard({ note, onDelete, onUpdate, onTagSelect, onUploadImage }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onUpdate, onTagSelect }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [previewImage, setPreviewImage] = useState<Extract<NoteBlock, { type: 'image' }> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const content = noteText(note.blocks);
   const lines = content.split('\n');
-  const containsImage = hasImage(note.blocks);
-  const shouldCollapse = !containsImage && lines.length > 5;
+  const shouldCollapse = lines.length > 5;
   const visibleContent = !expanded && shouldCollapse ? lines.slice(0, 5).join('\n') : content;
 
   useEffect(() => {
@@ -155,19 +117,6 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, onUploadImage 
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [menuOpen]);
-
-  useEffect(() => {
-    if (!previewImage) {
-      return;
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setPreviewImage(null);
-      }
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [previewImage]);
 
   const closeMenuOnBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -203,37 +152,12 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, onUploadImage 
 
       {editing ? (
         <NoteEditor
-          initialBlocks={note.blocks}
-          onUploadImage={onUploadImage}
+          initialText={paragraphText(note.blocks)}
           onSubmit={(blocks) => {
-            onUpdate(note.id, blocks);
+            onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
             setEditing(false);
           }}
         />
-      ) : containsImage ? (
-        <div className="note-card__content note-card__content--blocks" onDoubleClick={() => setEditing(true)}>
-          {note.blocks.map((block, index) =>
-            block.type === 'paragraph' ? (
-              <p key={`paragraph-${index}`} className="note-card__paragraph">
-                {renderContentWithTags(block.content, onTagSelect)}
-              </p>
-            ) : (
-              <button
-                key={`image-${block.mediaId ?? block.url}-${index}`}
-                type="button"
-                className="note-card__image-button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setPreviewImage(block);
-                }}
-                onDoubleClick={(event) => event.stopPropagation()}
-                aria-label="放大图片"
-              >
-                <AuthenticatedImage src={block.url} alt={block.alt ?? '笔记图片'} className="note-card__image" />
-              </button>
-            )
-          )}
-        </div>
       ) : (
         <div className="note-card__content" onDoubleClick={() => setEditing(true)}>
           {renderContentWithTags(visibleContent, onTagSelect)}
@@ -244,15 +168,6 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, onUploadImage 
         <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>
           {expanded ? '收起' : '展开'}
         </Button>
-      ) : null}
-
-      {previewImage ? (
-        <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewImage(null)}>
-          <button type="button" className="image-lightbox__close" aria-label="关闭图片预览" onClick={() => setPreviewImage(null)}>
-            ×
-          </button>
-          <AuthenticatedImage src={previewImage.url} alt={previewImage.alt ?? '笔记图片'} className="image-lightbox__image" />
-        </div>
       ) : null}
     </article>
   );

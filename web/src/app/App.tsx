@@ -5,7 +5,6 @@ import { refreshAuth, submitAuth } from '../features/auth/api';
 import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
-import { uploadMedia } from '../features/media/api';
 import { createNote, deleteNote, fromApiNote, listNoteStats, listNotes, updateNote } from '../features/notes/api';
 import { AccessKeySummary, createAccessKey, CreateAccessKeyResult, deleteAccessKey as deleteAccessKeyAPI, listAccessKeys } from '../features/settings/api';
 import { Note } from '../features/notes/NoteCard';
@@ -288,10 +287,6 @@ export function App() {
           await deleteNote(client, id);
         })
       }
-      onUploadImage={async (file) => {
-        const asset = await uploadMedia(client, file);
-        return { mediaId: asset.id, url: asset.url, alt: file.name || '粘贴图片' };
-      }}
       onLogout={() => authStore.clear()}
       accessKeys={accessKeys}
       isLoadingAccessKeys={isLoadingAccessKeys}
