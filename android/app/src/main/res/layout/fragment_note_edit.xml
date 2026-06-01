@@ -52,5 +52,5 @@
         android:padding="16dp"
         android:textColor="@color/jifo_ink"
         android:textColorHint="@color/jifo_muted"
-        android:textSize="16sp" />
+        android:textSize="14sp" />
 </LinearLayout>

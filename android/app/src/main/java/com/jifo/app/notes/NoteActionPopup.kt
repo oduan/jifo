@@ -34,7 +34,7 @@ object NoteActionPopup {
 
     private fun row(context: Context, text: String, action: () -> Unit): TextView = TextView(context).apply {
         this.text = text
-        textSize = 15f
+        textSize = 14f
         setTextColor(Color.rgb(32, 27, 22))
         setBackgroundColor(Color.TRANSPARENT)
         gravity = Gravity.CENTER_VERTICAL
