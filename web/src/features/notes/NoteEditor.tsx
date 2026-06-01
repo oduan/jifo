@@ -1,16 +1,10 @@
-import { ClipboardEvent, FormEvent, useMemo, useState } from 'react';
-
-import { Textarea } from '../../shared/ui/Input';
+import { ClipboardEvent, FormEvent, useEffect, useRef, useState } from 'react';
 
 export type NoteBlock =
   | { type: 'paragraph'; content: string }
   | { type: 'image'; url: string; mediaId?: string; alt?: string };
 
 export type UploadedImage = { url: string; mediaId?: string; alt?: string };
-
-type DraftParagraphBlock = { type: 'paragraph'; content: string };
-type DraftImageBlock = { type: 'image'; url: string; mediaId?: string; alt?: string; localId: string; uploading?: boolean; error?: string };
-type DraftBlock = DraftParagraphBlock | DraftImageBlock;
 
 type NoteEditorProps = {
   initialText?: string;
@@ -23,7 +17,7 @@ function newLocalId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function toParagraphBlocks(text: string): DraftParagraphBlock[] {
+function toParagraphBlocks(text: string): NoteBlock[] {
   return text
     .split(/\n\s*\n/g)
     .map((part) => part.trim())
@@ -31,32 +25,7 @@ function toParagraphBlocks(text: string): DraftParagraphBlock[] {
     .map((content) => ({ type: 'paragraph', content }));
 }
 
-function toDraftBlocks(initialBlocks: NoteBlock[] | undefined, initialText: string): DraftBlock[] {
-  const source = initialBlocks?.length ? initialBlocks : toParagraphBlocks(initialText);
-  if (source.length === 0) {
-    return [{ type: 'paragraph', content: '' }];
-  }
-  return source.map((block) => {
-    if (block.type === 'image') {
-      return { ...block, localId: newLocalId() };
-    }
-    return block;
-  });
-}
-
-function normalizeBlocks(blocks: DraftBlock[]): NoteBlock[] {
-  return blocks.flatMap((block): NoteBlock[] => {
-    if (block.type === 'paragraph') {
-      return toParagraphBlocks(block.content).map((item) => ({ type: 'paragraph', content: item.content }));
-    }
-    if (block.uploading || block.error) {
-      return [];
-    }
-    return [{ type: 'image', url: block.url, mediaId: block.mediaId, alt: block.alt }];
-  });
-}
-
-function imageFilesFromClipboard(event: ClipboardEvent<HTMLTextAreaElement>) {
+function imageFilesFromClipboard(event: ClipboardEvent<HTMLElement>) {
   const files = Array.from(event.clipboardData.files ?? []).filter((file) => file.type.startsWith('image/'));
   if (files.length > 0) {
     return files;
@@ -67,116 +36,210 @@ function imageFilesFromClipboard(event: ClipboardEvent<HTMLTextAreaElement>) {
     .filter((file): file is File => Boolean(file));
 }
 
-export function NoteEditor({ initialText = '', initialBlocks, onSubmit, onUploadImage }: NoteEditorProps) {
-  const [draftBlocks, setDraftBlocks] = useState<DraftBlock[]>(() => toDraftBlocks(initialBlocks, initialText));
+function appendBreaks(root: HTMLElement, count = 1) {
+  for (let index = 0; index < count; index += 1) {
+    root.appendChild(document.createElement('br'));
+  }
+}
+
+function appendParagraph(root: HTMLElement, content: string) {
+  root.appendChild(document.createTextNode(content));
+  appendBreaks(root, 2);
+}
+
+function createEditorImage(block: Extract<NoteBlock, { type: 'image' }> & { localId?: string; uploading?: boolean }) {
+  const image = document.createElement('img');
+  image.className = 'note-editor__inline-image';
+  image.src = block.url;
+  image.alt = block.alt ?? '粘贴图片';
+  image.dataset.localId = block.localId ?? newLocalId();
+  if (block.mediaId) image.dataset.mediaId = block.mediaId;
+  if (block.uploading) image.dataset.uploading = 'true';
+  image.contentEditable = 'false';
+  return image;
+}
+
+function initializeEditor(root: HTMLElement, blocks: NoteBlock[], initialText: string) {
+  root.innerHTML = '';
+  const source = blocks.length > 0 ? blocks : toParagraphBlocks(initialText);
+  if (source.length === 0) {
+    return;
+  }
+  source.forEach((block) => {
+    if (block.type === 'paragraph') {
+      appendParagraph(root, block.content);
+    } else {
+      root.appendChild(createEditorImage(block));
+      appendBreaks(root, 1);
+    }
+  });
+}
+
+function placeCaretAfter(node: Node) {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function insertNodeAtSelection(root: HTMLElement, node: Node) {
+  const selection = window.getSelection();
+  const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : document.createRange();
+  if (!selection || selection.rangeCount === 0 || !root.contains(range.commonAncestorContainer)) {
+    range.selectNodeContents(root);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  range.insertNode(node);
+  const trailingSpace = document.createTextNode(' ');
+  node.parentNode?.insertBefore(trailingSpace, node.nextSibling);
+  placeCaretAfter(trailingSpace);
+}
+
+function serializeEditor(root: HTMLElement): NoteBlock[] {
+  const blocks: NoteBlock[] = [];
+  let textBuffer = '';
+
+  const flushText = () => {
+    const paragraphs = toParagraphBlocks(textBuffer);
+    paragraphs.forEach((paragraph) => blocks.push(paragraph));
+    textBuffer = '';
+  };
+
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      textBuffer += node.textContent ?? '';
+      return;
+    }
+
+    if (node instanceof HTMLBRElement) {
+      textBuffer += '\n';
+      return;
+    }
+
+    if (node instanceof HTMLImageElement && node.classList.contains('note-editor__inline-image')) {
+      flushText();
+      if (node.dataset.uploading === 'true' || node.dataset.error === 'true') {
+        return;
+      }
+      blocks.push({
+        type: 'image',
+        url: node.dataset.url || node.src,
+        mediaId: node.dataset.mediaId,
+        alt: node.alt || undefined
+      });
+      return;
+    }
+
+    node.childNodes.forEach(visit);
+    if (node instanceof HTMLDivElement || node instanceof HTMLParagraphElement) {
+      textBuffer += '\n';
+    }
+  };
+
+  root.childNodes.forEach(visit);
+  flushText();
+  return blocks;
+}
+
+export function NoteEditor({ initialText = '', initialBlocks = [], onSubmit, onUploadImage }: NoteEditorProps) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const initializedRef = useRef(false);
   const [isExpanded, setExpanded] = useState(false);
+  const [hasContent, setHasContent] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
   const [pasteError, setPasteError] = useState<string | null>(null);
-  const normalizedBlocks = useMemo(() => normalizeBlocks(draftBlocks), [draftBlocks]);
-  const hasUploadingImage = draftBlocks.some((block) => block.type === 'image' && block.uploading);
-  const hasContent = normalizedBlocks.length > 0;
+
+  const refreshContentState = () => {
+    const root = editorRef.current;
+    setHasContent(Boolean(root && serializeEditor(root).length > 0));
+  };
+
+  useEffect(() => {
+    const root = editorRef.current;
+    if (!root || initializedRef.current) return;
+    initializeEditor(root, initialBlocks, initialText);
+    initializedRef.current = true;
+    refreshContentState();
+  }, [initialBlocks, initialText]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!hasContent || hasUploadingImage) {
-      return;
-    }
-    onSubmit(normalizedBlocks);
-    setDraftBlocks([{ type: 'paragraph', content: '' }]);
+    const root = editorRef.current;
+    if (!root || uploadingCount > 0) return;
+    const blocks = serializeEditor(root);
+    if (blocks.length === 0) return;
+    onSubmit(blocks);
+    root.innerHTML = '';
     setExpanded(false);
     setPasteError(null);
+    refreshContentState();
   };
 
-  const updateParagraph = (index: number, content: string) => {
-    setDraftBlocks((current) => current.map((block, blockIndex) => (blockIndex === index && block.type === 'paragraph' ? { ...block, content } : block)));
-  };
-
-  const removeImage = (localId: string) => {
-    setDraftBlocks((current) => current.filter((block) => block.type !== 'image' || block.localId !== localId));
-  };
-
-  const uploadPastedImage = async (localId: string, file: File, previewUrl: string) => {
+  const uploadPastedImage = async (image: HTMLImageElement, file: File, previewUrl: string) => {
     if (!onUploadImage) {
-      setDraftBlocks((current) => current.map((block) => (block.type === 'image' && block.localId === localId ? { ...block, uploading: false } : block)));
+      image.dataset.uploading = 'false';
+      refreshContentState();
       return;
     }
 
+    setUploadingCount((count) => count + 1);
     try {
       const uploaded = await onUploadImage(file);
-      setDraftBlocks((current) =>
-        current.map((block) =>
-          block.type === 'image' && block.localId === localId
-            ? { ...block, url: uploaded.url || previewUrl, mediaId: uploaded.mediaId, alt: uploaded.alt ?? file.name, uploading: false, error: undefined }
-            : block
-        )
-      );
-    } catch (error) {
+      image.src = uploaded.url || previewUrl;
+      image.dataset.url = uploaded.url || previewUrl;
+      if (uploaded.mediaId) image.dataset.mediaId = uploaded.mediaId;
+      image.alt = uploaded.alt ?? file.name ?? '粘贴图片';
+      image.dataset.uploading = 'false';
+      delete image.dataset.error;
+      setPasteError(null);
+    } catch {
+      image.dataset.uploading = 'false';
+      image.dataset.error = 'true';
       setPasteError('图片上传失败，请稍后重试。');
-      setDraftBlocks((current) =>
-        current.map((block) => (block.type === 'image' && block.localId === localId ? { ...block, uploading: false, error: 'upload_failed' } : block))
-      );
+    } finally {
+      setUploadingCount((count) => Math.max(0, count - 1));
+      refreshContentState();
     }
   };
 
-  const handlePasteImage = (index: number, event: ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
     const files = imageFilesFromClipboard(event);
-    if (files.length === 0) {
-      return;
-    }
+    if (files.length === 0) return;
 
     event.preventDefault();
     setPasteError(null);
-    const target = event.currentTarget;
-    const before = target.value.slice(0, target.selectionStart ?? target.value.length);
-    const after = target.value.slice(target.selectionEnd ?? target.value.length);
-    const imageBlocks = files.map((file): DraftImageBlock => {
+    files.forEach((file) => {
       const previewUrl = URL.createObjectURL(file);
-      const localId = newLocalId();
-      if (onUploadImage) {
-        void uploadPastedImage(localId, file, previewUrl);
-      }
-      return { type: 'image', url: previewUrl, alt: file.name || '粘贴图片', localId, uploading: Boolean(onUploadImage) };
+      const image = createEditorImage({ type: 'image', url: previewUrl, alt: file.name || '粘贴图片', localId: newLocalId(), uploading: Boolean(onUploadImage) });
+      image.dataset.url = previewUrl;
+      insertNodeAtSelection(editorRef.current!, image);
+      void uploadPastedImage(image, file, previewUrl);
     });
-
-    setDraftBlocks((current) => {
-      const next = [...current];
-      next[index] = { type: 'paragraph', content: before };
-      const inserted: DraftBlock[] = [...imageBlocks];
-      if (after.trim()) {
-        inserted.push({ type: 'paragraph', content: after });
-      }
-      next.splice(index + 1, 0, ...inserted);
-      return next;
-    });
+    refreshContentState();
   };
+
+  const disabled = !hasContent || uploadingCount > 0;
 
   return (
     <form className="note-editor" onSubmit={handleSubmit}>
       <div className="note-editor__input-wrap">
-        <div className="note-editor__blocks" aria-label="笔记内容块">
-          {draftBlocks.map((block, index) =>
-            block.type === 'paragraph' ? (
-              <Textarea
-                key={`paragraph-${index}`}
-                className="note-editor__textarea"
-                aria-label={index === 0 ? '笔记内容' : '笔记段落'}
-                name="note-content"
-                rows={isExpanded ? 10 : 5}
-                value={block.content}
-                onChange={(event) => updateParagraph(index, event.target.value)}
-                onPaste={(event) => handlePasteImage(index, event)}
-                placeholder="记录此刻想法…可直接粘贴图片"
-              />
-            ) : (
-              <figure key={block.localId} className="note-editor__image-draft" aria-label={block.uploading ? '图片上传中' : '已粘贴图片'}>
-                <img src={block.url} alt={block.alt ?? '粘贴图片'} />
-                <figcaption>{block.uploading ? '图片上传中…' : block.error ? '上传失败' : block.alt || '图片'}</figcaption>
-                <button type="button" className="note-editor__remove-image" onClick={() => removeImage(block.localId)} aria-label="移除图片">
-                  ×
-                </button>
-              </figure>
-            )
-          )}
-        </div>
+        <div
+          ref={editorRef}
+          className={`note-editor__rich ${isExpanded ? 'note-editor__rich--expanded' : ''}`}
+          contentEditable
+          role="textbox"
+          aria-multiline="true"
+          aria-label="笔记内容"
+          data-placeholder="记录此刻想法…可直接粘贴图片"
+          onInput={refreshContentState}
+          onPaste={handlePaste}
+          suppressContentEditableWarning
+        />
+        {uploadingCount > 0 ? <p className="note-editor__hint">图片上传中…</p> : null}
         {pasteError ? <p className="note-editor__error" role="alert">{pasteError}</p> : null}
         <button
           type="button"
@@ -187,13 +250,7 @@ export function NoteEditor({ initialText = '', initialBlocks, onSubmit, onUpload
         >
           <span aria-hidden="true">⤢</span>
         </button>
-        <button
-          type="submit"
-          className="send-icon-button"
-          aria-label="发送笔记"
-          title="发送笔记"
-          disabled={!hasContent || hasUploadingImage}
-        >
+        <button type="submit" className="send-icon-button" aria-label="发送笔记" title="发送笔记" disabled={disabled}>
           <span aria-hidden="true">➤</span>
         </button>
       </div>
