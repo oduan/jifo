@@ -28,6 +28,7 @@ import com.jifo.app.core.model.NoteBlock
 import com.jifo.app.databinding.FragmentNotesBinding
 import com.google.android.material.snackbar.Snackbar
 import com.jifo.app.data.local.NoteEntity
+import com.jifo.app.data.local.TagEntity
 import com.jifo.app.drawer.TagAdapter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -40,6 +41,7 @@ class NotesFragment : Fragment() {
     private var visibleLimit = PAGE_SIZE
     private var refreshInFlight = false
     private var pullAnimator: ValueAnimator? = null
+    private var currentTags: List<TagEntity> = emptyList()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val next = FragmentNotesBinding.inflate(inflater, container, false)
@@ -85,8 +87,9 @@ class NotesFragment : Fragment() {
         }
         viewLifecycleOwner.lifecycleScope.launch {
             ServiceLocator.database(requireContext()).tagDao().observeTags().collect { tags ->
-                tagAdapter.submitList(tags.filter { it.noteCount > 0 })
-                textTagCount.text = tags.count { it.noteCount > 0 }.toString()
+                currentTags = tags.filter { it.noteCount > 0 }
+                tagAdapter.submitList(currentTags)
+                textTagCount.text = currentTags.size.toString()
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
@@ -116,7 +119,7 @@ class NotesFragment : Fragment() {
         }
         b.buttonMenu.setOnClickListener { b.drawerLayout.openDrawer(GravityCompat.START) }
         b.buttonAddNote.setOnClickListener {
-            NoteEditorBottomSheet { text ->
+            NoteEditorBottomSheet(tags = currentTags) { text ->
                 viewLifecycleOwner.lifecycleScope.launch {
                     repository.createNote(listOf(NoteBlock.Paragraph(text.trim())))
                     runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }

@@ -13,10 +13,15 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.jifo.app.R
+import com.jifo.app.data.local.TagEntity
 import com.jifo.app.databinding.BottomSheetNoteEditorBinding
 
-class NoteEditorBottomSheet(private val onSubmit: ((String) -> Unit)? = null) : BottomSheetDialogFragment() {
+class NoteEditorBottomSheet(
+    private val tags: List<TagEntity> = emptyList(),
+    private val onSubmit: ((String) -> Unit)? = null
+) : BottomSheetDialogFragment() {
     private var binding: BottomSheetNoteEditorBinding? = null
+    private var tagAutocomplete: NoteTagAutocomplete? = null
 
     override fun onStart() {
         super.onStart()
@@ -44,6 +49,7 @@ class NoteEditorBottomSheet(private val onSubmit: ((String) -> Unit)? = null) : 
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = render()
             override fun afterTextChanged(s: Editable?) = Unit
         })
+        tagAutocomplete = NoteTagAutocomplete(b.editNote, tags)
         b.buttonSend.setOnClickListener {
             val text = b.editNote.text?.toString().orEmpty()
             if (NoteEditorState(text).canSend) { onSubmit?.invoke(text); dismiss() }
@@ -55,5 +61,10 @@ class NoteEditorBottomSheet(private val onSubmit: ((String) -> Unit)? = null) : 
         }
         render()
     }
-    override fun onDestroyView() { binding = null; super.onDestroyView() }
+    override fun onDestroyView() {
+        tagAutocomplete?.detach()
+        tagAutocomplete = null
+        binding = null
+        super.onDestroyView()
+    }
 }

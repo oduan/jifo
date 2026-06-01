@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 
 class NoteEditFragment : Fragment() {
     private var binding: FragmentNoteEditBinding? = null
+    private var tagAutocomplete: NoteTagAutocomplete? = null
     private val noteId: String by lazy { requireArguments().getString(ARG_NOTE_ID).orEmpty() }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -26,6 +27,12 @@ class NoteEditFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
         val repository = ServiceLocator.notesRepository(requireContext())
+        tagAutocomplete = NoteTagAutocomplete(b.editNoteFull)
+        viewLifecycleOwner.lifecycleScope.launch {
+            ServiceLocator.database(requireContext()).tagDao().observeTags().collect { tags ->
+                tagAutocomplete?.updateTags(tags.filter { it.noteCount > 0 })
+            }
+        }
         viewLifecycleOwner.lifecycleScope.launch {
             repository.getNote(noteId)?.let { note -> b.editNoteFull.setText(note.plainText) }
             b.editNoteFull.post {
@@ -47,6 +54,8 @@ class NoteEditFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        tagAutocomplete?.detach()
+        tagAutocomplete = null
         binding = null
         super.onDestroyView()
     }
