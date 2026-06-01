@@ -460,7 +460,7 @@ h3 {
 .note-card__content {
   white-space: pre-wrap;
   color: #3a322a;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
   cursor: text;
@@ -519,6 +519,10 @@ h3 {
   font-size: 12px;
 }
 
+.note-menu__panel .jifo-button {
+  font-size: 14px;
+}
+
 .note-menu .note-menu__trigger {
   min-width: 24px;
   min-height: 24px;
@@ -552,6 +556,10 @@ h3 {
   box-shadow: none;
   font-size: 12px;
   font-weight: 400;
+}
+
+.note-menu__panel .dropdown-menu__item {
+  font-size: 14px;
 }
 
 .note-menu__panel .dropdown-menu__item:hover:not(:disabled),
@@ -1081,7 +1089,7 @@ h3 {
   min-height: 96px;
   padding: 13px 50px 48px 14px;
   border-radius: 16px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .note-editor__textarea:focus-visible {
