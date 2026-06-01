@@ -70,6 +70,22 @@ describe('NoteEditor', () => {
     expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
   });
 
+  test('没有匹配标签时显示可新建的输入词', async () => {
+    const user = userEvent.setup();
+
+    render(<NoteEditor tags={[{ id: 'test', name: '测试', path: '测试' }]} onSubmit={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, ' #新标签');
+
+    const option = screen.getByRole('option', { name: '新标签 新建' });
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('新建')).toHaveClass('note-editor__tag-suggestion-badge');
+
+    await user.keyboard('{Enter}');
+    expect(textarea).toHaveValue(' #新标签 ');
+  });
+
   test('标签下拉会根据 # 后输入实时过滤，且非独立 # 不触发', async () => {
     const user = userEvent.setup();
 
@@ -77,6 +93,7 @@ describe('NoteEditor', () => {
       <NoteEditor
         tags={[
           { id: 'test', name: '测试', path: '测试' },
+          { id: 'test1', name: '测试1', path: '测试1' },
           { id: 'work', name: '工作', path: '工作/前端' }
         ]}
         onSubmit={vi.fn()}
@@ -88,10 +105,11 @@ describe('NoteEditor', () => {
     expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
 
     await user.clear(textarea);
-    await user.type(textarea, ' #工');
+    await user.type(textarea, ' #1');
 
-    expect(screen.getByRole('option', { name: '工作/前端' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '测试1' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '测试' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '工作/前端' })).not.toBeInTheDocument();
   });
 
   test('提交后清空内容、恢复默认高度，并禁用发送按钮', async () => {

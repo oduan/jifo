@@ -24,6 +24,15 @@ type TagTrigger = {
   query: string;
 };
 
+type SuggestionItem =
+  | { type: 'tag'; key: string; label: string; tag: NoteEditorTag }
+  | { type: 'create'; key: string; label: string };
+
+type SuggestionPosition = {
+  left: number;
+  top: number;
+};
+
 function toParagraphBlocks(text: string): NoteBlock[] {
   return text
     .split(/\n\s*\n/g)
@@ -61,7 +70,7 @@ function filterTags(tags: NoteEditorTag[], query: string): NoteEditorTag[] {
   tags.forEach((tag) => {
     const label = tagInsertText(tag);
     if (!label) return;
-    const haystack = `${label} ${tag.name} ${tag.id}`.toLocaleLowerCase();
+    const haystack = `${label} ${tag.name}`.toLocaleLowerCase();
     if (!normalized || haystack.includes(normalized)) {
       unique.set(tag.id, tag);
     }
@@ -69,21 +78,96 @@ function filterTags(tags: NoteEditorTag[], query: string): NoteEditorTag[] {
   return [...unique.values()];
 }
 
+function suggestionItems(tags: NoteEditorTag[], query: string): SuggestionItem[] {
+  const matches = filterTags(tags, query).map((tag): SuggestionItem => ({ type: 'tag', key: tag.id, label: tagInsertText(tag), tag }));
+  const createLabel = query.trim();
+  if (matches.length === 0 && createLabel) {
+    return [{ type: 'create', key: `create:${createLabel}`, label: createLabel }];
+  }
+  return matches;
+}
+
+function numericStyle(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function lineHeightPx(style: CSSStyleDeclaration): number {
+  const parsed = Number.parseFloat(style.lineHeight);
+  if (Number.isFinite(parsed)) return parsed;
+  return numericStyle(style.fontSize) * 1.35;
+}
+
+function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): SuggestionPosition {
+  const style = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+  const span = document.createElement('span');
+  const copyProperties = [
+    'boxSizing',
+    'width',
+    'fontFamily',
+    'fontSize',
+    'fontWeight',
+    'fontStyle',
+    'letterSpacing',
+    'textTransform',
+    'wordSpacing',
+    'textIndent',
+    'paddingTop',
+    'paddingRight',
+    'paddingBottom',
+    'paddingLeft',
+    'borderTopWidth',
+    'borderRightWidth',
+    'borderBottomWidth',
+    'borderLeftWidth',
+    'lineHeight'
+  ] as const;
+
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.overflowWrap = 'break-word';
+  mirror.style.top = '0';
+  mirror.style.left = '-9999px';
+  copyProperties.forEach((property) => {
+    mirror.style[property] = style[property];
+  });
+
+  mirror.textContent = textarea.value.slice(0, caret);
+  span.textContent = '\u200b';
+  mirror.appendChild(span);
+  document.body.appendChild(mirror);
+
+  const left = textarea.offsetLeft + span.offsetLeft - textarea.scrollLeft;
+  const top = textarea.offsetTop + span.offsetTop - textarea.scrollTop + lineHeightPx(style) + 4;
+  document.body.removeChild(mirror);
+
+  return {
+    left: Math.max(8, left),
+    top: Math.max(8, top)
+  };
+}
+
 export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(initialText);
   const [isExpanded, setExpanded] = useState(false);
   const [tagTrigger, setTagTrigger] = useState<TagTrigger | null>(null);
+  const [suggestionPosition, setSuggestionPosition] = useState<SuggestionPosition>({ left: 10, top: 0 });
   const [focusedTagIndex, setFocusedTagIndex] = useState(0);
   const blocks = toParagraphBlocks(text);
   const hasContent = blocks.length > 0;
-  const suggestedTags = useMemo(() => (tagTrigger ? filterTags(tags, tagTrigger.query) : []), [tagTrigger, tags]);
-  const showTagSuggestions = Boolean(tagTrigger && suggestedTags.length > 0);
+  const suggestions = useMemo(() => (tagTrigger ? suggestionItems(tags, tagTrigger.query) : []), [tagTrigger, tags]);
+  const showTagSuggestions = Boolean(tagTrigger && suggestions.length > 0);
 
-  const refreshTagTrigger = (nextText: string, caret: number) => {
+  const refreshTagTrigger = (nextText: string, caret: number, textarea: HTMLTextAreaElement | null = textareaRef.current) => {
     const nextTrigger = findTagTrigger(nextText, caret);
     setTagTrigger(nextTrigger);
     setFocusedTagIndex(0);
+    if (nextTrigger && textarea) {
+      setSuggestionPosition(caretDropdownPosition(textarea, caret));
+    }
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -98,9 +182,9 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
     setFocusedTagIndex(0);
   };
 
-  const chooseTag = (tag: NoteEditorTag) => {
-    if (!tagTrigger) return;
-    const label = tagInsertText(tag);
+  const chooseSuggestion = (item: SuggestionItem | undefined) => {
+    if (!tagTrigger || !item) return;
+    const label = item.label;
     const beforeHash = text.slice(0, tagTrigger.hashStart);
     const afterCaret = text.slice(tagTrigger.caret).replace(/^\s+/, '');
     const inserted = `#${label} `;
@@ -120,17 +204,17 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setFocusedTagIndex((index) => (index + 1) % suggestedTags.length);
+      setFocusedTagIndex((index) => (index + 1) % suggestions.length);
       return;
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setFocusedTagIndex((index) => (index - 1 + suggestedTags.length) % suggestedTags.length);
+      setFocusedTagIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
       return;
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      chooseTag(suggestedTags[focusedTagIndex] ?? suggestedTags[0]);
+      chooseSuggestion(suggestions[focusedTagIndex] ?? suggestions[0]);
       return;
     }
     if (event.key === 'Escape') {
@@ -153,33 +237,40 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
           onChange={(event) => {
             const nextText = event.target.value;
             setText(nextText);
-            refreshTagTrigger(nextText, event.target.selectionStart ?? nextText.length);
+            refreshTagTrigger(nextText, event.target.selectionStart ?? nextText.length, event.currentTarget);
           }}
-          onClick={(event) => refreshTagTrigger(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)}
-          onSelect={(event) => refreshTagTrigger(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)}
+          onClick={(event) => refreshTagTrigger(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length, event.currentTarget)}
+          onSelect={(event) => refreshTagTrigger(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length, event.currentTarget)}
           onKeyDown={handleKeyDown}
           placeholder="记录此刻想法…"
           autoComplete="off"
         />
         {showTagSuggestions ? (
-          <div className="note-editor__tag-suggestions" role="listbox" aria-label="标签建议">
-            {suggestedTags.map((tag, index) => {
-              const label = tagInsertText(tag);
+          <div
+            className="note-editor__tag-suggestions"
+            role="listbox"
+            aria-label="标签建议"
+            style={{ left: suggestionPosition.left, top: suggestionPosition.top }}
+          >
+            {suggestions.map((item, index) => {
               const active = index === focusedTagIndex;
               return (
                 <button
-                  key={tag.id}
+                  key={item.key}
                   type="button"
                   className="note-editor__tag-suggestion"
                   role="option"
                   aria-selected={active}
                   onMouseEnter={() => setFocusedTagIndex(index)}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => chooseTag(tag)}
+                  onClick={() => chooseSuggestion(item)}
                 >
                   <span className="note-editor__tag-suggestion-focus">
-                    <span aria-hidden="true">#</span>
-                    <span>{label}</span>
+                    <span className="note-editor__tag-suggestion-label">
+                      <span aria-hidden="true">#</span>
+                      <span>{item.label}</span>
+                    </span>
+                    {item.type === 'create' ? <span className="note-editor__tag-suggestion-badge">新建</span> : null}
                   </span>
                 </button>
               );
