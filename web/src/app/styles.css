@@ -591,7 +591,11 @@ h3 {
 }
 
 .tag-row:hover {
-  background: var(--jifo-button-hover);
+  background: rgba(32, 27, 22, 0.06);
+}
+
+.tag-row:hover .tag-button {
+  background: transparent;
 }
 
 .tag-expander,
