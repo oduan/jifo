@@ -4,36 +4,24 @@ import userEvent from '@testing-library/user-event';
 
 import { NoteEditor } from './NoteEditor';
 
-function placeCaretInText(editor: HTMLElement, offset: number) {
-  const textNode = Array.from(editor.childNodes).find((node) => node.nodeType === Node.TEXT_NODE) ?? editor.firstChild;
-  if (!textNode) return;
-  const range = document.createRange();
-  range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
-  range.collapse(true);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-}
-
 describe('NoteEditor', () => {
   beforeEach(() => {
     Object.defineProperty(URL, 'createObjectURL', { writable: true, value: vi.fn(() => 'blob:pasted-image') });
     Object.defineProperty(URL, 'revokeObjectURL', { writable: true, value: vi.fn() });
   });
-
-  test('默认显示富文本输入框并可通过纸飞机按钮提交 paragraph blocks', async () => {
+  test('默认 5 行并可通过纸飞机按钮提交 paragraph blocks', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
 
     render(<NoteEditor onSubmit={onSubmit} />);
 
-    const editor = screen.getByLabelText('笔记内容');
-    expect(editor).toHaveAttribute('contenteditable', 'true');
+    const textarea = screen.getByLabelText('笔记内容');
+    expect(textarea).toHaveAttribute('rows', '5');
 
     const sendButton = screen.getByRole('button', { name: '发送笔记' });
     expect(sendButton).toBeDisabled();
 
-    await user.type(editor, '第一段{enter}{enter}第二段');
+    await user.type(textarea, '第一段\n\n第二段');
     expect(sendButton).toBeEnabled();
     await user.click(sendButton);
 
@@ -48,19 +36,19 @@ describe('NoteEditor', () => {
 
     render(<NoteEditor onSubmit={vi.fn()} />);
 
-    const editor = screen.getByLabelText('笔记内容');
-    expect(editor).not.toHaveClass('note-editor__rich--expanded');
+    const textarea = screen.getByLabelText('笔记内容');
+    expect(textarea).toHaveAttribute('rows', '5');
 
     const expandButton = screen.getByRole('button', { name: '扩大输入' });
     expect(expandButton).toHaveTextContent('⤢');
 
     await user.click(expandButton);
 
-    expect(editor).toHaveClass('note-editor__rich--expanded');
+    expect(textarea).toHaveAttribute('rows', '10');
     expect(screen.getByRole('button', { name: '收起输入' })).toHaveTextContent('⤢');
   });
 
-  test('粘贴图片后图片直接出现在输入框文字后面并提交混排 blocks', async () => {
+  test('粘贴图片后按光标位置形成文字和图片混排 blocks', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     const onUploadImage = vi.fn(async (file: File) => ({ mediaId: 'media-1', url: '/api/media/media-1', alt: file.name }));
@@ -68,10 +56,10 @@ describe('NoteEditor', () => {
 
     render(<NoteEditor onSubmit={onSubmit} onUploadImage={onUploadImage} />);
 
-    const editor = screen.getByLabelText('笔记内容');
-    await user.type(editor, '前文后文');
-    placeCaretInText(editor, 2);
-    fireEvent.paste(editor, {
+    const textarea = screen.getByLabelText('笔记内容') as HTMLTextAreaElement;
+    await user.type(textarea, '前文后文');
+    textarea.setSelectionRange(2, 2);
+    fireEvent.paste(textarea, {
       clipboardData: {
         files: [file],
         items: []
@@ -79,7 +67,7 @@ describe('NoteEditor', () => {
     });
 
     expect(onUploadImage).toHaveBeenCalledWith(file);
-    await waitFor(() => expect(screen.getByAltText('pasted.png')).toHaveAttribute('src', '/api/media/media-1'));
+    await waitFor(() => expect(screen.getByText('pasted.png')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
     expect(onSubmit).toHaveBeenCalledWith([
@@ -95,14 +83,14 @@ describe('NoteEditor', () => {
 
     render(<NoteEditor onSubmit={onSubmit} />);
 
-    const editor = screen.getByLabelText('笔记内容');
+    const textarea = screen.getByLabelText('笔记内容');
     await user.click(screen.getByRole('button', { name: '扩大输入' }));
-    await user.type(editor, '提交后清空');
+    await user.type(textarea, '提交后清空');
     await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
     expect(onSubmit).toHaveBeenCalledWith([{ type: 'paragraph', content: '提交后清空' }]);
-    expect(editor).toHaveTextContent('');
-    expect(editor).not.toHaveClass('note-editor__rich--expanded');
+    expect(textarea).toHaveValue('');
+    expect(textarea).toHaveAttribute('rows', '5');
     expect(screen.getByRole('button', { name: '发送笔记' })).toBeDisabled();
   });
 });
