@@ -56,6 +56,32 @@ class NotesRepositoryTest {
         assertEquals(3, op.baseVersion)
     }
 
+    @Test fun updateUnsyncedCreateCoalescesIntoCreateOutbox() = runTest {
+        val db = database()
+        val repo = NotesRepository(db, FakeSyncScheduler(), FixedIdGenerator("client-note-1", "op-create"), FixedClock("2026-05-31T09:00:00Z"))
+
+        repo.createNote(listOf(NoteBlock.Paragraph("draft")))
+        repo.updateNote("client-note-1", listOf(NoteBlock.Paragraph("edited before sync")))
+
+        val outbox = db.outboxDao().pendingOrFailed()
+        val note = db.noteDao().getById("client-note-1")!!
+        assertEquals(listOf("create"), outbox.map { it.action })
+        assertEquals("edited before sync", note.plainText)
+        assertEquals(true, outbox.single().payloadJson.contains("edited before sync"))
+    }
+
+    @Test fun deleteUnsyncedCreateRemovesCreateOutboxWithoutInvalidDelete() = runTest {
+        val db = database()
+        val repo = NotesRepository(db, FakeSyncScheduler(), FixedIdGenerator("client-note-1", "op-create"), FixedClock("2026-05-31T09:00:00Z"))
+
+        repo.createNote(listOf(NoteBlock.Paragraph("draft")))
+        repo.deleteNote("client-note-1")
+
+        val note = db.noteDao().getById("client-note-1")!!
+        assertNotNull(note.deletedAt)
+        assertEquals(emptyList<String>(), db.outboxDao().pendingOrFailed().map { it.action })
+    }
+
     @Test fun deleteNoteMarksLocalDeletedAndQueuesDelete() = runTest {
         val db = database()
         db.noteDao().upsert(NoteEntity(id = "note-1", clientId = "client-1", contentJson = "[]", plainText = "old", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 4))

@@ -58,6 +58,7 @@ class NotesRepository(
         val opId = idGenerator.newOpId()
         val now = clock.nowIso()
         val plainText = blocks.toPlainText()
+        val payloadJson = NoteJson.encodePayload(blocks, plainText)
         db.withTransaction {
             db.noteDao().upsert(current.copy(
                 contentJson = NoteJson.encodeBlocks(blocks),
@@ -66,16 +67,22 @@ class NotesRepository(
                 syncStatus = "PENDING",
                 lastError = null
             ))
-            db.outboxDao().insert(OutboxOperationEntity(
-                opId = opId,
-                entity = "note",
-                action = "update",
-                noteId = id,
-                clientId = current.clientId,
-                baseVersion = current.version,
-                payloadJson = NoteJson.encodePayload(blocks, plainText),
-                createdAt = now
-            ))
+            val pendingCreate = db.outboxDao().pendingCreateForClient(current.clientId)
+            if (pendingCreate != null) {
+                db.outboxDao().updatePayload(pendingCreate.opId, payloadJson)
+                db.outboxDao().deletePendingMutationsForClient(current.clientId)
+            } else {
+                db.outboxDao().insert(OutboxOperationEntity(
+                    opId = opId,
+                    entity = "note",
+                    action = "update",
+                    noteId = id,
+                    clientId = current.clientId,
+                    baseVersion = current.version,
+                    payloadJson = payloadJson,
+                    createdAt = now
+                ))
+            }
             LocalTagIndex.rebuild(db)
         }
         syncScheduler.scheduleNow()
@@ -87,16 +94,22 @@ class NotesRepository(
         val now = clock.nowIso()
         db.withTransaction {
             db.noteDao().upsert(current.copy(deletedAt = now, updatedAt = now, syncStatus = "PENDING"))
-            db.outboxDao().insert(OutboxOperationEntity(
-                opId = opId,
-                entity = "note",
-                action = "delete",
-                noteId = id,
-                clientId = current.clientId,
-                baseVersion = current.version,
-                payloadJson = "{}",
-                createdAt = now
-            ))
+            val pendingCreate = db.outboxDao().pendingCreateForClient(current.clientId)
+            if (pendingCreate != null) {
+                db.outboxDao().deletePendingCreateForClient(current.clientId)
+                db.outboxDao().deletePendingMutationsForClient(current.clientId)
+            } else {
+                db.outboxDao().insert(OutboxOperationEntity(
+                    opId = opId,
+                    entity = "note",
+                    action = "delete",
+                    noteId = id,
+                    clientId = current.clientId,
+                    baseVersion = current.version,
+                    payloadJson = "{}",
+                    createdAt = now
+                ))
+            }
             LocalTagIndex.rebuild(db)
         }
         syncScheduler.scheduleNow()
@@ -107,7 +120,19 @@ class NotesRepository(
         db.withTransaction {
             db.outboxDao().deletePendingDeleteForNote(snapshot.id, snapshot.clientId)
             db.noteDao().upsert(snapshot.copy(deletedAt = null, updatedAt = now, syncStatus = if (snapshot.version > 0) "SYNCED" else "PENDING", lastError = null))
+            if (snapshot.version == 0L && db.outboxDao().pendingCreateForClient(snapshot.clientId) == null) {
+                db.outboxDao().insert(OutboxOperationEntity(
+                    opId = idGenerator.newOpId(),
+                    entity = "note",
+                    action = "create",
+                    clientId = snapshot.clientId,
+                    baseVersion = 0,
+                    payloadJson = NoteJson.encodePayload(listOf(NoteBlock.Paragraph(snapshot.plainText)), snapshot.plainText),
+                    createdAt = now
+                ))
+            }
             LocalTagIndex.rebuild(db)
         }
+        if (snapshot.version == 0L) syncScheduler.scheduleNow()
     }
 }

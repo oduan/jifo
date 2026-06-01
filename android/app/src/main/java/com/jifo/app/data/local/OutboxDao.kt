@@ -24,4 +24,16 @@ interface OutboxDao {
 
     @Query("DELETE FROM outbox_operations WHERE action = 'delete' AND (noteId = :noteId OR clientId = :clientId) AND status IN ('pending', 'failed')")
     suspend fun deletePendingDeleteForNote(noteId: String, clientId: String)
+
+    @Query("SELECT * FROM outbox_operations WHERE clientId = :clientId AND action = 'create' AND status IN ('pending', 'failed') ORDER BY localSeq ASC LIMIT 1")
+    suspend fun pendingCreateForClient(clientId: String): OutboxOperationEntity?
+
+    @Query("UPDATE outbox_operations SET payloadJson = :payloadJson, status = 'pending', lastError = NULL WHERE opId = :opId")
+    suspend fun updatePayload(opId: String, payloadJson: String)
+
+    @Query("DELETE FROM outbox_operations WHERE clientId = :clientId AND action IN ('update', 'delete', 'restore') AND status IN ('pending', 'failed')")
+    suspend fun deletePendingMutationsForClient(clientId: String)
+
+    @Query("DELETE FROM outbox_operations WHERE clientId = :clientId AND action = 'create' AND status IN ('pending', 'failed')")
+    suspend fun deletePendingCreateForClient(clientId: String)
 }

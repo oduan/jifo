@@ -7,18 +7,47 @@ import com.jifo.app.data.local.SyncStateEntity
 import com.jifo.app.network.ApiNoteDto
 import com.jifo.app.network.PushResultDto
 import com.jifo.app.notes.LocalTagIndex
+import java.util.UUID
 
 class SyncCoordinator(
     private val db: JifoDatabase,
     private val remote: SyncRemote
 ) {
     suspend fun runOnce() {
+        repairPendingCreateMutations()
         val operations = db.outboxDao().pendingOrFailed()
         if (operations.isNotEmpty()) {
             val response = remote.push(SyncDtoMapper.toPushRequest(operations))
             response.results.forEach { result -> applyPushResult(result) }
         }
         pullAllPages()
+    }
+
+    private suspend fun repairPendingCreateMutations() {
+        val operations = db.outboxDao().pendingOrFailed()
+        val invalidLocalMutations = operations.filter { op ->
+            op.action in setOf("update", "delete", "restore") && !isUuid(op.noteId)
+        }
+        if (invalidLocalMutations.isEmpty()) return
+        db.withTransaction {
+            invalidLocalMutations.forEach { op ->
+                val pendingCreate = db.outboxDao().pendingCreateForClient(op.clientId)
+                if (pendingCreate != null) {
+                    when (op.action) {
+                        "update", "restore" -> db.outboxDao().updatePayload(pendingCreate.opId, op.payloadJson)
+                        "delete" -> db.outboxDao().deletePendingCreateForClient(op.clientId)
+                    }
+                    db.outboxDao().deleteByOpId(op.opId)
+                } else {
+                    db.outboxDao().updateStatus(op.opId, "blocked", "invalid_note_id")
+                }
+            }
+        }
+    }
+
+    private fun isUuid(value: String?): Boolean {
+        if (value.isNullOrBlank()) return false
+        return runCatching { UUID.fromString(value); true }.getOrDefault(false)
     }
 
     private suspend fun pullAllPages() {

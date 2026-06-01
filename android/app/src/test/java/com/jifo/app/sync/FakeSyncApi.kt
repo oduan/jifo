@@ -11,8 +11,12 @@ class FakeSyncApi(
     private val pullNotes: List<ApiNoteDto>
 ) : SyncRemote {
     val pullCalls = mutableListOf<Pair<String?, String?>>()
+    val pushedOpIds = mutableListOf<String>()
 
-    override suspend fun push(body: SyncPushRequest): SyncPushResponse = SyncPushResponse(pushResults)
+    override suspend fun push(body: SyncPushRequest): SyncPushResponse {
+        pushedOpIds += body.operations.map { it.opId }
+        return SyncPushResponse(pushResults)
+    }
 
     override suspend fun pull(updatedAt: String?, id: String?, limit: Int): SyncPullResponse {
         pullCalls += updatedAt to id
