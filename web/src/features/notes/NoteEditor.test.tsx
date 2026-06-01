@@ -79,7 +79,8 @@ describe('NoteEditor', () => {
     });
 
     expect(onUploadImage).toHaveBeenCalledWith(file);
-    await waitFor(() => expect(screen.getByAltText('pasted.png')).toHaveAttribute('src', '/api/media/media-1'));
+    await waitFor(() => expect(screen.getByAltText('pasted.png')).toHaveAttribute('data-url', '/api/media/media-1'));
+    expect(screen.getByAltText('pasted.png')).toHaveAttribute('src', 'blob:pasted-image');
     await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
     expect(onSubmit).toHaveBeenCalledWith([

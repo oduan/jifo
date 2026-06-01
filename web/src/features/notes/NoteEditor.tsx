@@ -52,6 +52,7 @@ function createEditorImage(block: Extract<NoteBlock, { type: 'image' }> & { loca
   image.className = 'note-editor__inline-image';
   image.src = block.url;
   image.alt = block.alt ?? '粘贴图片';
+  image.dataset.url = block.url;
   image.dataset.localId = block.localId ?? newLocalId();
   if (block.mediaId) image.dataset.mediaId = block.mediaId;
   if (block.uploading) image.dataset.uploading = 'true';
@@ -189,7 +190,10 @@ export function NoteEditor({ initialText = '', initialBlocks = [], onSubmit, onU
     setUploadingCount((count) => count + 1);
     try {
       const uploaded = await onUploadImage(file);
-      image.src = uploaded.url || previewUrl;
+      // Keep the visible editor image on the local blob URL. /api/media is protected by
+      // Authorization, so assigning it directly to <img src> inside the editor shows a
+      // broken-image icon. The persisted URL/mediaId still lives in data attributes.
+      image.src = previewUrl;
       image.dataset.url = uploaded.url || previewUrl;
       if (uploaded.mediaId) image.dataset.mediaId = uploaded.mediaId;
       image.alt = uploaded.alt ?? file.name ?? '粘贴图片';

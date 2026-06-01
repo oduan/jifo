@@ -1,4 +1,5 @@
 import { FocusEvent, MouseEvent, ReactNode, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Button } from '../../shared/ui/Button';
 import { authStore } from '../auth/authStore';
@@ -246,14 +247,17 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, onUploadImage 
         </Button>
       ) : null}
 
-      {previewImage ? (
-        <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewImage(null)}>
-          <button type="button" className="image-lightbox__close" aria-label="关闭图片预览" onClick={() => setPreviewImage(null)}>
-            ×
-          </button>
-          <AuthenticatedImage src={previewImage.url} alt={previewImage.alt ?? '笔记图片'} className="image-lightbox__image" />
-        </div>
-      ) : null}
+      {previewImage
+        ? createPortal(
+            <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewImage(null)}>
+              <button type="button" className="image-lightbox__close" aria-label="关闭图片预览" onClick={() => setPreviewImage(null)}>
+                ×
+              </button>
+              <AuthenticatedImage src={previewImage.url} alt={previewImage.alt ?? '笔记图片'} className="image-lightbox__image" />
+            </div>,
+            document.body
+          )
+        : null}
     </article>
   );
 }
