@@ -1,6 +1,7 @@
 import { FocusEvent, MouseEvent, ReactNode, useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
+import { TagNode } from '../tags/TagTree';
 import { NoteBlock, NoteEditor } from './NoteEditor';
 
 export type Note = {
@@ -17,6 +18,7 @@ type NoteCardProps = {
   onDelete: (id: string) => void;
   onUpdate: (id: string, blocks: NoteBlock[]) => void;
   onTagSelect?: (tagPath: string) => void;
+  tags?: TagNode[];
 };
 
 const NOTE_TAG_PATTERN = /#[^\s#]+/g;
@@ -82,7 +84,7 @@ function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => 
   return nodes.length > 0 ? nodes : [text];
 }
 
-export function NoteCard({ note, onDelete, onUpdate, onTagSelect }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [] }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -153,6 +155,7 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect }: NoteCardProp
       {editing ? (
         <NoteEditor
           initialText={paragraphText(note.blocks)}
+          tags={tags}
           onSubmit={(blocks) => {
             onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
             setEditing(false);

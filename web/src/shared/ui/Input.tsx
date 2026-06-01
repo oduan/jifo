@@ -1,4 +1,4 @@
-import { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import { forwardRef, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
 
 type FieldProps = {
   label: ReactNode;
@@ -19,6 +19,6 @@ export function TextInput({ className = '', ...props }: InputHTMLAttributes<HTML
   return <input className={['jifo-input', className].filter(Boolean).join(' ')} {...props} />;
 }
 
-export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={['jifo-textarea', className].filter(Boolean).join(' ')} {...props} />;
-}
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className = '', ...props }, ref) {
+  return <textarea ref={ref} className={['jifo-textarea', className].filter(Boolean).join(' ')} {...props} />;
+});

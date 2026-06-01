@@ -44,6 +44,56 @@ describe('NoteEditor', () => {
     expect(screen.getByRole('button', { name: '收起输入' })).toHaveTextContent('⤢');
   });
 
+  test('输入独立 # 后显示标签下拉并可用键盘选择插入', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteEditor
+        tags={[
+          { id: 'test', name: '测试', path: '测试' },
+          { id: 'work', name: '工作', path: '工作/前端' },
+          { id: 'life', name: '生活', path: '生活' }
+        ]}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, '记录 #');
+
+    expect(screen.getByRole('listbox', { name: '标签建议' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '测试' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(textarea).toHaveValue('记录 #工作/前端 ');
+    expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
+  });
+
+  test('标签下拉会根据 # 后输入实时过滤，且非独立 # 不触发', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteEditor
+        tags={[
+          { id: 'test', name: '测试', path: '测试' },
+          { id: 'work', name: '工作', path: '工作/前端' }
+        ]}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, 'abc#');
+    expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
+
+    await user.clear(textarea);
+    await user.type(textarea, ' #工');
+
+    expect(screen.getByRole('option', { name: '工作/前端' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '测试' })).not.toBeInTheDocument();
+  });
+
   test('提交后清空内容、恢复默认高度，并禁用发送按钮', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

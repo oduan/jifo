@@ -191,7 +191,7 @@ export function NotesPage({
         </header>
 
         <section className="composer-card" aria-label="新笔记编辑器">
-          <NoteEditor onSubmit={(blocks) => onCreateNote?.(blocks)} />
+          <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} />
         </section>
 
         <section className="notes-stream" aria-label="笔记流">
@@ -202,6 +202,7 @@ export function NotesPage({
               onDelete={(id) => onDeleteNote?.(id)}
               onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
               onTagSelect={selectTagFromNote}
+              tags={tags}
             />
           ))}
           {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
