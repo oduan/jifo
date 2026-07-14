@@ -10,7 +10,8 @@
 ## 启动数据库
 
 ```bash
-docker compose up -d db
+cp .env.production.example .env.production
+docker compose --env-file .env.production up -d db
 ```
 
 默认数据库配置：
@@ -19,6 +20,8 @@ docker compose up -d db
 - 密码：`jifo`
 - 数据库：`jifo`
 - 端口：`5432`
+
+数据库数据保存在仓库相对目录 `data/postgres`，该目录已被 Git 忽略。
 
 ## 启动后端 API
 

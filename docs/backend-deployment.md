@@ -1,88 +1,80 @@
-# 后端部署指南
+# Docker 部署指南
 
-本文档覆盖 Jifo API 与 PostgreSQL 的单机 Docker Compose 部署。公网入口、TLS 与反向代理由部署环境单独负责，不在这里配置。
+本文档说明如何使用 Docker Compose 部署 Jifo Web、API 与 PostgreSQL。默认拓扑为：
+
+```text
+Browser → Web (Nginx) → API (Go) → PostgreSQL
+                         └→ data/media
+```
 
 ## 准备配置
-
-复制示例环境变量文件：
 
 ```bash
 cp .env.production.example .env.production
 ```
 
-必须替换：
+必须替换 `POSTGRES_PASSWORD` 和 `JWT_SECRET`。生产环境的 `JWT_SECRET` 至少 32 字节。
 
-- `POSTGRES_PASSWORD`：数据库强密码。
-- `JWT_SECRET`：至少 32 字节的密码学随机值；修改它会使现有 JWT 失效。
-- `TRUSTED_PROXIES`：只有确切知道代理请求来源地址或 CIDR 时才设置。留空时后端不会信任任何客户端提交的 `X-Forwarded-For`。
-
-环境文件不得提交到 Git，也不应出现在日志或工单中。
-
-access token 默认 15 分钟过期，可通过 `ACCESS_TOKEN_TTL` 调整；客户端应使用轮换 refresh token 续期。
-
-## 启动
+## 启动与检查
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
-docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production up -d --build
+docker compose --env-file .env.production ps
+docker compose --env-file .env.production logs --tail=100 web api
 ```
 
-API 只发布到宿主机回环地址 `127.0.0.1:8080`。PostgreSQL 不发布宿主机端口。API 启动时会在 advisory lock 保护下执行尚未应用的 migration。
+默认入口为 `http://localhost:8080`。Web 通过内部网络代理 `/api`，API 和 PostgreSQL 不直接暴露到公网；数据库端口仅绑定 `127.0.0.1`。
 
-检查服务：
+API 健康检查：
 
-```bash
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/readyz
-```
+- `/healthz`：进程存活。
+- `/readyz`：数据库可连接且媒体目录可写。
 
-- `/healthz` 只表示进程存活。
-- `/readyz` 同时验证数据库可连接和媒体目录可写。
+## 相对数据目录
 
-## 数据持久化
+Compose 使用 bind mount：
 
-Compose 创建两个命名卷：
+- `./data/postgres:/var/lib/postgresql/data`
+- `./data/media:/data/media`
 
-- `jifo_pgdata`：PostgreSQL 数据。
-- `jifo_media`：上传媒体。
-
-删除容器不会删除命名卷。不要在未确认备份的情况下执行 `docker compose down -v`。
+`media-init` 容器会在 API 启动前准备媒体目录权限。两个目录均被 Git 忽略。不要使用 `docker compose down -v` 作为数据管理方式，也不要直接删除 `data/`。
 
 ## 备份
 
-数据库与媒体必须一起纳入备份，并复制到宿主机之外的位置。数据库逻辑备份示例：
+数据库逻辑备份：
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml exec -T db \
-  pg_dump -U jifo -d jifo -Fc > jifo.dump
+mkdir -p backups
+docker compose --env-file .env.production exec -T db \
+  pg_dump -U jifo -d jifo -Fc > backups/jifo.dump
 ```
 
-恢复必须在隔离环境定期演练：先恢复 PostgreSQL，再恢复对应时间点的媒体卷，最后启动相同或兼容版本的 API 并检查 `/readyz`。生产环境应通过备份系统执行加密、异地复制和保留策略，而不是仅把备份留在部署主机。
+同时备份 `data/media`。数据库与媒体必须使用相同时间点，并复制到部署主机之外。
 
 ## 更新
 
-更新前先备份，然后：
-
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml build api
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d api
-docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=100 api
+git pull
+docker compose --env-file .env.production up -d --build
+docker compose --env-file .env.production logs --tail=100 web api
 ```
 
-不要修改已经在生产数据库执行过的 migration 文件；schema 变更必须新增 migration。
+API 会在 advisory lock 保护下执行尚未应用的 migration。不要修改已执行的 migration。
 
-## 自动清理
+## 反向代理与 TLS
 
-API 内置单实例安全的清理 worker：
+若使用 Caddy、Traefik 或宿主机 Nginx：
 
-- 默认每小时扫描一次。
-- 每批最多永久删除 500 条到期回收站笔记。
-- PostgreSQL advisory lock 防止多实例重复执行。
-- 无引用且创建超过 24 小时的媒体会被标记并清理。
-- 清理任务有独立超时，失败只记录日志，不会终止 API。
-
-可通过 `CLEANUP_INTERVAL` 和 `CLEANUP_TIMEOUT` 调整。
+1. 将 `HTTP_PORT` 仅绑定到可信入口或防火墙限制的地址。
+2. 在外层代理终止 TLS。
+3. 保留 `X-Forwarded-For` 与 `X-Forwarded-Proto`。
+4. 根据实际 Compose 子网配置 `TRUSTED_PROXIES`。
+5. 定期轮换数据库密码、JWT 密钥和访问密钥。
 
 ## 停机
 
-容器收到 `SIGTERM` 后，API 停止接收新请求，并在超时时间内等待请求和清理 worker 退出。Compose 的 `stop_grace_period` 为 30 秒，后端默认 shutdown timeout 为 15 秒。
+```bash
+docker compose --env-file .env.production down
+```
+
+API 接收 `SIGTERM` 后会优雅停机；默认 Compose 停机宽限期为 30 秒。

@@ -1,13 +1,98 @@
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: jifo
-      POSTGRES_PASSWORD: jifo
-      POSTGRES_DB: jifo
+      POSTGRES_USER: ${POSTGRES_USER:-jifo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-jifo}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - jifo_pgdata:/var/lib/postgresql/data
-volumes:
-  jifo_pgdata:
+      - type: bind
+        source: ./data/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - jifo-internal
+
+  media-init:
+    image: alpine:3.22
+    restart: "no"
+    command: ["sh", "-c", "mkdir -p /data/media && chown -R 10001:10001 /data/media"]
+    volumes:
+      - type: bind
+        source: ./data/media
+        target: /data/media
+    networks:
+      - jifo-internal
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      media-init:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: production
+      ADDR: :8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-jifo}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-jifo}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      MEDIA_ROOT: /data/media
+      JIFO_MIGRATIONS_DIR: /app/migrations
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.30.0.0/24}
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10}
+      AUTH_RATE_WINDOW: ${AUTH_RATE_WINDOW:-1m}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      CLEANUP_INTERVAL: ${CLEANUP_INTERVAL:-1h}
+      CLEANUP_TIMEOUT: ${CLEANUP_TIMEOUT:-10m}
+    volumes:
+      - type: bind
+        source: ./data/media
+        target: /data/media
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
+    networks:
+      - jifo-internal
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - jifo-internal
+
+networks:
+  jifo-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${JIFO_SUBNET:-172.30.0.0/24}

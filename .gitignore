@@ -4,6 +4,7 @@ backend/storage/media/*
 backend/bin/
 backend/.env
 .env.production
+data/
 web/node_modules/
 web/dist/
 .DS_Store
