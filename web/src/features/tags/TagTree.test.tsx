@@ -70,4 +70,28 @@ describe('TagTree', () => {
     expect(screen.getByRole('button', { name: 'Jifo (2)' })).toBeInTheDocument();
     expect(container.querySelector('.tag-prefix__icon')).toBeInTheDocument();
   });
+
+  test('标签行菜单支持编辑名称和两种删除方式', async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn().mockResolvedValue(undefined);
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+
+    render(<TagTree tags={[{ id: 'test', name: '测试', path: '测试', noteCount: 3 }]} onSelect={vi.fn()} onRename={onRename} onDelete={onDelete} />);
+
+    await user.click(screen.getByRole('button', { name: '测试 更多操作' }));
+    expect(screen.getByRole('menu', { name: '测试 标签操作' })).toBeInTheDocument();
+    expect(screen.queryByText('置顶')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('menuitem', { name: '编辑名称' }));
+    const input = screen.getByRole('textbox', { name: '标签名称' });
+    expect(input).toHaveValue('测试');
+    await user.clear(input);
+    await user.type(input, '项目/测试');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    expect(onRename).toHaveBeenCalledWith('test', '项目/测试');
+
+    await user.click(screen.getByRole('button', { name: '测试 更多操作' }));
+    await user.click(screen.getByRole('menuitem', { name: '仅删除标签' }));
+    expect(onDelete).toHaveBeenCalledWith('test', false);
+  });
 });

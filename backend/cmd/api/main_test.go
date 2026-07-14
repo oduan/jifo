@@ -130,6 +130,14 @@ func (f *fakeTagsService) Tree(ctx context.Context, userID uuid.UUID) ([]tags.Tr
 	return []tags.TreeNode{{ID: uuid.MustParse("44444444-4444-4444-4444-444444444444"), Name: "项目", Path: "项目", Depth: 0, NoteCount: 1}}, nil
 }
 
+func (f *fakeTagsService) Rename(ctx context.Context, userID uuid.UUID, tagID uuid.UUID, path string) error {
+	return nil
+}
+
+func (f *fakeTagsService) Delete(ctx context.Context, userID uuid.UUID, tagID uuid.UUID, deleteNotes bool) error {
+	return nil
+}
+
 type fakeHeatmapService struct{}
 
 func (f *fakeHeatmapService) Aggregate(ctx context.Context, userID uuid.UUID, from time.Time, to time.Time) ([]heatmap.DayCount, error) {

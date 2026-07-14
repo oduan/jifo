@@ -60,6 +60,8 @@ type NotesService interface {
 type TagsService interface {
 	List(ctx context.Context, userID uuid.UUID) ([]tags.Tag, error)
 	Tree(ctx context.Context, userID uuid.UUID) ([]tags.TreeNode, error)
+	Rename(ctx context.Context, userID uuid.UUID, tagID uuid.UUID, path string) error
+	Delete(ctx context.Context, userID uuid.UUID, tagID uuid.UUID, deleteNotes bool) error
 }
 
 type HeatmapService interface {
@@ -171,6 +173,8 @@ func NewRouterWithOptions(deps Dependencies, options RouterOptions) http.Handler
 			tagsHandler := tags.NewHandler(deps.Tags)
 			protected.Get("/tags", tagsHandler.List)
 			protected.Get("/tags/tree", tagsHandler.Tree)
+			protected.Patch("/tags/{tagID}", tagsHandler.Rename)
+			protected.Delete("/tags/{tagID}", tagsHandler.Delete)
 
 			heatmapHandler := heatmap.NewHandler(deps.Heatmap)
 			protected.Get("/heatmap", heatmapHandler.Get)

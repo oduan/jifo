@@ -11,7 +11,7 @@ import { AccessKeySummary, changePassword, createAccessKey, CreateAccessKeyResul
 import { Note } from '../features/notes/NoteCard';
 import { NoteBlock } from '../features/notes/NoteEditor';
 import { NotesPage } from '../features/notes/NotesPage';
-import { listTagTree } from '../features/tags/api';
+import { deleteTag, listTagTree, renameTag } from '../features/tags/api';
 import { TagNode } from '../features/tags/TagTree';
 import { ApiError, createApiClient } from '../shared/api/client';
 import { CachedNote, CachedNoteBlock, createJifoDb } from '../storage/db';
@@ -452,6 +452,36 @@ export function App() {
         setShowTrash(false);
         setSelectedTagId(tag.id);
         setSelectedTagPath(tag.id ? tag.path : undefined);
+      }}
+      onRenameTag={async (tagId, path) => {
+        setMutating(true);
+        setError(null);
+        try {
+          await renameTag(client, tagId, path);
+          setSelectedTagId(null);
+          setSelectedTagPath(undefined);
+          await loadWorkspace();
+        } catch (tagError) {
+          setError(errorMessage(tagError));
+          throw tagError;
+        } finally {
+          setMutating(false);
+        }
+      }}
+      onDeleteTag={async (tagId, deleteNotes) => {
+        setMutating(true);
+        setError(null);
+        try {
+          await deleteTag(client, tagId, deleteNotes);
+          setSelectedTagId(null);
+          setSelectedTagPath(undefined);
+          await loadWorkspace();
+        } catch (tagError) {
+          setError(errorMessage(tagError));
+          throw tagError;
+        } finally {
+          setMutating(false);
+        }
       }}
       onLoadMoreNotes={() => void loadMoreNotes()}
       trash={showTrash}

@@ -26,3 +26,16 @@ export async function listTagTree(client: ApiClient): Promise<TagNode[]> {
   const response = await client.request<TagsResponse>('/tags/tree');
   return flattenTagTree(response.items);
 }
+
+export function renameTag(client: ApiClient, tagId: string, path: string): Promise<void> {
+  return client.request(`/tags/${encodeURIComponent(tagId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  });
+}
+
+export function deleteTag(client: ApiClient, tagId: string, deleteNotes: boolean): Promise<void> {
+  const query = deleteNotes ? '?deleteNotes=true' : '';
+  return client.request(`/tags/${encodeURIComponent(tagId)}${query}`, { method: 'DELETE' });
+}

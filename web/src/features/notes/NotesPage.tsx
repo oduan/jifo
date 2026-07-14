@@ -38,6 +38,8 @@ type NotesPageProps = {
   onRetry?: () => void;
   onSearchChange?: (query: string) => void;
   onSelectTag?: (tag: SelectedTag) => void;
+  onRenameTag?: (tagId: string, path: string) => void | Promise<void>;
+  onDeleteTag?: (tagId: string, deleteNotes: boolean) => void | Promise<void>;
   onLoadMoreNotes?: () => void;
   onCreateNote?: (blocks: NoteBlock[]) => void | Promise<void>;
   onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
@@ -75,6 +77,8 @@ export function NotesPage({
   isLoadingMoreNotes = false,
   onSearchChange,
   onSelectTag,
+  onRenameTag,
+  onDeleteTag,
   onLoadMoreNotes,
   onCreateNote,
   onUpdateNote,
@@ -258,7 +262,7 @@ export function NotesPage({
 
         <section className="sidebar-section">
           <h2>全部标签</h2>
-          <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={selectTagById} />
+          <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={selectTagById} onRename={onRenameTag} onDelete={onDeleteTag} />
         </section>
       </aside>
 
