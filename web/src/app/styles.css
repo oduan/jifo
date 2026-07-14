@@ -875,13 +875,23 @@ h3 {
 }
 
 .tag-count {
+  color: var(--jifo-muted);
   opacity: 0;
+  font-size: 11px;
+  line-height: 1;
   transition: opacity 160ms ease;
+}
+
+.nav-count {
+  color: var(--jifo-muted);
+  opacity: 0.5;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .tag-tree:hover .tag-count,
 .tag-tree:focus-within .tag-count {
-  opacity: 0.72;
+  opacity: 0.5;
 }
 
 .tag-row:hover > .tag-row__trailing .tag-count,
