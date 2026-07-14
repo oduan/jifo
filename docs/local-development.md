@@ -5,23 +5,22 @@
 - Go 1.25.7+
 - Node.js 20+ / npm
 - Docker 与 Docker Compose
-- PostgreSQL 16（可通过 docker compose 启动）
+- PostgreSQL 16（仅在宿主机直接运行 Go API 时需要）
 
-## 启动数据库
+## 使用 Compose 运行完整环境
 
 ```bash
-cp .env.production.example .env.production
-docker compose --env-file .env.production up -d db
+cp .env.example .env
+docker compose up -d --build
 ```
 
-默认数据库配置：
+访问 `http://localhost:8086`。生产拓扑默认只发布 Web/Nginx 端口；API 和 PostgreSQL 仅在 Docker 内部网络中通过 `api`、`db` 服务名访问。
 
-- 用户：`jifo`
-- 密码：`jifo`
-- 数据库：`jifo`
-- 端口：`5432`
+数据库数据保存在仓库相对目录 `data/postgres`，媒体保存在 `data/media`，两个目录均被 Git 忽略。
 
-数据库数据保存在仓库相对目录 `data/postgres`，该目录已被 Git 忽略。
+## 在宿主机运行源码
+
+如需直接运行 Go API，请先在宿主机准备一个仅监听本机的 PostgreSQL 16，并创建 `jifo` 数据库。Compose 中的数据库不会发布宿主机端口，这是有意的生产安全边界。
 
 ## 启动后端 API
 
@@ -29,6 +28,8 @@ docker compose --env-file .env.production up -d db
 cd backend
 DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret-at-least-16 go run ./cmd/api
 ```
+
+示例中的用户名和密码仅供本机开发，请按实际 PostgreSQL 配置替换。
 
 后端启动后会自动按文件名顺序执行 `backend/migrations/*.sql` 中尚未记录的迁移，并记录到 `schema_migrations`。
 

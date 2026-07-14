@@ -41,16 +41,16 @@ cd jifo
 ### 2. 准备配置
 
 ```bash
-cp .env.production.example .env.production
+cp .env.example .env
 ```
 
 Windows PowerShell：
 
 ```powershell
-Copy-Item .env.production.example .env.production
+Copy-Item .env.example .env
 ```
 
-编辑 `.env.production`，至少替换：
+编辑 `.env`，替换其中两个必填值：
 
 - `POSTGRES_PASSWORD`：数据库强密码。
 - `JWT_SECRET`：不少于 32 字节的随机密钥。
@@ -64,22 +64,22 @@ openssl rand -hex 32
 ### 3. 启动
 
 ```bash
-docker compose --env-file .env.production up -d --build
-docker compose --env-file .env.production ps
+docker compose up -d --build
+docker compose ps
 ```
 
-打开 [http://localhost:8086](http://localhost:8086)。Web 容器会将同源的 `/api` 请求转发给 API 容器；Web 和 PostgreSQL 均只绑定到宿主机回环地址。
+打开 [http://localhost:8086](http://localhost:8086)。只有 Web/Nginx 的 `8086` 端口绑定到宿主机回环地址；API 和 PostgreSQL 不发布宿主机端口，只能通过 Compose 内部网络和服务名访问。
 
 查看日志：
 
 ```bash
-docker compose --env-file .env.production logs -f web api
+docker compose logs -f web api
 ```
 
 停止服务：
 
 ```bash
-docker compose --env-file .env.production down
+docker compose down
 ```
 
 ### 数据目录
@@ -95,7 +95,7 @@ Compose 使用仓库内的相对目录，不使用 Docker named volume：
 
 ```bash
 mkdir -p backups
-docker compose --env-file .env.production exec -T db \
+docker compose exec -T db \
   pg_dump -U jifo -d jifo -Fc > backups/jifo.dump
 ```
 
@@ -105,25 +105,24 @@ docker compose --env-file .env.production exec -T db \
 
 ```bash
 git pull
-docker compose --env-file .env.production up -d --build
-docker compose --env-file .env.production logs --tail=100 web api
+docker compose up -d --build
+docker compose logs --tail=100 web api
 ```
 
 API 启动时会自动执行尚未应用的数据库迁移。不要修改已经在生产环境执行过的 migration，应新增 migration 文件。
 
 ## 配置
 
-常用环境变量见 [`.env.production.example`](.env.production.example)。
+复制 [`.env.example`](.env.example) 为 `.env` 即可启动。模板只保留两个必填密钥；其余变量都有 Compose 默认值，仅在需要覆盖时添加到 `.env`。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `HTTP_PORT` | `8086` | Web 宿主机回环端口 |
-| `POSTGRES_PORT` | `5432` | PostgreSQL 本机回环端口 |
 | `POSTGRES_USER` | `jifo` | 数据库用户 |
 | `POSTGRES_DB` | `jifo` | 数据库名 |
 | `POSTGRES_PASSWORD` | 必填 | 数据库密码 |
 | `JWT_SECRET` | 必填 | 生产环境至少 32 字节 |
-| `JIFO_SUBNET` | `172.30.0.0/24` | Compose 内部网络 |
+| `TRUSTED_PROXIES` | RFC1918 私网段 | API 信任的内部反向代理 CIDR；自定义 Docker 地址池时覆盖 |
 | `ACCESS_TOKEN_TTL` | `15m` | access token 有效期 |
 | `AUTH_RATE_LIMIT` | `10` | 认证接口限流次数 |
 | `CLEANUP_INTERVAL` | `1h` | 回收站和媒体清理周期 |
@@ -221,14 +220,14 @@ codex mcp list
 - Node.js 20+
 - Docker 与 Docker Compose
 
-先准备环境文件并启动 PostgreSQL：
+最简单的本地运行方式是启动完整 Compose 栈：
 
 ```bash
-cp .env.production.example .env.production
-docker compose --env-file .env.production up -d db
+cp .env.example .env
+docker compose up -d --build
 ```
 
-启动 API：
+如果需要直接运行 Go API 进行源码开发，请另行准备只监听本机的 PostgreSQL 16；生产 Compose 中的数据库不会发布到宿主机。然后启动 API：
 
 ```bash
 cd backend
@@ -317,7 +316,7 @@ jifo/
 1. 将变更控制在清晰、可审查的范围内。
 2. 为行为变更补充测试。
 3. 运行相关测试、类型检查或构建。
-4. 不提交 `.env.production`、`data/`、访问密钥或其他敏感信息。
+4. 不提交 `.env`、`data/`、访问密钥或其他敏感信息。
 
 安全问题请不要公开披露，优先使用 GitHub Security Advisory 私下报告。
 

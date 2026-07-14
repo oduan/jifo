@@ -10,20 +10,22 @@ Browser → Web (Nginx) → API (Go) → PostgreSQL
 ## 准备配置
 
 ```bash
-cp .env.production.example .env.production
+cp .env.example .env
 ```
 
-必须替换 `POSTGRES_PASSWORD` 和 `JWT_SECRET`。生产环境的 `JWT_SECRET` 至少 32 字节。
+`.env` 只需要配置 `POSTGRES_PASSWORD` 和 `JWT_SECRET`。生产环境的 `JWT_SECRET` 至少 32 字节；其他设置都有默认值，需要时再添加到 `.env`。
 
 ## 启动与检查
 
 ```bash
-docker compose --env-file .env.production up -d --build
-docker compose --env-file .env.production ps
-docker compose --env-file .env.production logs --tail=100 web api
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 web api
 ```
 
-默认入口为 `http://localhost:8086`。Web 通过内部网络代理 `/api`，Web 和 PostgreSQL 仅绑定 `127.0.0.1`，API 不直接暴露到宿主机。
+默认入口为 `http://localhost:8086`。Web/Nginx 通过内部 DNS 服务名 `api` 代理 `/api` 和 `/mcp`；PostgreSQL 通过服务名 `db` 访问。只有 Web 的 `8086` 端口绑定到宿主机 `127.0.0.1`，API 和 PostgreSQL 都没有宿主机端口。
+
+Compose 网络由 Docker 自动分配地址，服务发现不依赖固定子网。网络设置为 `internal: true`，容器间仍可按服务名通信，但不会直接接入外部网络。
 
 API 健康检查：
 
@@ -45,7 +47,7 @@ Compose 使用 bind mount：
 
 ```bash
 mkdir -p backups
-docker compose --env-file .env.production exec -T db \
+docker compose exec -T db \
   pg_dump -U jifo -d jifo -Fc > backups/jifo.dump
 ```
 
@@ -55,8 +57,8 @@ docker compose --env-file .env.production exec -T db \
 
 ```bash
 git pull
-docker compose --env-file .env.production up -d --build
-docker compose --env-file .env.production logs --tail=100 web api
+docker compose up -d --build
+docker compose logs --tail=100 web api
 ```
 
 API 会在 advisory lock 保护下执行尚未应用的 migration。不要修改已执行的 migration。
@@ -76,13 +78,13 @@ Caddy 会为有效公网域名自动申请和续期 HTTPS 证书。若使用 Cad
 1. 保持 Compose 中的 `HTTP_PORT` 仅绑定到宿主机 `127.0.0.1`。
 2. 在外层代理终止 TLS。
 3. 保留 `X-Forwarded-For` 与 `X-Forwarded-Proto`。
-4. 根据实际 Compose 子网配置 `TRUSTED_PROXIES`。
+4. API 默认信任 RFC1918 私网中的内部代理；只有在 Docker 使用非私网自定义地址池时，才需要在 `.env` 中覆盖 `TRUSTED_PROXIES`。
 5. 定期轮换数据库密码、JWT 密钥和访问密钥。
 
 ## 停机
 
 ```bash
-docker compose --env-file .env.production down
+docker compose down
 ```
 
 API 接收 `SIGTERM` 后会优雅停机；默认 Compose 停机宽限期为 30 秒。

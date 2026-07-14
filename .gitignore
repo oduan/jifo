@@ -3,6 +3,7 @@ backend/storage/media/*
 !backend/storage/media/.gitkeep
 backend/bin/
 backend/.env
+.env
 .env.production
 data/
 web/node_modules/

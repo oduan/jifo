@@ -6,8 +6,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-jifo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-jifo}
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - type: bind
         source: ./data/postgres
@@ -49,7 +47,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       MEDIA_ROOT: /data/media
       JIFO_MIGRATIONS_DIR: /app/migrations
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.30.0.0/24}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10}
       AUTH_RATE_WINDOW: ${AUTH_RATE_WINDOW:-1m}
       ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
@@ -59,8 +57,6 @@ services:
       - type: bind
         source: ./data/media
         target: /data/media
-    expose:
-      - "8080"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
       interval: 15s
@@ -93,6 +89,4 @@ services:
 networks:
   jifo-internal:
     driver: bridge
-    ipam:
-      config:
-        - subnet: ${JIFO_SUBNET:-172.30.0.0/24}
+    internal: true
