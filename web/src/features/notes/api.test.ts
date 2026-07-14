@@ -66,4 +66,18 @@ describe('notes API DTO conversion', () => {
     expect(calls).toEqual(['/notes?search=%E4%BC%9A%E8%AE%AE&tagPath=%E5%B7%A5%E4%BD%9C%2F%E4%BC%9A%E8%AE%AE&limit=20&offset=40']);
     expect(result.page.hasMore).toBe(true);
   });
+
+  test('listNotes URL-encodes special-character tag paths', async () => {
+    const calls: string[] = [];
+    const client = {
+      request: async <T>(path: string): Promise<T> => {
+        calls.push(path);
+        return { items: [], page: { limit: 0, offset: 0, hasMore: false } } as T;
+      }
+    };
+
+    await listNotes(client, { tagPath: '&' });
+
+    expect(calls).toEqual(['/notes?tagPath=%26']);
+  });
 });

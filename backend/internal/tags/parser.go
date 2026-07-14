@@ -64,13 +64,5 @@ func expandPath(path string) []string {
 }
 
 func isTagBoundary(r rune) bool {
-	if r == '/' {
-		return false
-	}
-
-	if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
-		return true
-	}
-
-	return false
+	return r == '#' || unicode.IsSpace(r)
 }

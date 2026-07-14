@@ -292,6 +292,8 @@ h3 {
   --sidebar-icon-size: 16px;
   --sidebar-item-gap: 8px;
   --sidebar-glyph-inset: 1px;
+  --sidebar-row-padding: 4px;
+  --sidebar-row-radius: 5px;
   align-self: start;
   position: sticky;
   top: 10px;
@@ -703,8 +705,8 @@ h3 {
   display: flex;
   align-items: center;
   gap: var(--sidebar-item-gap);
-  border-radius: 9px;
-  padding: 2px 0;
+  border-radius: var(--sidebar-row-radius);
+  padding: var(--sidebar-row-padding);
   transition: background-color 160ms ease;
 }
 
@@ -787,8 +789,8 @@ h3 {
   gap: 6px;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 9px;
-  padding: 4px 0;
+  border-radius: var(--sidebar-row-radius);
+  padding: var(--sidebar-row-padding);
   color: #4d4338;
   background: transparent;
   cursor: pointer;
@@ -818,6 +820,7 @@ h3 {
 }
 
 .nav-pill {
+  min-height: calc(26px + (var(--sidebar-row-padding) * 2));
   font-size: 14px;
   font-weight: 400;
 }
@@ -1092,20 +1095,42 @@ h3 {
   font-size: 12px;
 }
 
-.note-card__images,
-.note-editor__image-preview {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
+.note-card__images {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-top: 3px;
+  scrollbar-width: none;
 }
 
-.note-card__images img,
-.note-editor__image-preview img {
-  width: 100%;
-  max-height: 420px;
-  object-fit: contain;
-  border-radius: 10px;
+.note-card__images::-webkit-scrollbar {
+  display: none;
+}
+
+.note-card__image-button {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--jifo-line);
+  border-radius: 8px;
   background: rgba(32, 27, 22, 0.04);
+  cursor: zoom-in;
+}
+
+.note-card__image-button img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.note-card__image-button:hover,
+.note-card__image-button:focus-visible {
+  border-color: var(--jifo-green-line);
+  box-shadow: 0 0 0 2px rgba(61, 124, 74, 0.1);
 }
 
 .note-card__image-loading,
@@ -1119,6 +1144,52 @@ h3 {
 .note-card__image-error,
 .note-editor__upload-error {
   color: var(--jifo-danger);
+}
+
+.note-image-preview {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(32, 27, 22, 0.58);
+  backdrop-filter: blur(5px);
+  cursor: zoom-out;
+}
+
+.note-image-preview__surface {
+  position: relative;
+  max-width: min(92vw, 1200px);
+  max-height: 88vh;
+  cursor: default;
+}
+
+.note-image-preview__surface img {
+  max-width: 100%;
+  max-height: 88vh;
+  display: block;
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 24px 70px rgba(32, 27, 22, 0.28);
+}
+
+.note-image-preview__close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(32, 27, 22, 0.76);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
 }
 
 .account-password-form {
@@ -1369,8 +1440,60 @@ h3 {
   transition: transform 160ms ease, color 160ms ease, border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
-.note-editor__image-preview {
-  margin-top: 8px;
+.note-editor__image-tray {
+  height: 64px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 16px 8px;
+  scrollbar-width: none;
+}
+
+.note-editor__image-tray::-webkit-scrollbar {
+  display: none;
+}
+
+.note-editor__image-thumbnail {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  overflow: hidden;
+  border: 1px solid var(--jifo-line);
+  border-radius: 8px;
+  background: rgba(32, 27, 22, 0.04);
+}
+
+.note-editor__image-thumbnail img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.note-editor__image-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(32, 27, 22, 0.62);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.note-editor__image-remove:hover,
+.note-editor__image-remove:focus-visible {
+  background: rgba(32, 27, 22, 0.8);
 }
 
 .note-editor__footer {

@@ -126,6 +126,30 @@ describe('NotesPage', () => {
     expect(onSelectTag).toHaveBeenCalledWith({ id: 'work', path: '工作' });
   });
 
+  test('特殊字符标签可匹配左侧标签并触发筛选', async () => {
+    const user = userEvent.setup();
+    const onSelectTag = vi.fn();
+
+    render(
+      <NotesPage
+        userName="oisin"
+        notes={[{ id: 'n1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '#& #......' }], tagIds: ['amp', 'dots'] }]}
+        tags={[
+          { id: 'amp', name: '&', path: '&', noteCount: 1 },
+          { id: 'dots', name: '......', path: '......', noteCount: 1 }
+        ]}
+        heatmapCells={[]}
+        onSelectTag={onSelectTag}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '#&' }));
+    expect(onSelectTag).toHaveBeenLastCalledWith({ id: 'amp', path: '&' });
+
+    await user.click(screen.getByRole('button', { name: '#......' }));
+    expect(onSelectTag).toHaveBeenLastCalledWith({ id: 'dots', path: '......' });
+  });
+
   test('滚动到底时通知上层加载下一页', async () => {
     let observerCallback: IntersectionObserverCallback | undefined;
     const originalIntersectionObserver = globalThis.IntersectionObserver;

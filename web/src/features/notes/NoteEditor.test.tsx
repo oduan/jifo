@@ -151,10 +151,30 @@ describe('NoteEditor', () => {
     };
     await user.click(textarea);
     fireEvent.paste(textarea, { clipboardData });
-    expect(await screen.findByAltText('photo.png')).toBeInTheDocument();
+    const preview = await screen.findByAltText('photo.png');
+    expect(preview.closest('.note-editor__image-tray')).toBeInTheDocument();
+    expect(textarea).toHaveStyle({ height: '68px' });
     await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
     expect(onUploadImage).toHaveBeenCalledWith(file);
     expect(onSubmit).toHaveBeenCalledWith([{ type: 'image', mediaId: 'm1', url: 'blob:preview', alt: 'photo.png' }]);
+  });
+
+  test('可从输入框图片栏移除待发送图片', async () => {
+    const user = userEvent.setup();
+    const onUploadImage = vi.fn(async () => ({ type: 'image' as const, mediaId: 'm1', url: 'blob:preview', alt: 'photo.png' }));
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    render(<NoteEditor onSubmit={vi.fn()} onUploadImage={onUploadImage} />);
+
+    const file = new File(['png'], 'photo.png', { type: 'image/png' });
+    const textarea = screen.getByLabelText('笔记内容');
+    fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] } });
+
+    await user.click(await screen.findByRole('button', { name: '移除图片 photo.png' }));
+
+    expect(screen.queryByAltText('photo.png')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送笔记' })).toBeDisabled();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview');
   });
 });

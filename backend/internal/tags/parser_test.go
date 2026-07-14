@@ -21,9 +21,17 @@ func TestStopsAtWhitespace(t *testing.T) {
 	}
 }
 
-func TestStopsAtPunctuation(t *testing.T) {
+func TestKeepsPunctuationAndSymbolsInsideTag(t *testing.T) {
 	got := ExtractTagPaths("#思考…后面文字 #work.project #项目/子项")
-	want := []string{"思考", "work", "项目", "项目/子项"}
+	want := []string{"思考…后面文字", "work.project", "项目", "项目/子项"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v want %#v", got, want)
+	}
+}
+
+func TestSupportsSpecialCharacterOnlyTags(t *testing.T) {
+	got := ExtractTagPaths("#& #...... #符号&.组合")
+	want := []string{"&", "......", "符号&.组合"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v want %#v", got, want)
 	}

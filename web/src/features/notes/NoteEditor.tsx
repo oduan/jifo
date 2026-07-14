@@ -170,7 +170,8 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
 
     const isActive = isFocused || text.length > 0 || images.length > 0;
     textarea.style.height = '0px';
-    const nextHeight = isActive ? Math.min(180, Math.max(68, textarea.scrollHeight)) : 44;
+    const maxTextareaHeight = images.length > 0 ? 116 : 180;
+    const nextHeight = isActive ? Math.min(maxTextareaHeight, Math.max(68, textarea.scrollHeight)) : 44;
     textarea.style.height = `${nextHeight}px`;
   }, [images.length, isFocused, text]);
 
@@ -205,6 +206,16 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
       event.preventDefault();
       void uploadImages(imageFiles);
     }
+  };
+
+  const removeImage = (index: number) => {
+    setImages((current) => {
+      const image = current[index];
+      if (image?.url?.startsWith('blob:')) {
+        URL.revokeObjectURL(image.url);
+      }
+      return current.filter((_, imageIndex) => imageIndex !== index);
+    });
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -328,6 +339,23 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
             })}
           </div>
         ) : null}
+        {images.length > 0 ? (
+          <div className="note-editor__image-tray" aria-label="待发送图片">
+            {images.map((image, index) => (
+              <div className="note-editor__image-thumbnail" key={`${image.mediaId ?? image.url}-${index}`}>
+                <img src={image.url} alt={image.alt ?? '待发送图片'} />
+                <button
+                  type="button"
+                  className="note-editor__image-remove"
+                  aria-label={`移除图片 ${image.alt ?? index + 1}`}
+                  onClick={() => removeImage(index)}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="note-editor__footer">
           <button
             type="submit"
@@ -340,11 +368,6 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
           </button>
         </div>
       </div>
-      {images.length > 0 ? (
-        <div className="note-editor__image-preview">
-          {images.map((image, index) => <img key={`${image.mediaId ?? image.url}-${index}`} src={image.url} alt={image.alt ?? '待发送图片'} />)}
-        </div>
-      ) : null}
       {uploadError ? <div className="note-editor__upload-error" role="alert">{uploadError}</div> : null}
     </form>
   );

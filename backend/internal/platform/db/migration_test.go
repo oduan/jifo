@@ -134,6 +134,7 @@ func TestRunMigrationsExecutesAndSkipsWhenDatabaseAvailable(t *testing.T) {
 	assertTableExists(t, ctx, pool, "access_keys")
 	assertMigrationRecorded(t, ctx, pool, "001_init")
 	assertMigrationRecorded(t, ctx, pool, "002_access_keys")
+	assertMigrationRecorded(t, ctx, pool, "003_rebuild_special_character_tags")
 }
 
 func assertTableExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool, table string) {

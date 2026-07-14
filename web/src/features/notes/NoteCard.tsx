@@ -51,7 +51,11 @@ function noteText(blocks: NoteBlock[]): string {
   return blocks.filter((block) => block.type === 'paragraph').map(blockText).join('\n');
 }
 
-function NoteImage({ block, resolveMediaUrl }: { block: Extract<NoteBlock, { type: 'image' }>; resolveMediaUrl?: (mediaId: string) => Promise<string> }) {
+function NoteImage({ block, resolveMediaUrl, onPreview }: {
+  block: Extract<NoteBlock, { type: 'image' }>;
+  resolveMediaUrl?: (mediaId: string) => Promise<string>;
+  onPreview: (image: { source: string; alt: string }) => void;
+}) {
   const [source, setSource] = useState(block.mediaId ? undefined : block.url);
   const [failed, setFailed] = useState(false);
 
@@ -74,7 +78,21 @@ function NoteImage({ block, resolveMediaUrl }: { block: Extract<NoteBlock, { typ
 
   if (failed) return <div className="note-card__image-error">图片加载失败</div>;
   if (!source) return <div className="note-card__image-loading">正在加载图片…</div>;
-  return <img src={source} alt={block.alt ?? '笔记图片'} loading="lazy" />;
+  const alt = block.alt ?? '笔记图片';
+  return (
+    <button
+      type="button"
+      className="note-card__image-button"
+      aria-label={`放大预览 ${alt}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onPreview({ source, alt });
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <img src={source} alt={alt} loading="lazy" />
+    </button>
+  );
 }
 
 function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => void): ReactNode[] {
@@ -121,6 +139,7 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down');
+  const [previewImage, setPreviewImage] = useState<{ source: string; alt: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPanelRef = useRef<HTMLDivElement>(null);
   const content = noteText(note.blocks);
@@ -153,6 +172,15 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!previewImage) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [previewImage]);
 
   useLayoutEffect(() => {
     if (!menuOpen || !menuRef.current || !menuPanelRef.current) return;
@@ -220,16 +248,34 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
         </div>
       )}
 
-      {!editing && imageBlocks(note.blocks).length > 0 ? (
-        <div className="note-card__images">
-          {imageBlocks(note.blocks).map((block, index) => <NoteImage key={`${block.mediaId ?? block.url}-${index}`} block={block} resolveMediaUrl={resolveMediaUrl} />)}
-        </div>
-      ) : null}
-
       {shouldCollapse ? (
         <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>
           {expanded ? '收起' : '展开'}
         </Button>
+      ) : null}
+
+      {!editing && imageBlocks(note.blocks).length > 0 ? (
+        <div className="note-card__images">
+          {imageBlocks(note.blocks).map((block, index) => (
+            <NoteImage
+              key={`${block.mediaId ?? block.url}-${index}`}
+              block={block}
+              resolveMediaUrl={resolveMediaUrl}
+              onPreview={setPreviewImage}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {previewImage ? (
+        <div className="note-image-preview" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewImage(null)}>
+          <div className="note-image-preview__surface" onClick={(event) => event.stopPropagation()}>
+            <img src={previewImage.source} alt={previewImage.alt} />
+            <button type="button" className="note-image-preview__close" aria-label="关闭图片预览" onClick={() => setPreviewImage(null)}>
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        </div>
       ) : null}
     </article>
   );

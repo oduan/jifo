@@ -212,4 +212,33 @@ describe('NoteCard', () => {
 
     expect(onTagSelect).toHaveBeenCalledWith('工作/前端');
   });
+
+  test('图片显示在底部缩略图栏并可打开和关闭大图预览', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [
+            { type: 'paragraph', content: '带图片的笔记' },
+            { type: 'image', url: 'blob:photo', alt: 'photo.png' }
+          ],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    const thumbnailButton = screen.getByRole('button', { name: '放大预览 photo.png' });
+    expect(thumbnailButton.closest('.note-card__images')).toBeInTheDocument();
+
+    await user.click(thumbnailButton);
+    expect(screen.getByRole('dialog', { name: '图片预览' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '图片预览' })).not.toBeInTheDocument();
+  });
 });
