@@ -79,6 +79,43 @@ describe('NoteEditor', () => {
     expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
   });
 
+  test('光标离开输入框时关闭标签建议，重新聚焦到 # 后再次打开', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <div>
+        <NoteEditor tags={[{ id: 'test', name: '测试', path: '测试' }]} onSubmit={vi.fn()} />
+        <button type="button">外部按钮</button>
+      </div>
+    );
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, '#');
+    expect(screen.getByRole('listbox', { name: '标签建议' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '外部按钮' }));
+    expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
+
+    await user.click(textarea);
+    expect(screen.getByRole('listbox', { name: '标签建议' })).toBeInTheDocument();
+  });
+
+  test('删除文字后输入框高度会随内容减少而缩小', () => {
+    render(<NoteEditor onSubmit={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('笔记内容');
+    let measuredHeight = 150;
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, get: () => measuredHeight });
+
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: '第一行\n第二行\n第三行\n第四行' } });
+    expect(textarea).toHaveStyle({ height: '150px' });
+
+    measuredHeight = 74;
+    fireEvent.change(textarea, { target: { value: '短内容' } });
+    expect(textarea).toHaveStyle({ height: '74px' });
+  });
+
   test('没有匹配标签时显示可新建的输入词', async () => {
     const user = userEvent.setup();
 

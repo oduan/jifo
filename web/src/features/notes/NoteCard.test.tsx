@@ -74,6 +74,29 @@ describe('NoteCard', () => {
     expect(onDelete).toHaveBeenCalledWith('n1');
   });
 
+  test('从菜单进入编辑后可通过发送按钮左侧的取消按钮退出', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteCard
+        note={{ id: 'n1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '原内容' }], tagIds: [] }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+
+    const cancelButton = screen.getByRole('button', { name: '取消编辑' });
+    expect(cancelButton).toHaveTextContent('取消');
+    expect(cancelButton.nextElementSibling).toHaveAccessibleName('发送笔记');
+
+    await user.click(cancelButton);
+    expect(screen.queryByLabelText('笔记内容')).not.toBeInTheDocument();
+    expect(screen.getByText('原内容')).toBeInTheDocument();
+  });
+
   test('点击外部区域后关闭三个点菜单', async () => {
     const user = userEvent.setup();
 

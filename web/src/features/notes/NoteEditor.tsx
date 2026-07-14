@@ -16,6 +16,7 @@ type NoteEditorProps = {
   initialText?: string;
   tags?: NoteEditorTag[];
   onSubmit: (blocks: NoteBlock[]) => void;
+  onCancel?: () => void;
   onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
 };
 
@@ -150,7 +151,7 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
   };
 }
 
-export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImage }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', tags = [], onSubmit, onCancel, onUploadImage }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(initialText);
   const [isFocused, setFocused] = useState(false);
@@ -162,14 +163,14 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
   const blocks = [...toParagraphBlocks(text), ...images];
   const hasContent = blocks.length > 0;
   const suggestions = useMemo(() => (tagTrigger ? suggestionItems(tags, tagTrigger.query) : []), [tagTrigger, tags]);
-  const showTagSuggestions = Boolean(tagTrigger && suggestions.length > 0);
+  const showTagSuggestions = Boolean(isFocused && tagTrigger && suggestions.length > 0);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
     const isActive = isFocused || text.length > 0 || images.length > 0;
-    textarea.style.height = '0px';
+    textarea.style.height = 'auto';
     const maxTextareaHeight = images.length > 0 ? 116 : 180;
     const nextHeight = isActive ? Math.min(maxTextareaHeight, Math.max(68, textarea.scrollHeight)) : 44;
     textarea.style.height = `${nextHeight}px`;
@@ -357,6 +358,11 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
           </div>
         ) : null}
         <div className="note-editor__footer">
+          {onCancel ? (
+            <button type="button" className="note-editor__cancel-button" aria-label="取消编辑" onClick={onCancel}>
+              取消
+            </button>
+          ) : null}
           <button
             type="submit"
             className="send-icon-button"

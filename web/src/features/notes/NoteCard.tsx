@@ -237,6 +237,7 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
           initialText={paragraphText(note.blocks)}
           tags={tags}
           onUploadImage={onUploadImage}
+          onCancel={() => setEditing(false)}
           onSubmit={(blocks) => {
             onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
             setEditing(false);
