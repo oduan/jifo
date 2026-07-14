@@ -19,17 +19,6 @@ services:
     networks:
       - jifo-internal
 
-  media-init:
-    image: alpine:3.22
-    restart: "no"
-    command: ["sh", "-c", "mkdir -p /data/media && chown -R 10001:10001 /data/media"]
-    volumes:
-      - type: bind
-        source: ./data/media
-        target: /data/media
-    networks:
-      - jifo-internal
-
   api:
     build:
       context: ./backend
@@ -38,8 +27,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      media-init:
-        condition: service_completed_successfully
+    # Override Dockerfile's non-root user so bind-mounted media storage can be
+    # created and managed without a separate permission-init container.
+    user: "0:0"
     environment:
       APP_ENV: production
       ADDR: :8080

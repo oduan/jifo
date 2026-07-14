@@ -68,7 +68,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-打开 [http://localhost:8086](http://localhost:8086)。只有 Web/Nginx 的 `8086` 端口绑定到宿主机回环地址；API 和 PostgreSQL 不发布宿主机端口，只能通过 Compose 内部网络和服务名访问。
+打开 [http://localhost:8086](http://localhost:8086)。只有 Web/Nginx 的 `8086` 端口绑定到宿主机回环地址；API 和 PostgreSQL 不发布宿主机端口，只能通过 Compose 内部网络和服务名访问。Compose 中 API 以 root 运行，以便直接管理 bind-mounted `data/media`；直接运行 API 镜像时仍使用 Dockerfile 定义的非 root 用户。
 
 查看日志：
 

@@ -39,7 +39,7 @@ Compose 使用 bind mount：
 - `./data/postgres:/var/lib/postgresql/data`
 - `./data/media:/data/media`
 
-`media-init` 容器会在 API 启动前准备媒体目录权限。两个目录均被 Git 忽略。不要使用 `docker compose down -v` 作为数据管理方式，也不要直接删除 `data/`。
+两个目录均被 Git 忽略。Compose 会覆盖镜像的非 root 用户，让 API 以 root 运行，从而直接管理 bind-mounted `data/media`，无需单独的权限初始化容器。不要使用 `docker compose down -v` 作为数据管理方式，也不要直接删除 `data/`。
 
 ## 备份
 
