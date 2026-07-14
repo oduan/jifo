@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useMemo, useRef, useState } from 'react';
+import { ClipboardEvent, FormEvent, KeyboardEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { Textarea } from '../../shared/ui/Input';
 
@@ -153,41 +153,61 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
 export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImage }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(initialText);
-  const [isExpanded, setExpanded] = useState(false);
+  const [isFocused, setFocused] = useState(false);
   const [tagTrigger, setTagTrigger] = useState<TagTrigger | null>(null);
   const [suggestionPosition, setSuggestionPosition] = useState<SuggestionPosition>({ left: 10, top: 0 });
   const [focusedTagIndex, setFocusedTagIndex] = useState(0);
   const [images, setImages] = useState<Extract<NoteBlock, { type: 'image' }>[]>([]);
   const [isUploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const blocks = [...toParagraphBlocks(text), ...images];
   const hasContent = blocks.length > 0;
   const suggestions = useMemo(() => (tagTrigger ? suggestionItems(tags, tagTrigger.query) : []), [tagTrigger, tags]);
   const showTagSuggestions = Boolean(tagTrigger && suggestions.length > 0);
 
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const isActive = isFocused || text.length > 0 || images.length > 0;
+    textarea.style.height = '0px';
+    const nextHeight = isActive ? Math.min(224, Math.max(112, textarea.scrollHeight)) : 72;
+    textarea.style.height = `${nextHeight}px`;
+  }, [images.length, isFocused, text]);
+
   const refreshTagTrigger = (nextText: string, caret: number, textarea: HTMLTextAreaElement | null = textareaRef.current) => {
     const nextTrigger = findTagTrigger(nextText, caret);
     setTagTrigger(nextTrigger);
     setFocusedTagIndex(0);
-    setImages([]);
     if (nextTrigger && textarea) {
       setSuggestionPosition(caretDropdownPosition(textarea, caret));
     }
   };
 
-  const uploadSelectedImage = async (file: File | undefined) => {
-    if (!file || !onUploadImage) return;
+  const uploadImages = async (files: File[]) => {
+    if (files.length === 0 || !onUploadImage) return;
     setUploading(true);
     setUploadError(null);
     try {
-      const image = await onUploadImage(file);
-      setImages((current) => [...current, image]);
+      const uploadedImages = await Promise.all(files.map((file) => onUploadImage(file)));
+      setImages((current) => [...current, ...uploadedImages]);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : '图片上传失败。');
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onUploadImage) return;
+    const imageFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (imageFiles.length > 0) {
+      event.preventDefault();
+      void uploadImages(imageFiles);
     }
   };
 
@@ -201,9 +221,9 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
       if (image.url?.startsWith('blob:')) URL.revokeObjectURL(image.url);
     });
     setText('');
-    setExpanded(false);
     setTagTrigger(null);
     setFocusedTagIndex(0);
+    setImages([]);
   };
 
   const chooseSuggestion = (item: SuggestionItem | undefined) => {
@@ -256,7 +276,7 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
           className="note-editor__textarea"
           aria-label="笔记内容"
           name="note-content"
-          rows={isExpanded ? 10 : 5}
+          rows={2}
           value={text}
           onChange={(event) => {
             const nextText = event.target.value;
@@ -265,7 +285,10 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
           }}
           onClick={(event) => refreshTagTrigger(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length, event.currentTarget)}
           onSelect={(event) => refreshTagTrigger(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length, event.currentTarget)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="记录此刻想法…"
           autoComplete="off"
         />
@@ -301,23 +324,7 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
             })}
           </div>
         ) : null}
-        <button
-          type="button"
-          className="expand-icon-button"
-          aria-label={isExpanded ? '收起输入' : '扩大输入'}
-          title={isExpanded ? '收起输入' : '扩大输入'}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <span aria-hidden="true">⤢</span>
-        </button>
-        {onUploadImage ? (
-          <>
-            <input ref={fileInputRef} className="note-editor__file-input" type="file" aria-label="选择图片文件" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => void uploadSelectedImage(event.target.files?.[0])} />
-            <button type="button" className="note-editor__image-button" aria-label="添加图片" disabled={isUploading} onClick={() => fileInputRef.current?.click()}>
-              {isUploading ? '上传中…' : '图片'}
-            </button>
-          </>
-        ) : null}
+        {onUploadImage ? <span className="note-editor__paste-hint">{isUploading ? '正在粘贴图片…' : '可直接粘贴图片'}</span> : null}
         <button
           type="submit"
           className="send-icon-button"

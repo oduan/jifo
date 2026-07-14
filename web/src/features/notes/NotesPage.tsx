@@ -164,19 +164,21 @@ export function NotesPage({
         <section className="sidebar-section sidebar-section--primary-filter">
           <button type="button" className="nav-pill" aria-pressed={!trash && selectedTagId === null} aria-label="全部笔记" onClick={selectAllNotes}>
             <span className="nav-pill__label">
-              <span className="nav-grid-icon" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-                <span />
-              </span>
+              <svg className="sidebar-icon nav-grid-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="1" y="1" width="5" height="5" rx="1" />
+                <rect x="10" y="1" width="5" height="5" rx="1" />
+                <rect x="1" y="10" width="5" height="5" rx="1" />
+                <rect x="10" y="10" width="5" height="5" rx="1" />
+              </svg>
               <span>全部笔记</span>
             </span>
             <span className="nav-count">{allNotesCount}</span>
           </button>
           <button type="button" className="nav-pill" aria-pressed={trash} aria-label="回收站" onClick={onSelectTrash}>
             <span className="nav-pill__label">
-              <span aria-hidden="true">⌫</span>
+              <svg className="sidebar-icon nav-trash-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M1 4h14M5.5 4V1.5h5V4m3 0-1 11h-9l-1-11m4 3v5m3-5v5" />
+              </svg>
               <span>回收站</span>
             </span>
           </button>

@@ -51,12 +51,22 @@ function renderTagItems({ tags, parentId, selectedTagId, expandedTagIds, onSelec
               aria-expanded={isExpanded}
               onClick={() => onToggle(tag.id)}
             >
-              <span className="tag-expander__hash" aria-hidden="true">#</span>
-              <span className="tag-expander__triangle tag-expander__triangle--right" aria-hidden="true">▶</span>
-              <span className="tag-expander__triangle tag-expander__triangle--down" aria-hidden="true">▼</span>
+              <svg className="sidebar-icon tag-expander__hash" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M5 1 3.5 15M12.5 1 11 15M1.5 6h13M1 11h13" />
+              </svg>
+              <svg className="sidebar-icon tag-expander__triangle tag-expander__triangle--right" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m1 1 10 7-10 7Z" />
+              </svg>
+              <svg className="sidebar-icon tag-expander__triangle tag-expander__triangle--down" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m1 3 7 10 7-10Z" />
+              </svg>
             </button>
           ) : (
-            <span className="tag-prefix" aria-hidden="true">#</span>
+            <span className="tag-prefix" aria-hidden="true">
+              <svg className="sidebar-icon tag-prefix__icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M5 1 3.5 15M12.5 1 11 15M1.5 6h13M1 11h13" />
+              </svg>
+            </span>
           )}
           <button
             type="button"

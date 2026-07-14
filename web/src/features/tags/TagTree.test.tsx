@@ -56,7 +56,7 @@ describe('TagTree', () => {
   });
 
   test('note_count=0 的父标签不会阻断有计数子标签', () => {
-    render(
+    const { container } = render(
       <TagTree
         tags={[
           { id: 'projects', name: '项目', noteCount: 0 },
@@ -68,6 +68,6 @@ describe('TagTree', () => {
 
     expect(screen.queryByRole('button', { name: '项目 (0)' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Jifo (2)' })).toBeInTheDocument();
-    expect(screen.getByText('#')).toBeInTheDocument();
+    expect(container.querySelector('.tag-prefix__icon')).toBeInTheDocument();
   });
 });

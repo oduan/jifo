@@ -1,18 +1,19 @@
 import { describe, expect, test, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { NoteEditor } from './NoteEditor';
 
 describe('NoteEditor', () => {
-  test('默认 5 行并可通过纸飞机按钮提交 paragraph blocks', async () => {
+  test('默认使用紧凑高度并可通过纸飞机按钮提交 paragraph blocks', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
 
     render(<NoteEditor onSubmit={onSubmit} />);
 
     const textarea = screen.getByLabelText('笔记内容');
-    expect(textarea).toHaveAttribute('rows', '5');
+    expect(textarea).toHaveAttribute('rows', '2');
+    expect(textarea).toHaveStyle({ height: '72px' });
 
     const sendButton = screen.getByRole('button', { name: '发送笔记' });
     expect(sendButton).toBeDisabled();
@@ -27,21 +28,15 @@ describe('NoteEditor', () => {
     ]);
   });
 
-  test('点击输入框右上角扩大图标会直接拉大输入框', async () => {
+  test('聚焦时自动展开输入框', async () => {
     const user = userEvent.setup();
 
     render(<NoteEditor onSubmit={vi.fn()} />);
 
     const textarea = screen.getByLabelText('笔记内容');
-    expect(textarea).toHaveAttribute('rows', '5');
-
-    const expandButton = screen.getByRole('button', { name: '扩大输入' });
-    expect(expandButton).toHaveTextContent('⤢');
-
-    await user.click(expandButton);
-
-    expect(textarea).toHaveAttribute('rows', '10');
-    expect(screen.getByRole('button', { name: '收起输入' })).toHaveTextContent('⤢');
+    expect(textarea).toHaveStyle({ height: '72px' });
+    await user.click(textarea);
+    expect(textarea).toHaveStyle({ height: '112px' });
   });
 
   test('输入独立 # 后显示标签下拉并可用键盘选择插入', async () => {
@@ -119,17 +114,16 @@ describe('NoteEditor', () => {
     render(<NoteEditor onSubmit={onSubmit} />);
 
     const textarea = screen.getByLabelText('笔记内容');
-    await user.click(screen.getByRole('button', { name: '扩大输入' }));
     await user.type(textarea, '提交后清空');
     await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
     expect(onSubmit).toHaveBeenCalledWith([{ type: 'paragraph', content: '提交后清空' }]);
     expect(textarea).toHaveValue('');
-    expect(textarea).toHaveAttribute('rows', '5');
+    expect(textarea).toHaveAttribute('rows', '2');
     expect(screen.getByRole('button', { name: '发送笔记' })).toBeDisabled();
   });
 
-  test('上传图片后可作为图片块提交', async () => {
+  test('粘贴图片后可作为图片块提交', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     const onUploadImage = vi.fn(async () => ({ type: 'image' as const, mediaId: 'm1', url: 'blob:preview', alt: 'photo.png' }));
@@ -137,7 +131,12 @@ describe('NoteEditor', () => {
     render(<NoteEditor onSubmit={onSubmit} onUploadImage={onUploadImage} />);
 
     const file = new File(['png'], 'photo.png', { type: 'image/png' });
-    await user.upload(screen.getByLabelText('选择图片文件'), file);
+    const textarea = screen.getByLabelText('笔记内容');
+    const clipboardData = {
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }]
+    };
+    await user.click(textarea);
+    fireEvent.paste(textarea, { clipboardData });
     expect(await screen.findByAltText('photo.png')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '发送笔记' }));
 
