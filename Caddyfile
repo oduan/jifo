@@ -1,0 +1,9 @@
+{$JIFO_SITE_ADDRESS:http://localhost} {
+	encode zstd gzip
+
+	reverse_proxy {$JIFO_UPSTREAM:127.0.0.1:8086}
+
+	header {
+		-Server
+	}
+}

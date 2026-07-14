@@ -23,7 +23,7 @@ docker compose --env-file .env.production ps
 docker compose --env-file .env.production logs --tail=100 web api
 ```
 
-默认入口为 `http://localhost:8080`。Web 通过内部网络代理 `/api`，API 和 PostgreSQL 不直接暴露到公网；数据库端口仅绑定 `127.0.0.1`。
+默认入口为 `http://localhost:8086`。Web 通过内部网络代理 `/api`，Web 和 PostgreSQL 仅绑定 `127.0.0.1`，API 不直接暴露到宿主机。
 
 API 健康检查：
 
@@ -63,9 +63,17 @@ API 会在 advisory lock 保护下执行尚未应用的 migration。不要修改
 
 ## 反向代理与 TLS
 
-若使用 Caddy、Traefik 或宿主机 Nginx：
+仓库根目录包含可直接使用的 `Caddyfile`。默认代理 `127.0.0.1:8086`；生产环境示例：
 
-1. 将 `HTTP_PORT` 仅绑定到可信入口或防火墙限制的地址。
+```bash
+export JIFO_SITE_ADDRESS=notes.example.com
+export JIFO_UPSTREAM=127.0.0.1:8086
+caddy run --config ./Caddyfile
+```
+
+Caddy 会为有效公网域名自动申请和续期 HTTPS 证书。若使用 Caddy、Traefik 或宿主机 Nginx：
+
+1. 保持 Compose 中的 `HTTP_PORT` 仅绑定到宿主机 `127.0.0.1`。
 2. 在外层代理终止 TLS。
 3. 保留 `X-Forwarded-For` 与 `X-Forwarded-Proto`。
 4. 根据实际 Compose 子网配置 `TRUSTED_PROXIES`。
