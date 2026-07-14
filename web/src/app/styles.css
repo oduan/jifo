@@ -864,6 +864,16 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
+.tag-count {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.tag-tree:hover .tag-count,
+.tag-tree:focus-within .tag-count {
+  opacity: 0.72;
+}
+
 .heatmap {
   display: grid;
   gap: 4px;
