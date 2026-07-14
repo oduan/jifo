@@ -1182,7 +1182,7 @@ h3 {
 .settings-popover:hover .settings-trigger,
 .settings-popover[open] .settings-trigger {
   color: var(--jifo-green-dark);
-  background: var(--jifo-button-hover, rgba(255, 255, 255, 0.66));
+  background: transparent;
 }
 
 .settings-popover:hover .settings-trigger__chevron,
