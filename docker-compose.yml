@@ -74,9 +74,12 @@ services:
       retries: 5
       start_period: 10s
     networks:
+      - jifo-edge
       - jifo-internal
 
 networks:
+  jifo-edge:
+    driver: bridge
   jifo-internal:
     driver: bridge
     internal: true
