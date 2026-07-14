@@ -125,6 +125,36 @@ describe('NoteCard', () => {
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
   });
 
+  test('视口底部空间不足时菜单向上展开', async () => {
+    const user = userEvent.setup();
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 720 });
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      const element = this as HTMLElement;
+      if (element.classList.contains('note-menu__panel')) {
+        return { top: 690, bottom: 780, left: 0, right: 108, width: 108, height: 90, x: 0, y: 690, toJSON: () => ({}) };
+      }
+      if (element.classList.contains('note-menu')) {
+        return { top: 680, bottom: 704, left: 0, right: 24, width: 24, height: 24, x: 0, y: 680, toJSON: () => ({}) };
+      }
+      return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
+    });
+
+    render(
+      <NoteCard
+        note={{ id: 'n1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '底部笔记' }], tagIds: [] }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+
+    expect(screen.getByRole('menu')).toHaveClass('note-menu__panel--up');
+    rectSpy.mockRestore();
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight });
+  });
+
   test('焦点移到外部元素后关闭三个点菜单', async () => {
     const user = userEvent.setup();
 

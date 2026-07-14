@@ -4,7 +4,7 @@ import { Textarea } from '../../shared/ui/Input';
 
 export type NoteBlock =
   | { type: 'paragraph'; content: string }
-  | { type: 'image'; url: string; mediaId?: string; alt?: string };
+  | { type: 'image'; url?: string; mediaId?: string; alt?: string };
 
 export type NoteEditorTag = {
   id: string;
@@ -16,6 +16,7 @@ type NoteEditorProps = {
   initialText?: string;
   tags?: NoteEditorTag[];
   onSubmit: (blocks: NoteBlock[]) => void;
+  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
 };
 
 type TagTrigger = {
@@ -149,14 +150,18 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
   };
 }
 
-export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImage }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(initialText);
   const [isExpanded, setExpanded] = useState(false);
   const [tagTrigger, setTagTrigger] = useState<TagTrigger | null>(null);
   const [suggestionPosition, setSuggestionPosition] = useState<SuggestionPosition>({ left: 10, top: 0 });
   const [focusedTagIndex, setFocusedTagIndex] = useState(0);
-  const blocks = toParagraphBlocks(text);
+  const [images, setImages] = useState<Extract<NoteBlock, { type: 'image' }>[]>([]);
+  const [isUploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const blocks = [...toParagraphBlocks(text), ...images];
   const hasContent = blocks.length > 0;
   const suggestions = useMemo(() => (tagTrigger ? suggestionItems(tags, tagTrigger.query) : []), [tagTrigger, tags]);
   const showTagSuggestions = Boolean(tagTrigger && suggestions.length > 0);
@@ -165,8 +170,24 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
     const nextTrigger = findTagTrigger(nextText, caret);
     setTagTrigger(nextTrigger);
     setFocusedTagIndex(0);
+    setImages([]);
     if (nextTrigger && textarea) {
       setSuggestionPosition(caretDropdownPosition(textarea, caret));
+    }
+  };
+
+  const uploadSelectedImage = async (file: File | undefined) => {
+    if (!file || !onUploadImage) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const image = await onUploadImage(file);
+      setImages((current) => [...current, image]);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : '图片上传失败。');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -176,6 +197,9 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
       return;
     }
     onSubmit(blocks);
+    images.forEach((image) => {
+      if (image.url?.startsWith('blob:')) URL.revokeObjectURL(image.url);
+    });
     setText('');
     setExpanded(false);
     setTagTrigger(null);
@@ -286,6 +310,14 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
         >
           <span aria-hidden="true">⤢</span>
         </button>
+        {onUploadImage ? (
+          <>
+            <input ref={fileInputRef} className="note-editor__file-input" type="file" aria-label="选择图片文件" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => void uploadSelectedImage(event.target.files?.[0])} />
+            <button type="button" className="note-editor__image-button" aria-label="添加图片" disabled={isUploading} onClick={() => fileInputRef.current?.click()}>
+              {isUploading ? '上传中…' : '图片'}
+            </button>
+          </>
+        ) : null}
         <button
           type="submit"
           className="send-icon-button"
@@ -296,6 +328,12 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit }: NoteEditor
           <span aria-hidden="true">➤</span>
         </button>
       </div>
+      {images.length > 0 ? (
+        <div className="note-editor__image-preview">
+          {images.map((image, index) => <img key={`${image.mediaId ?? image.url}-${index}`} src={image.url} alt={image.alt ?? '待发送图片'} />)}
+        </div>
+      ) : null}
+      {uploadError ? <div className="note-editor__upload-error" role="alert">{uploadError}</div> : null}
     </form>
   );
 }

@@ -133,8 +133,13 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 
 	switch op.Action {
 	case "create":
-		note, err := s.notes.CreateTx(ctx, tx, notes.CreateInput{UserID: userID, ClientID: op.ClientID, Content: op.Payload.Content, PlainText: op.Payload.PlainText})
+		createTx, err := tx.Begin(ctx)
 		if err != nil {
+			return PushResult{}, err
+		}
+		note, err := s.notes.CreateTx(ctx, createTx, notes.CreateInput{UserID: userID, ClientID: op.ClientID, Content: op.Payload.Content, PlainText: op.Payload.PlainText})
+		if err != nil {
+			_ = createTx.Rollback(ctx)
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				var existingID uuid.UUID
@@ -144,6 +149,9 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 				}
 				return PushResult{Status: "duplicate", NoteID: &existingID, Version: existingVersion}, nil
 			}
+			return PushResult{}, err
+		}
+		if err := createTx.Commit(ctx); err != nil {
 			return PushResult{}, err
 		}
 		return PushResult{Status: "created", NoteID: &note.ID, Version: note.Version}, nil

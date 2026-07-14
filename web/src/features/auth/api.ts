@@ -48,3 +48,7 @@ export async function refreshAuth(client: ApiClient, refreshToken: string): Prom
     body: JSON.stringify({ refreshToken })
   });
 }
+
+export function logoutAuth(client: ApiClient): Promise<void> {
+  return client.request<void>('/auth/logout', { method: 'POST' });
+}

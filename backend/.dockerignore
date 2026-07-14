@@ -1,0 +1,6 @@
+.env
+.gocache/
+bin/
+storage/media/*
+!storage/media/.gitkeep
+*_test.go

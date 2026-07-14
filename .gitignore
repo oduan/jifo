@@ -3,6 +3,7 @@ backend/storage/media/*
 !backend/storage/media/.gitkeep
 backend/bin/
 backend/.env
+.env.production
 web/node_modules/
 web/dist/
 .DS_Store

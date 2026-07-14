@@ -128,4 +128,20 @@ describe('NoteEditor', () => {
     expect(textarea).toHaveAttribute('rows', '5');
     expect(screen.getByRole('button', { name: '发送笔记' })).toBeDisabled();
   });
+
+  test('上传图片后可作为图片块提交', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onUploadImage = vi.fn(async () => ({ type: 'image' as const, mediaId: 'm1', url: 'blob:preview', alt: 'photo.png' }));
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    render(<NoteEditor onSubmit={onSubmit} onUploadImage={onUploadImage} />);
+
+    const file = new File(['png'], 'photo.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText('选择图片文件'), file);
+    expect(await screen.findByAltText('photo.png')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '发送笔记' }));
+
+    expect(onUploadImage).toHaveBeenCalledWith(file);
+    expect(onSubmit).toHaveBeenCalledWith([{ type: 'image', mediaId: 'm1', url: 'blob:preview', alt: 'photo.png' }]);
+  });
 });

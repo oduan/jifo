@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest",
-    "build": "vite build"
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.66.9",

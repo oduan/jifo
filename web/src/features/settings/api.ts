@@ -32,3 +32,11 @@ export function createAccessKey(client: ApiClient, label: string): Promise<Creat
 export function deleteAccessKey(client: ApiClient, id: string): Promise<void> {
   return client.request<void>(`/settings/access-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+
+export function changePassword(client: ApiClient, currentPassword: string, newPassword: string): Promise<void> {
+  return client.request<void>('/me/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
+}

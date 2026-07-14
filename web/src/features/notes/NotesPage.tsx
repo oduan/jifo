@@ -35,6 +35,9 @@ type NotesPageProps = {
   onCreateNote?: (blocks: NoteBlock[]) => void | Promise<void>;
   onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
   onDeleteNote?: (id: string) => void | Promise<void>;
+  onRestoreNote?: (id: string) => void | Promise<void>;
+  trash?: boolean;
+  onSelectTrash?: () => void;
   onLogout?: () => void;
   accessKeys?: AccessKeySummary[];
   isLoadingAccessKeys?: boolean;
@@ -43,6 +46,9 @@ type NotesPageProps = {
   onLoadAccessKeys?: () => void | Promise<void>;
   onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
   onDeleteAccessKey?: (id: string) => Promise<void>;
+  onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
+  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
+  resolveMediaUrl?: (mediaId: string) => Promise<string>;
 };
 
 function createdAtTime(note: Note): number {
@@ -66,6 +72,9 @@ export function NotesPage({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  onRestoreNote,
+  trash = false,
+  onSelectTrash,
   onLogout,
   accessKeys = [],
   isLoadingAccessKeys = false,
@@ -73,7 +82,10 @@ export function NotesPage({
   settingsError,
   onLoadAccessKeys,
   onCreateAccessKey,
-  onDeleteAccessKey
+  onDeleteAccessKey,
+  onChangePassword,
+  onUploadImage,
+  resolveMediaUrl
 }: NotesPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -150,7 +162,7 @@ export function NotesPage({
         </section>
 
         <section className="sidebar-section sidebar-section--primary-filter">
-          <button type="button" className="nav-pill" aria-pressed={selectedTagId === null} aria-label="全部笔记" onClick={selectAllNotes}>
+          <button type="button" className="nav-pill" aria-pressed={!trash && selectedTagId === null} aria-label="全部笔记" onClick={selectAllNotes}>
             <span className="nav-pill__label">
               <span className="nav-grid-icon" aria-hidden="true">
                 <span />
@@ -161,6 +173,12 @@ export function NotesPage({
               <span>全部笔记</span>
             </span>
             <span className="nav-count">{allNotesCount}</span>
+          </button>
+          <button type="button" className="nav-pill" aria-pressed={trash} aria-label="回收站" onClick={onSelectTrash}>
+            <span className="nav-pill__label">
+              <span aria-hidden="true">⌫</span>
+              <span>回收站</span>
+            </span>
           </button>
         </section>
 
@@ -173,7 +191,7 @@ export function NotesPage({
       <section className="jifo-workspace" aria-label="笔记工作区">
         <header className="workspace-header">
           <div className="workspace-heading">
-            <h2 className="workspace-title">{selectedTag ? selectedTag.name : '全部笔记'}</h2>
+            <h2 className="workspace-title">{trash ? '回收站' : selectedTag ? selectedTag.name : '全部笔记'}</h2>
           </div>
           <div className="workspace-search" role="search" aria-label="搜索笔记">
             <TextInput
@@ -190,9 +208,11 @@ export function NotesPage({
           </div>
         </header>
 
-        <section className="composer-card" aria-label="新笔记编辑器">
-          <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} />
-        </section>
+        {!trash ? (
+          <section className="composer-card" aria-label="新笔记编辑器">
+            <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} onUploadImage={onUploadImage} />
+          </section>
+        ) : null}
 
         <section className="notes-stream" aria-label="笔记流">
           {displayNotes.map((note) => (
@@ -203,10 +223,14 @@ export function NotesPage({
               onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
               onTagSelect={selectTagFromNote}
               tags={tags}
+              trash={trash}
+              onRestore={(id) => onRestoreNote?.(id)}
+              onUploadImage={onUploadImage}
+              resolveMediaUrl={resolveMediaUrl}
             />
           ))}
           {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
-          {displayNotes.length === 0 ? <EmptyState title="还没有笔记" description="写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。" /> : null}
+          {displayNotes.length === 0 ? <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} /> : null}
         </section>
       </section>
 
@@ -220,6 +244,7 @@ export function NotesPage({
         onLoadAccessKeys={onLoadAccessKeys}
         onCreateAccessKey={onCreateAccessKey}
         onDeleteAccessKey={onDeleteAccessKey}
+        onChangePassword={onChangePassword}
       />
     </main>
   );

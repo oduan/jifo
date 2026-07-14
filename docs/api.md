@@ -64,6 +64,7 @@ Authorization: Bearer <accessKey>
 常见错误：
 
 - `400 bad_request`：JSON 无效或缺少 `email/password/deviceCode`
+- `400 invalid_password`：密码长度不在 8 到 72 字节之间
 - `409 email_exists`：邮箱已注册
 
 ### 登录
@@ -104,6 +105,29 @@ Authorization: Bearer <accessKey>
 
 - `400 bad_request`：JSON 无效或缺少 `refreshToken`
 - `401 invalid_refresh_token`：refresh token 无效、已轮换或 session 已撤销
+
+### 退出当前会话
+
+`POST /auth/logout`
+
+需要网页登录 JWT，不接受访问密钥。响应 `204`。当前 session 会立即撤销，现有 access token 与 refresh token 随后失效。
+
+## Account
+
+### 修改密码
+
+`POST /me/password`
+
+请求：
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-password"
+}
+```
+
+需要网页登录 JWT，不接受访问密钥。响应 `204`。修改成功后撤销用户的全部 session，客户端需要使用新密码重新登录。
 
 ## Settings
 

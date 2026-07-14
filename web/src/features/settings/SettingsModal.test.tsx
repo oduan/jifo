@@ -108,4 +108,18 @@ describe('SettingsModal', () => {
 
     expect(onClose).toHaveBeenCalled();
   });
+
+  test('账户页校验并提交修改密码', async () => {
+    const user = userEvent.setup();
+    const onChangePassword = vi.fn(async () => undefined);
+    render(<SettingsModal open accessKeys={[]} onClose={vi.fn()} onChangePassword={onChangePassword} />);
+
+    await user.click(screen.getByRole('button', { name: '账户' }));
+    await user.type(screen.getByLabelText('当前密码'), 'old-password');
+    await user.type(screen.getByLabelText('新密码'), 'new-password');
+    await user.type(screen.getByLabelText('确认新密码'), 'new-password');
+    await user.click(screen.getByRole('button', { name: '修改密码' }));
+
+    expect(onChangePassword).toHaveBeenCalledWith('old-password', 'new-password');
+  });
 });

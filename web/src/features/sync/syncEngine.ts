@@ -23,7 +23,7 @@ export type PullCursor = {
 };
 
 export type PullChangesResult = {
-  cursor: PullCursor;
+  cursor?: PullCursor;
   notes: CachedNote[];
 };
 
@@ -230,7 +230,9 @@ async function applyPullChanges(db: JifoDb, changes: PullChangesResult) {
   for (const note of changes.notes) {
     await db.notes_cache.put(note);
   }
-  await db.sync_state.put({ key: 'cursor', value: changes.cursor });
+  if (changes.cursor) {
+    await db.sync_state.put({ key: 'cursor', value: changes.cursor });
+  }
 }
 
 function readCursor(value: unknown): PullCursor | undefined {

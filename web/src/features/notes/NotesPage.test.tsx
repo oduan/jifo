@@ -199,6 +199,27 @@ describe('NotesPage', () => {
     expect(container.querySelector('.notes-stream__sentinel')).not.toBeInTheDocument();
   });
 
+  test('回收站隐藏编辑器并提供恢复操作', async () => {
+    const user = userEvent.setup();
+    const onRestoreNote = vi.fn();
+    render(
+      <NotesPage
+        userName="oisin"
+        trash
+        notes={[{ id: 'n1', clientId: 'c1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '已删除笔记' }], tagIds: [] }]}
+        tags={[]}
+        heatmapCells={[]}
+        onRestoreNote={onRestoreNote}
+      />
+    );
+
+    expect(screen.getByRole('heading', { name: '回收站' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('新笔记编辑器')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '恢复' }));
+    expect(onRestoreNote).toHaveBeenCalledWith('n1');
+  });
+
   test('从用户名菜单打开设置弹窗并加载密钥', async () => {
     const user = userEvent.setup();
     const onLoadAccessKeys = vi.fn();

@@ -48,6 +48,9 @@ function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: stri
     if (path.includes('/settings/access-keys/') && method === 'DELETE') {
       return new Response(null, { status: 204 });
     }
+    if (path.endsWith('/auth/logout') && method === 'POST') {
+      return new Response(null, { status: 204 });
+    }
     if (path.endsWith('/tags/tree')) {
       return new Response(JSON.stringify({ items: [{ id: 'tag-work', name: '工作', path: '工作', noteCount: 1 }] }), {
         status: 200,
@@ -260,6 +263,21 @@ describe('App', () => {
 
     await waitFor(() => expect(requestedUrls).toContain('/api/settings/access-keys/k1'));
     await waitFor(() => expect(screen.queryByText('jifo_abcd••••••vwxyz')).not.toBeInTheDocument());
+  });
+
+  test('退出登录时先调用服务端logout再清除本地会话', async () => {
+    const user = userEvent.setup();
+    const requestedUrls: string[] = [];
+    mockWorkspaceFetch(requestedUrls);
+    authenticateAndRender();
+    await waitFor(() => expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'oisin 设置菜单' }));
+    await user.click(screen.getByRole('button', { name: '退出登录' }));
+
+    await waitFor(() => expect(requestedUrls).toContain('/api/auth/logout'));
+    await waitFor(() => expect(authStore.getState().accessToken).toBeNull());
+    expect(screen.getByRole('heading', { name: '轻量记录，安静回看' })).toBeInTheDocument();
   });
 
   test('滚动到底时根据 hasMore 请求下一页并追加', async () => {

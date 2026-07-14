@@ -44,6 +44,12 @@ func (s *Service) Aggregate(ctx context.Context, userID uuid.UUID, from time.Tim
 }
 
 func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Time, toExclusive time.Time, field string) (map[time.Time]int64, error) {
+	additionalCondition := ""
+	if field == "updated_at" {
+		// A newly created note starts with updated_at equal to created_at. Do not
+		// count that initial value as a separate update activity.
+		additionalCondition = " AND updated_at > created_at"
+	}
 	rows, err := s.db.Query(ctx, `
 		SELECT date_trunc('day', `+field+`)::date AS day, count(*)
 		FROM notes
@@ -51,6 +57,7 @@ func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Ti
 		  AND permanently_deleted_at IS NULL
 		  AND `+field+` >= $2
 		  AND `+field+` < $3
+		  `+additionalCondition+`
 		GROUP BY day
 	`, userID, from, toExclusive)
 	if err != nil {

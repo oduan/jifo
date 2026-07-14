@@ -24,3 +24,11 @@ export async function uploadMedia(client: ApiClient, file: File): Promise<MediaA
   });
   return response.item;
 }
+
+export async function loadMediaObjectUrl(client: ApiClient, mediaId: string): Promise<string> {
+  if (!client.requestBlob) {
+    throw new Error('media download is not supported by this API client');
+  }
+  const blob = await client.requestBlob(`/media/${encodeURIComponent(mediaId)}`);
+  return URL.createObjectURL(blob);
+}

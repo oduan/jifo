@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 
 import { ApiClient } from '../../shared/api/client';
-import { createAccessKey, deleteAccessKey, listAccessKeys } from './api';
+import { changePassword, createAccessKey, deleteAccessKey, listAccessKeys } from './api';
 
 function mockClient(response: unknown): ApiClient {
   return {
@@ -35,5 +35,15 @@ describe('settings api', () => {
     await expect(deleteAccessKey(client, 'k1')).resolves.toBeUndefined();
 
     expect(client.request).toHaveBeenCalledWith('/settings/access-keys/k1', { method: 'DELETE' });
+  });
+
+  test('changePassword posts both passwords', async () => {
+    const client = mockClient(undefined);
+    await changePassword(client, 'old-password', 'new-password');
+    expect(client.request).toHaveBeenCalledWith('/me/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword: 'old-password', newPassword: 'new-password' })
+    });
   });
 });

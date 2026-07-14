@@ -161,6 +161,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", asset.MIMEType)
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Content-Disposition", `inline; filename="`+asset.ID.String()+`"`)
 	http.ServeContent(w, r, asset.ID.String(), asset.CreatedAt, file)
 }
 

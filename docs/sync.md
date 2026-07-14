@@ -2,7 +2,7 @@
 
 Jifo 同步采用离线优先思路：Web 先写 IndexedDB 本地缓存与 outbox；网络可用时按顺序同步到后端，再 pull 远端变更刷新本地缓存。
 
-> 当前状态：后端 `internal/sync.Service`、`/api/sync/push`、`/api/sync/pull` 和 Web `syncEngine` 已实现核心协议与测试；Web App 主界面已接真实 notes/tags/heatmap API，离线 sync engine 的自动启动与媒体上传 UI 仍可继续打磨。
+> 当前状态：后端 `internal/sync.Service`、`/api/sync/push`、`/api/sync/pull` 和 Web `syncEngine` 已实现核心协议与测试；Web App 已挂载 sync engine，在登录、恢复网络和定时间隔触发同步，并在普通文字笔记请求发生网络错误时写入本地 cache/outbox。图片可在线上传和鉴权展示；离线新建图片仍待补全。
 
 ## IndexedDB schema
 

@@ -117,9 +117,11 @@ function tagIdsForNote(note: ApiNote, tags: TagNode[]) {
 export function fromApiNote(note: ApiNote, tags: TagNode[] = []): Note {
   return {
     id: note.id,
+    clientId: note.clientId,
     createdAt: displayTimestamp(note.createdAt),
     updatedAt: note.updatedAt,
     version: note.version,
+    deletedAt: note.deletedAt,
     blocks: fromApiBlocks(note.content?.blocks, note.plainText),
     tagIds: tagIdsForNote(note, tags)
   };

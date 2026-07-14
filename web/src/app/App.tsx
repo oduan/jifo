@@ -1,22 +1,27 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { LoginPage, LoginPayload, LoginResult } from '../features/auth/LoginPage';
-import { refreshAuth, submitAuth } from '../features/auth/api';
+import { logoutAuth, refreshAuth, submitAuth } from '../features/auth/api';
 import { authStore } from '../features/auth/authStore';
 import { loadHeatmap } from '../features/heatmap/api';
 import { HeatmapCell } from '../features/heatmap/Heatmap';
-import { createNote, deleteNote, fromApiNote, listNoteStats, listNotes, updateNote } from '../features/notes/api';
-import { AccessKeySummary, createAccessKey, CreateAccessKeyResult, deleteAccessKey as deleteAccessKeyAPI, listAccessKeys } from '../features/settings/api';
+import { loadMediaObjectUrl, uploadMedia } from '../features/media/api';
+import { createNote, deleteNote, fromApiNote, listNoteStats, listNotes, restoreNote, updateNote } from '../features/notes/api';
+import { AccessKeySummary, changePassword, createAccessKey, CreateAccessKeyResult, deleteAccessKey as deleteAccessKeyAPI, listAccessKeys } from '../features/settings/api';
 import { Note } from '../features/notes/NoteCard';
 import { NoteBlock } from '../features/notes/NoteEditor';
 import { NotesPage } from '../features/notes/NotesPage';
 import { listTagTree } from '../features/tags/api';
 import { TagNode } from '../features/tags/TagTree';
 import { ApiError, createApiClient } from '../shared/api/client';
+import { CachedNote, CachedNoteBlock, createJifoDb } from '../storage/db';
+import { pullChanges, pushOutbox } from '../features/sync/api';
+import { runSync } from '../features/sync/syncEngine';
+import { createOfflineNote, deleteNoteOutboxOperation, restoreNoteOutboxOperation, updateNoteOutboxOperation } from '../features/sync/outbox';
 
 const NOTES_PAGE_SIZE = 20;
-const ACCESS_TOKEN_RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-const ACCESS_TOKEN_RENEWAL_CHECK_MS = 30 * 60 * 1000;
+const ACCESS_TOKEN_RENEWAL_THRESHOLD_MS = 2 * 60 * 1000;
+const ACCESS_TOKEN_RENEWAL_CHECK_MS = 30 * 1000;
 
 function useAuthState() {
   return useSyncExternalStore(authStore.subscribe, authStore.getSnapshot, authStore.getSnapshot);
@@ -59,9 +64,40 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '请求失败，请稍后重试。';
 }
 
+function newLocalId(prefix: string) {
+  const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${id}`;
+}
+
+function toCachedBlocks(blocks: NoteBlock[]): CachedNoteBlock[] {
+  return blocks.map((block) => block.type === 'paragraph' ? { type: 'paragraph', content: block.content } : { type: 'image', url: block.url, mediaId: block.mediaId, alt: block.alt });
+}
+
+function fromCachedNote(note: CachedNote): Note {
+  return {
+    id: note.id,
+    clientId: note.clientId,
+    createdAt: note.createdAt ?? note.updatedAt,
+    updatedAt: note.updatedAt,
+    version: note.version,
+    deletedAt: note.deletedAt,
+    blocks: note.blocks,
+    tagIds: []
+  };
+}
+
+function isNetworkFailure(error: unknown) {
+  return error instanceof TypeError;
+}
+
+function cachedPlainText(note: CachedNote) {
+  return note.blocks.filter((block): block is Extract<CachedNoteBlock, { type: 'paragraph' }> => block.type === 'paragraph').map((block) => block.content).join('\n\n');
+}
+
 export function App() {
   const authState = useAuthState();
   const accessToken = authState.accessToken;
+  const localDb = useMemo(() => createJifoDb(`jifo-${authState.user?.id ?? 'guest'}`), [authState.user?.id]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [totalNoteCount, setTotalNoteCount] = useState(0);
   const [tags, setTags] = useState<TagNode[]>([]);
@@ -79,6 +115,7 @@ export function App() {
   const [selectedTagPath, setSelectedTagPath] = useState<string | undefined>();
   const [hasMoreNotes, setHasMoreNotes] = useState(false);
   const [isLoadingMoreNotes, setLoadingMoreNotes] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
 
   const authApi = useMemo(() => {
     const baseUrl = apiBaseUrl();
@@ -130,6 +167,8 @@ export function App() {
   }, []);
   const client = authApi.client;
 
+  useEffect(() => () => localDb.close(), [localDb]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedNoteQuery(noteQuery), 300);
     return () => window.clearTimeout(timer);
@@ -156,10 +195,11 @@ export function App() {
     (offset: number) => ({
       search: debouncedNoteQuery,
       tagPath: selectedTagPath,
+      trash: showTrash,
       limit: NOTES_PAGE_SIZE,
       offset
     }),
-    [debouncedNoteQuery, selectedTagPath]
+    [debouncedNoteQuery, selectedTagPath, showTrash]
   );
 
   const loadWorkspace = useCallback(async () => {
@@ -172,6 +212,15 @@ export function App() {
     try {
       const nextTags = await listTagTree(client);
       const [nextNotes, nextStats, nextHeatmap] = await Promise.all([listNotes(client, noteListOptions(0)), listNoteStats(client), loadHeatmap(client)]);
+      await localDb.notes_cache.bulkPut(nextNotes.items.map((note) => ({
+        id: note.id,
+        clientId: note.clientId,
+        blocks: fromApiNote(note, nextTags).blocks,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        deletedAt: note.deletedAt,
+        version: note.version
+      })));
       setTags(nextTags);
       setNotes(nextNotes.items.map((note) => fromApiNote(note, nextTags)));
       setTotalNoteCount(nextStats.total);
@@ -180,13 +229,34 @@ export function App() {
     } catch (loadError) {
       const message = errorMessage(loadError);
       setError(message);
+      const cached = await localDb.notes_cache.toArray();
+      const query = debouncedNoteQuery.trim().toLocaleLowerCase();
+      setNotes(cached
+        .filter((note) => showTrash ? Boolean(note.deletedAt) && !note.permanentlyDeletedAt : !note.deletedAt && !note.permanentlyDeletedAt)
+        .filter((note) => !query || cachedPlainText(note).toLocaleLowerCase().includes(query))
+        .filter((note) => !selectedTagPath || cachedPlainText(note).includes(`#${selectedTagPath}`))
+        .map(fromCachedNote));
       if (loadError instanceof ApiError && loadError.status === 401 && !authStore.getState().refreshToken) {
         authStore.clear();
       }
     } finally {
       setLoading(false);
     }
-  }, [client, noteListOptions]);
+  }, [client, debouncedNoteQuery, localDb, noteListOptions, selectedTagPath, showTrash]);
+
+  const syncNow = useCallback(async () => {
+    await runSync({
+      db: localDb,
+      uploadMedia: async ({ localId }) => {
+        const cached = await localDb.media_cache.where('localId').equals(localId).first();
+        if (!cached?.blob) throw new Error('local media is unavailable');
+        const asset = await uploadMedia(client, new File([cached.blob], localId, { type: cached.blob.type }));
+        return { mediaId: asset.id };
+      },
+      pushOutbox: (operations) => pushOutbox(client, operations),
+      pullChanges: (cursor) => pullChanges(client, cursor)
+    });
+  }, [client, localDb]);
 
   useEffect(() => {
     if (accessToken) {
@@ -205,8 +275,28 @@ export function App() {
       setSelectedTagPath(undefined);
       setHasMoreNotes(false);
       setLoadingMoreNotes(false);
+      setShowTrash(false);
     }
   }, [accessToken, loadWorkspace]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let active = true;
+    const synchronize = () => {
+      if (!navigator.onLine) return;
+      void syncNow().then(async () => {
+        if (active) await loadWorkspace();
+      }).catch(() => undefined);
+    };
+    synchronize();
+    window.addEventListener('online', synchronize);
+    const timer = window.setInterval(synchronize, 60_000);
+    return () => {
+      active = false;
+      window.removeEventListener('online', synchronize);
+      window.clearInterval(timer);
+    };
+  }, [accessToken, loadWorkspace, syncNow]);
 
   const submitLogin = useCallback(
     async (payload: LoginPayload): Promise<LoginResult> => {
@@ -263,6 +353,29 @@ export function App() {
     [client]
   );
 
+  const logout = useCallback(async () => {
+    try {
+      await logoutAuth(client);
+    } finally {
+      authStore.clear();
+    }
+  }, [client]);
+
+  const updatePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      await changePassword(client, currentPassword, newPassword);
+      authStore.clear();
+    },
+    [client]
+  );
+
+  const uploadImage = useCallback(async (file: File): Promise<Extract<NoteBlock, { type: 'image' }>> => {
+    const asset = await uploadMedia(client, file);
+    return { type: 'image', mediaId: asset.id, url: URL.createObjectURL(file), alt: file.name };
+  }, [client]);
+
+  const resolveMediaUrl = useCallback((mediaId: string) => loadMediaObjectUrl(client, mediaId), [client]);
+
   const withMutation = useCallback(
     async (operation: () => Promise<void>) => {
       setMutating(true);
@@ -288,6 +401,15 @@ export function App() {
     setError(null);
     try {
       const next = await listNotes(client, noteListOptions(notes.length));
+      await localDb.notes_cache.bulkPut(next.items.map((note) => ({
+        id: note.id,
+        clientId: note.clientId,
+        blocks: fromApiNote(note, tags).blocks,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        deletedAt: note.deletedAt,
+        version: note.version
+      })));
       setNotes((current) => [...current, ...next.items.map((note) => fromApiNote(note, tags))]);
       setHasMoreNotes(next.page.hasMore);
     } catch (loadError) {
@@ -295,7 +417,7 @@ export function App() {
     } finally {
       setLoadingMoreNotes(false);
     }
-  }, [client, hasMoreNotes, isLoading, isLoadingMoreNotes, noteListOptions, notes.length, tags]);
+  }, [client, hasMoreNotes, isLoading, isLoadingMoreNotes, localDb, noteListOptions, notes.length, tags]);
 
   if (!accessToken) {
     return (
@@ -327,26 +449,78 @@ export function App() {
       onRetry={() => void loadWorkspace()}
       onSearchChange={setNoteQuery}
       onSelectTag={(tag) => {
+        setShowTrash(false);
         setSelectedTagId(tag.id);
         setSelectedTagPath(tag.id ? tag.path : undefined);
       }}
       onLoadMoreNotes={() => void loadMoreNotes()}
+      trash={showTrash}
+      onSelectTrash={() => {
+        setShowTrash(true);
+        setSelectedTagId(null);
+        setSelectedTagPath(undefined);
+      }}
       onCreateNote={(blocks: NoteBlock[]) =>
         withMutation(async () => {
-          await createNote(client, blocks);
+          try {
+            await createNote(client, blocks);
+          } catch (createError) {
+            if (!isNetworkFailure(createError)) throw createError;
+            await createOfflineNote(localDb, { clientId: newLocalId('web-note'), blocks: toCachedBlocks(blocks) });
+          }
         })
       }
       onUpdateNote={(id: string, blocks: NoteBlock[]) =>
         withMutation(async () => {
-          await updateNote(client, id, blocks);
+          try {
+            await updateNote(client, id, blocks);
+          } catch (updateError) {
+            if (!isNetworkFailure(updateError)) throw updateError;
+            const current = notes.find((note) => note.id === id);
+            if (!current) throw updateError;
+            const cached: CachedNote = { id, clientId: current.clientId, blocks: toCachedBlocks(blocks), createdAt: current.createdAt, updatedAt: new Date().toISOString(), version: current.version };
+            const operation = updateNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version, blocks: cached.blocks });
+            await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+              await localDb.notes_cache.put(cached);
+              await localDb.outbox.add(operation);
+            });
+          }
         })
       }
       onDeleteNote={(id: string) =>
         withMutation(async () => {
-          await deleteNote(client, id);
+          try {
+            await deleteNote(client, id);
+          } catch (deleteError) {
+            if (!isNetworkFailure(deleteError)) throw deleteError;
+            const current = notes.find((note) => note.id === id);
+            if (!current) throw deleteError;
+            const operation = deleteNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version });
+            await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+              await localDb.notes_cache.update(id, { deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+              await localDb.outbox.add(operation);
+            });
+          }
         })
       }
-      onLogout={() => authStore.clear()}
+      onRestoreNote={(id: string) =>
+        withMutation(async () => {
+          try {
+            await restoreNote(client, id);
+          } catch (restoreError) {
+            if (!isNetworkFailure(restoreError)) throw restoreError;
+            const current = notes.find((note) => note.id === id);
+            if (!current) throw restoreError;
+            const blocks = toCachedBlocks(current.blocks);
+            const operation = restoreNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version, blocks });
+            await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+              await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: new Date().toISOString(), blocks });
+              await localDb.outbox.add(operation);
+            });
+          }
+        })
+      }
+      onLogout={() => void logout()}
       accessKeys={accessKeys}
       isLoadingAccessKeys={isLoadingAccessKeys}
       isCreatingAccessKey={isCreatingAccessKey}
@@ -354,6 +528,9 @@ export function App() {
       onLoadAccessKeys={loadAccessKeys}
       onCreateAccessKey={createNewAccessKey}
       onDeleteAccessKey={deleteExistingAccessKey}
+      onChangePassword={updatePassword}
+      onUploadImage={uploadImage}
+      resolveMediaUrl={resolveMediaUrl}
     />
   );
 }

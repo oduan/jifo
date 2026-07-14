@@ -1,4 +1,4 @@
-import { FocusEvent, MouseEvent, ReactNode, useEffect, useRef, useState } from 'react';
+import { FocusEvent, MouseEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
 import { TagNode } from '../tags/TagTree';
@@ -6,9 +6,11 @@ import { NoteBlock, NoteEditor } from './NoteEditor';
 
 export type Note = {
   id: string;
+  clientId: string;
   createdAt: string;
   updatedAt?: string;
   version?: number;
+  deletedAt?: string | null;
   blocks: NoteBlock[];
   tagIds: string[];
 };
@@ -19,6 +21,10 @@ type NoteCardProps = {
   onUpdate: (id: string, blocks: NoteBlock[]) => void;
   onTagSelect?: (tagPath: string) => void;
   tags?: TagNode[];
+  trash?: boolean;
+  onRestore?: (id: string) => void;
+  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
+  resolveMediaUrl?: (mediaId: string) => Promise<string>;
 };
 
 const NOTE_TAG_PATTERN = /#[^\s#]+/g;
@@ -42,7 +48,33 @@ function imageBlocks(blocks: NoteBlock[]): Extract<NoteBlock, { type: 'image' }>
 }
 
 function noteText(blocks: NoteBlock[]): string {
-  return blocks.map(blockText).join('\n');
+  return blocks.filter((block) => block.type === 'paragraph').map(blockText).join('\n');
+}
+
+function NoteImage({ block, resolveMediaUrl }: { block: Extract<NoteBlock, { type: 'image' }>; resolveMediaUrl?: (mediaId: string) => Promise<string> }) {
+  const [source, setSource] = useState(block.mediaId ? undefined : block.url);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!block.mediaId || !resolveMediaUrl) return;
+    let active = true;
+    let objectUrl: string | undefined;
+    void resolveMediaUrl(block.mediaId)
+      .then((url) => {
+        objectUrl = url;
+        if (active) setSource(url);
+        else URL.revokeObjectURL(url);
+      })
+      .catch(() => active && setFailed(true));
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [block.mediaId, resolveMediaUrl]);
+
+  if (failed) return <div className="note-card__image-error">图片加载失败</div>;
+  if (!source) return <div className="note-card__image-loading">正在加载图片…</div>;
+  return <img src={source} alt={block.alt ?? '笔记图片'} loading="lazy" />;
 }
 
 function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => void): ReactNode[] {
@@ -84,11 +116,13 @@ function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => 
   return nodes.length > 0 ? nodes : [text];
 }
 
-export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [] }: NoteCardProps) {
+export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down');
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
   const content = noteText(note.blocks);
   const lines = content.split('\n');
   const shouldCollapse = lines.length > 5;
@@ -120,6 +154,16 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [] }: N
     };
   }, [menuOpen]);
 
+  useLayoutEffect(() => {
+    if (!menuOpen || !menuRef.current || !menuPanelRef.current) return;
+
+    const menuRect = menuRef.current.getBoundingClientRect();
+    const panelRect = menuPanelRef.current.getBoundingClientRect();
+    const wouldOverflowBottom = panelRect.bottom > window.innerHeight - 8;
+    const hasRoomAbove = menuRect.top >= panelRect.height + 8;
+    setMenuPlacement(wouldOverflowBottom && hasRoomAbove ? 'up' : 'down');
+  }, [menuOpen]);
+
   const closeMenuOnBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
       setMenuOpen(false);
@@ -140,13 +184,21 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [] }: N
             ⋯
           </Button>
           {menuOpen ? (
-            <div className="note-menu__panel" role="menu">
-              <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={startEditing}>
-                编辑
-              </Button>
-              <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => onDelete(note.id)}>
-                删除
-              </Button>
+            <div ref={menuPanelRef} className={`note-menu__panel note-menu__panel--${menuPlacement}`} role="menu">
+              {trash ? (
+                <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => onRestore?.(note.id)}>
+                  恢复
+                </Button>
+              ) : (
+                <>
+                  <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={startEditing}>
+                    编辑
+                  </Button>
+                  <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => onDelete(note.id)}>
+                    删除
+                  </Button>
+                </>
+              )}
             </div>
           ) : null}
         </div>
@@ -156,16 +208,23 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [] }: N
         <NoteEditor
           initialText={paragraphText(note.blocks)}
           tags={tags}
+          onUploadImage={onUploadImage}
           onSubmit={(blocks) => {
             onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
             setEditing(false);
           }}
         />
       ) : (
-        <div className="note-card__content" onDoubleClick={() => setEditing(true)}>
+        <div className="note-card__content" onDoubleClick={() => !trash && setEditing(true)}>
           {renderContentWithTags(visibleContent, onTagSelect)}
         </div>
       )}
+
+      {!editing && imageBlocks(note.blocks).length > 0 ? (
+        <div className="note-card__images">
+          {imageBlocks(note.blocks).map((block, index) => <NoteImage key={`${block.mediaId ?? block.url}-${index}`} block={block} resolveMediaUrl={resolveMediaUrl} />)}
+        </div>
+      ) : null}
 
       {shouldCollapse ? (
         <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>

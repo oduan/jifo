@@ -164,6 +164,24 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*AuthResult, err
 	return s.createSessionResult(ctx, s.db, user, input.DeviceCode)
 }
 
+func (s *Service) Logout(ctx context.Context, userID, sessionID uuid.UUID) error {
+	if userID == uuid.Nil || sessionID == uuid.Nil {
+		return ErrInvalidAccessToken
+	}
+	result, err := s.db.Exec(ctx, `
+		UPDATE user_sessions
+		SET revoked_at = COALESCE(revoked_at, now())
+		WHERE id = $1 AND user_id = $2
+	`, sessionID, userID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrInvalidAccessToken
+	}
+	return nil
+}
+
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

@@ -18,6 +18,7 @@ export type ApiClientOptions = {
 
 export type ApiClient = {
   request<T>(path: string, init?: RequestInit): Promise<T>;
+  requestBlob?: (path: string, init?: RequestInit) => Promise<Blob>;
 };
 
 export function createApiClient(options: ApiClientOptions): ApiClient {
@@ -78,5 +79,24 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     return (await response.text()) as T;
   };
 
-  return { request };
+  const requestBlob = async (path: string, init: RequestInit = {}, allowRefresh = true, accessTokenOverride?: string): Promise<Blob> => {
+    const token = accessTokenOverride ?? options.getAccessToken();
+    const headers = new Headers(init.headers ?? undefined);
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    const response = await fetcher(`${options.baseUrl}${path}`, { ...init, headers });
+    if (response.status === 401 && allowRefresh && options.refreshAccessToken) {
+      const refreshedToken = await options.refreshAccessToken();
+      if (refreshedToken) {
+        return requestBlob(path, init, false, refreshedToken);
+      }
+    }
+    if (!response.ok) {
+      throw new ApiError('Request failed', response.status);
+    }
+    return response.blob();
+  };
+
+  return { request, requestBlob };
 }

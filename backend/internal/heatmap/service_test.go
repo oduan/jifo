@@ -14,7 +14,7 @@ import (
 	"jifo/backend/internal/platform/testutil"
 )
 
-func TestMergeDailyCountsIncludesCreatedAndUpdatedTotals(t *testing.T) {
+func TestMergeDailyCountsIncludesCreatedAndRealUpdatedTotals(t *testing.T) {
 	from := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)
 
@@ -66,7 +66,7 @@ func TestAggregateExcludesPermanentlyDeletedNotes(t *testing.T) {
 	if len(result) != 3 {
 		t.Fatalf("result len = %d, want 3", len(result))
 	}
-	if result[0].CreatedCount != 2 || result[0].UpdatedCount != 1 || result[0].TotalCount != 3 {
+	if result[0].CreatedCount != 2 || result[0].UpdatedCount != 0 || result[0].TotalCount != 2 {
 		t.Fatalf("day1 = %#v", result[0])
 	}
 	if result[1].CreatedCount != 1 || result[1].UpdatedCount != 1 || result[1].TotalCount != 2 {

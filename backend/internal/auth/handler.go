@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"jifo/backend/internal/platform/httpx"
 )
 
@@ -14,6 +16,25 @@ type HandlerService interface {
 	Register(ctx context.Context, input RegisterInput) (*AuthResult, error)
 	Login(ctx context.Context, input LoginInput) (*AuthResult, error)
 	Refresh(ctx context.Context, refreshToken string) (*AuthResult, error)
+	Logout(ctx context.Context, userID, sessionID uuid.UUID) error
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "auth service not configured")
+		return
+	}
+	userID, userOK := httpx.UserIDFromContext(r.Context())
+	sessionID, sessionOK := httpx.SessionIDFromContext(r.Context())
+	if !userOK || !sessionOK || sessionID == uuid.Nil {
+		httpx.WriteError(w, r, http.StatusForbidden, "user_session_required", "a user session is required")
+		return
+	}
+	if err := h.svc.Logout(r.Context(), userID, sessionID); err != nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "logout failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type Handler struct {
@@ -61,6 +82,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrEmailAlreadyExists):
 			httpx.WriteError(w, r, http.StatusConflict, "email_exists", "email already exists")
+		case errors.Is(err, ErrInvalidPassword):
+			httpx.WriteError(w, r, http.StatusBadRequest, "invalid_password", "password must be between 8 and 72 bytes")
 		default:
 			httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "register failed")
 		}

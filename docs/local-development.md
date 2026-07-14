@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Go 1.22+
+- Go 1.25.7+
 - Node.js 20+ / npm
 - Docker 与 Docker Compose
 - PostgreSQL 16（可通过 docker compose 启动）
@@ -52,9 +52,16 @@ INSERT INTO schema_migrations (version) VALUES ('001_init') ON CONFLICT (version
 
 可选环境变量：
 
+- `APP_ENV`：运行环境，默认 `development`；生产环境会执行更严格的配置校验
 - `ADDR`：HTTP 监听地址，默认 `:8080`
 - `MEDIA_ROOT`：本地媒体根目录，默认 `storage/media`
 - `JIFO_MIGRATIONS_DIR`：迁移 SQL 目录，默认自动查找 `backend/migrations`
+- `TRUSTED_PROXIES`：以逗号分隔的可信代理 IP 或 CIDR
+- `HTTP_READ_HEADER_TIMEOUT`、`HTTP_READ_TIMEOUT`、`HTTP_WRITE_TIMEOUT`、`HTTP_IDLE_TIMEOUT`
+- `SHUTDOWN_TIMEOUT`：优雅停机时限，默认 `15s`
+- `AUTH_RATE_LIMIT`、`AUTH_RATE_WINDOW`：认证端点单 IP 限流
+- `ACCESS_TOKEN_TTL`：JWT access token 有效期，默认 `15m`
+- `CLEANUP_INTERVAL`、`CLEANUP_TIMEOUT`：回收站和无引用媒体清理任务配置
 
 ## 启动 Web
 
@@ -98,6 +105,6 @@ TEST_DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable go te
 
 Web 同步模块使用 Dexie/IndexedDB。Vitest + jsdom 默认没有真实 IndexedDB，因此测试环境在 `web/src/test/setup.ts` 引入 `fake-indexeddb/auto`。生产入口不会导入它。
 
-### `/api/sync/push` 为什么返回 501？
+### `/api/sync/push` 和 `/api/sync/pull` 是否可用？
 
-当前 MVP 已实现后端同步 service 与 Web sync engine，但 HTTP handler 仍是占位；完整 HTTP 接入可在下一迭代完成。
+可用。当前后端已经接入同步 HTTP handler，支持幂等 push、版本冲突处理和基于 cursor 的增量 pull。

@@ -59,6 +59,16 @@ func (f *fakeAuthService) ValidateAccessToken(ctx context.Context, token string)
 	return &auth.AccessTokenClaims{UserID: f.userID, SessionID: uuid.MustParse("22222222-2222-2222-2222-222222222222")}, nil
 }
 
+func (f *fakeAuthService) Logout(ctx context.Context, userID, sessionID uuid.UUID) error {
+	return nil
+}
+
+type fakeUsersService struct{}
+
+func (f *fakeUsersService) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	return nil
+}
+
 type fakeAccessKeyService struct {
 	userID uuid.UUID
 }
@@ -170,6 +180,7 @@ func TestRouterSmoke(t *testing.T) {
 		Heatmap:    &fakeHeatmapService{},
 		Sync:       &fakeSyncService{},
 		Media:      &fakeMediaService{},
+		Users:      &fakeUsersService{},
 	})
 
 	registerBody := map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev"}
@@ -277,6 +288,21 @@ func TestRouterSmoke(t *testing.T) {
 	keyAuthPushResp := doJSON(t, router, http.MethodPost, "/api/sync/push", pushBody, "api-key-token")
 	if keyAuthPushResp.Code != http.StatusOK {
 		t.Fatalf("access key auth sync push status = %d, want %d", keyAuthPushResp.Code, http.StatusOK)
+	}
+
+	keySettingsResp := doJSON(t, router, http.MethodGet, "/api/settings/access-keys", nil, "api-key-token")
+	if keySettingsResp.Code != http.StatusForbidden {
+		t.Fatalf("access key settings status = %d, want %d", keySettingsResp.Code, http.StatusForbidden)
+	}
+
+	passwordResp := doJSON(t, router, http.MethodPost, "/api/me/password", map[string]any{"currentPassword": "old-password", "newPassword": "new-password"}, "access-token")
+	if passwordResp.Code != http.StatusNoContent {
+		t.Fatalf("change password status = %d body=%s, want %d", passwordResp.Code, passwordResp.Body.String(), http.StatusNoContent)
+	}
+
+	logoutResp := doJSON(t, router, http.MethodPost, "/api/auth/logout", nil, "access-token")
+	if logoutResp.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d body=%s, want %d", logoutResp.Code, logoutResp.Body.String(), http.StatusNoContent)
 	}
 }
 
