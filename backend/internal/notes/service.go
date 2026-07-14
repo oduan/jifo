@@ -382,6 +382,24 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		argIndex += 2
 	}
 
+	for _, timeFilter := range []struct {
+		column   string
+		operator string
+		value    *time.Time
+	}{
+		{"n.created_at", ">=", filter.CreatedFrom},
+		{"n.created_at", "<=", filter.CreatedTo},
+		{"n.updated_at", ">=", filter.UpdatedFrom},
+		{"n.updated_at", "<=", filter.UpdatedTo},
+	} {
+		if timeFilter.value == nil {
+			continue
+		}
+		conditions = append(conditions, fmt.Sprintf("%s %s $%d", timeFilter.column, timeFilter.operator, argIndex))
+		args = append(args, timeFilter.value.UTC())
+		argIndex++
+	}
+
 	sql := `
 		SELECT n.id, n.user_id, n.client_id, n.content, n.plain_text, n.created_at, n.updated_at, n.deleted_at, n.purge_after, n.permanently_deleted_at, n.version
 		FROM notes n

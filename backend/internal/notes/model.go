@@ -47,12 +47,16 @@ type UpdateInput struct {
 }
 
 type ListFilter struct {
-	UserID  uuid.UUID
-	Trash   bool
-	Search  string
-	TagPath string
-	Limit   int
-	Offset  int
+	UserID      uuid.UUID
+	Trash       bool
+	Search      string
+	TagPath     string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+	UpdatedFrom *time.Time
+	UpdatedTo   *time.Time
+	Limit       int
+	Offset      int
 }
 
 type ListResult struct {

@@ -2,7 +2,7 @@
 
 > 一个轻量、可自托管的图文笔记应用。
 
-[GitHub 仓库](https://github.com/oduan/jifo) · [API 文档](docs/api.md) · [部署指南](docs/backend-deployment.md)
+[GitHub 仓库](https://github.com/oduan/jifo) · [API 文档](docs/api.md) · [MCP 接入](docs/mcp.md) · [部署指南](docs/backend-deployment.md)
 
 Jifo 面向快速记录与长期整理：在简洁的时间流中记录文字和图片，通过层级标签、搜索、热力图与回收站管理内容，并提供 Web、HTTP API 和 CLI 使用方式。
 
@@ -17,6 +17,7 @@ Jifo 面向快速记录与长期整理：在简洁的时间流中记录文字和
 - 离线基础：Web 使用 IndexedDB 缓存和 outbox，同步接口支持幂等写入与增量拉取。
 - 自托管：Go API、React Web 和 PostgreSQL 均可通过 Docker Compose 部署。
 - CLI：通过访问密钥查询、搜索和创建笔记，适合脚本与 AI agent。
+- MCP：提供带 Bearer 鉴权的 Streamable HTTP 端点，让 Codex 等 agent 搜索和修改笔记、标签。
 
 ## 技术栈
 
@@ -146,6 +147,72 @@ caddy run --config ./Caddyfile
 
 Docker Web 端口只监听 `127.0.0.1`，公网仅需向 Caddy 开放 `80` 和 `443`。
 
+Caddy 会将包括 `/mcp` 在内的所有路径统一转发到 Web 容器；Web 容器的 Nginx 再把 `/mcp` 转发到 API。因此使用仓库提供的 Caddyfile 时不需要额外添加 MCP 路由。生产环境的 MCP 地址为 `https://<你的域名>/mcp`。
+
+## AI Agent / MCP 接入
+
+Jifo 提供带 Bearer 鉴权的 Streamable HTTP MCP 服务，Codex 等 Agent 可通过它读取和修改当前用户的笔记与标签。完整工具说明见 [MCP 文档](docs/mcp.md)。
+
+### 给 Agent 的安装约定
+
+当 Agent 帮助用户安装 Jifo MCP 时，应遵循以下步骤：
+
+1. 确认 Jifo 服务已启动，并选择正确的 MCP URL：本机为 `http://127.0.0.1:8086/mcp`，生产环境为 `https://<域名>/mcp`。不要使用 `/api/mcp`。
+2. 让用户在 Jifo Web 的设置页面创建专用访问密钥。不要要求用户提交密钥到仓库，也不要把密钥直接写进 Codex 配置文件。
+3. 将密钥保存到宿主机的 `JIFO_MCP_TOKEN` 环境变量或等价的安全凭据存储中。
+4. 把 MCP 传输类型配置为 Streamable HTTP，并通过 `Authorization: Bearer <token>` 鉴权。
+5. 重启或重新加载 Agent 宿主，使新环境变量和 MCP 配置生效，然后执行只读工具调用验证连接。
+
+访问密钥代表对应用户的完整笔记访问权限。建议每个 Agent 使用独立密钥，以便在 Jifo 设置中单独撤销。
+
+### Codex 自动配置
+
+先设置用户级环境变量。Windows PowerShell：
+
+```powershell
+setx JIFO_MCP_TOKEN "jifo_..."
+```
+
+Linux/macOS 可将密钥注入启动 Codex 的安全环境；例如仅对当前 shell：
+
+```bash
+export JIFO_MCP_TOKEN='jifo_...'
+```
+
+注册本机 MCP 服务：
+
+```bash
+codex mcp add jifo \
+  --url http://127.0.0.1:8086/mcp \
+  --bearer-token-env-var JIFO_MCP_TOKEN
+```
+
+生产部署时将 URL 替换为 `https://<域名>/mcp`。也可以直接写入 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.jifo]
+url = "http://127.0.0.1:8086/mcp"
+bearer_token_env_var = "JIFO_MCP_TOKEN"
+default_tools_approval_mode = "writes"
+```
+
+检查配置：
+
+```bash
+codex mcp get jifo --json
+codex mcp list
+```
+
+完全退出并重新启动 Codex 后，可用以下任务验证：
+
+```text
+使用 Jifo 列出标签树。
+使用 Jifo 搜索最近一个月包含“项目”的笔记。
+使用 Jifo 创建一条“Agent MCP 连接成功 #测试”笔记。
+```
+
+对于其他 MCP 客户端，配置等价信息即可：传输类型为 `streamable-http`、URL 为 Jifo `/mcp` 端点，并在每个请求中发送 Bearer 访问密钥。本机地址只能供本机 Agent 使用；云端 Agent 必须连接可访问且启用 HTTPS 的部署地址。
+
 ## 本地开发
 
 环境要求：
@@ -178,7 +245,7 @@ npm ci
 npm run dev
 ```
 
-Vite 默认将 `/api` 代理到 `http://127.0.0.1:8080`。
+Vite 默认将 `/api` 和 `/mcp` 代理到 `http://127.0.0.1:8080`。
 
 ## 测试
 
@@ -239,6 +306,7 @@ jifo/
 
 - [本地开发](docs/local-development.md)
 - [API 文档](docs/api.md)
+- [MCP 接入](docs/mcp.md)
 - [同步协议](docs/sync.md)
 - [部署指南](docs/backend-deployment.md)
 

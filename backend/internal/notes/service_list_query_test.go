@@ -3,19 +3,24 @@ package notes
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 func TestBuildListQuerySupportsSearchTagPathTrashAndPagination(t *testing.T) {
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	createdFrom := time.Date(2026, 1, 1, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	updatedTo := time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC)
 	filter := ListFilter{
-		UserID:  userID,
-		Trash:   true,
-		Search:  "alpha",
-		TagPath: "项目",
-		Limit:   20,
-		Offset:  40,
+		UserID:      userID,
+		Trash:       true,
+		Search:      "alpha",
+		TagPath:     "项目",
+		CreatedFrom: &createdFrom,
+		UpdatedTo:   &updatedTo,
+		Limit:       20,
+		Offset:      40,
 	}
 
 	sql, args := buildListQuery(filter)
@@ -35,9 +40,12 @@ func TestBuildListQuerySupportsSearchTagPathTrashAndPagination(t *testing.T) {
 	if !strings.Contains(sql, "LIMIT") || !strings.Contains(sql, "OFFSET") {
 		t.Fatalf("sql should include pagination, got: %s", sql)
 	}
+	if !strings.Contains(sql, "n.created_at >=") || !strings.Contains(sql, "n.updated_at <=") {
+		t.Fatalf("sql should include time range filters, got: %s", sql)
+	}
 
-	if len(args) != 6 {
-		t.Fatalf("args len = %d, want 6", len(args))
+	if len(args) != 8 {
+		t.Fatalf("args len = %d, want 8", len(args))
 	}
 	if args[0] != userID {
 		t.Fatalf("arg[0] userID = %v, want %v", args[0], userID)
@@ -51,8 +59,11 @@ func TestBuildListQuerySupportsSearchTagPathTrashAndPagination(t *testing.T) {
 	if args[3] != "项目/%" {
 		t.Fatalf("arg[3] tag prefix = %v, want 项目/%%", args[3])
 	}
-	if args[4] != 20 || args[5] != 40 {
-		t.Fatalf("pagination args = %v, want [20 40]", args[4:])
+	if args[4] != createdFrom.UTC() || args[5] != updatedTo.UTC() {
+		t.Fatalf("time args = %v, want [%v %v]", args[4:6], createdFrom.UTC(), updatedTo.UTC())
+	}
+	if args[6] != 20 || args[7] != 40 {
+		t.Fatalf("pagination args = %v, want [20 40]", args[6:])
 	}
 }
 

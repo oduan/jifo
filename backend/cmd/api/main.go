@@ -18,6 +18,7 @@ import (
 	"jifo/backend/internal/auth"
 	"jifo/backend/internal/cleanup"
 	"jifo/backend/internal/heatmap"
+	"jifo/backend/internal/mcpserver"
 	"jifo/backend/internal/media"
 	"jifo/backend/internal/notes"
 	"jifo/backend/internal/platform/config"
@@ -114,10 +115,34 @@ func NewRouterWithOptions(deps Dependencies, options RouterOptions) http.Handler
 	r.Use(httpx.SecurityHeaders)
 	r.Use(httpx.RequestBodyLimit(2<<20, media.DefaultMaxSizeBytes+(1<<20)))
 
+	tokenValidator := func(ctx context.Context, tokenString string) (uuid.UUID, uuid.UUID, error) {
+		if deps.Auth != nil {
+			claims, err := deps.Auth.ValidateAccessToken(ctx, tokenString)
+			if err == nil {
+				return claims.UserID, claims.SessionID, nil
+			}
+			if !errors.Is(err, auth.ErrInvalidAccessToken) {
+				return uuid.Nil, uuid.Nil, err
+			}
+		}
+		if deps.AccessKeys != nil {
+			principal, err := deps.AccessKeys.Validate(ctx, tokenString)
+			if err == nil {
+				return principal.UserID, uuid.Nil, nil
+			}
+			if !errors.Is(err, accesskeys.ErrInvalidAccessKey) {
+				return uuid.Nil, uuid.Nil, err
+			}
+		}
+		return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
+	}
+
 	if deps.Health != nil {
 		r.Get("/healthz", deps.Health.Live)
 		r.Get("/readyz", deps.Health.Ready)
 	}
+
+	r.With(httpx.RequireAuth(tokenValidator)).Handle("/mcp", mcpserver.NewHandler(deps.Notes, deps.Tags))
 
 	r.Route("/api", func(api chi.Router) {
 		api.NotFound(func(w http.ResponseWriter, req *http.Request) {
@@ -139,27 +164,7 @@ func NewRouterWithOptions(deps Dependencies, options RouterOptions) http.Handler
 		}
 
 		api.Group(func(protected chi.Router) {
-			protected.Use(httpx.RequireAuth(func(ctx context.Context, tokenString string) (uuid.UUID, uuid.UUID, error) {
-				if deps.Auth != nil {
-					claims, err := deps.Auth.ValidateAccessToken(ctx, tokenString)
-					if err == nil {
-						return claims.UserID, claims.SessionID, nil
-					}
-					if !errors.Is(err, auth.ErrInvalidAccessToken) {
-						return uuid.Nil, uuid.Nil, err
-					}
-				}
-				if deps.AccessKeys != nil {
-					principal, err := deps.AccessKeys.Validate(ctx, tokenString)
-					if err == nil {
-						return principal.UserID, uuid.Nil, nil
-					}
-					if !errors.Is(err, accesskeys.ErrInvalidAccessKey) {
-						return uuid.Nil, uuid.Nil, err
-					}
-				}
-				return uuid.Nil, uuid.Nil, httpx.ErrUnauthorized
-			}))
+			protected.Use(httpx.RequireAuth(tokenValidator))
 
 			notesHandler := notes.NewHandler(deps.Notes)
 			protected.Post("/notes", notesHandler.Create)
