@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Heatmap, HeatmapCell } from '../heatmap/Heatmap';
 import { AccessKeySummary, CreateAccessKeyResult } from '../settings/api';
@@ -13,6 +13,13 @@ import { NoteBlock, NoteEditor } from './NoteEditor';
 type SelectedTag = {
   id: string | null;
   path?: string;
+};
+
+type ScrollbarMetrics = {
+  thumbHeight: number;
+  thumbTop: number;
+  scrollable: boolean;
+  valueNow: number;
 };
 
 type NotesPageProps = {
@@ -88,7 +95,9 @@ export function NotesPage({
   resolveMediaUrl
 }: NotesPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scrollbarMetrics, setScrollbarMetrics] = useState<ScrollbarMetrics>({ thumbHeight: 36, thumbTop: 0, scrollable: false, valueNow: 0 });
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const notesStreamRef = useRef<HTMLElement>(null);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
@@ -115,6 +124,69 @@ export function NotesPage({
 
     return () => observer.disconnect();
   }, [hasMoreNotes, isLoadingMoreNotes, onLoadMoreNotes]);
+
+  useEffect(() => {
+    const stream = notesStreamRef.current;
+    if (!stream) return;
+
+    const updateScrollbar = () => {
+      const { clientHeight, scrollHeight, scrollTop } = stream;
+      const scrollRange = Math.max(0, scrollHeight - clientHeight);
+      const thumbHeight = scrollRange > 0 ? Math.max(36, (clientHeight / scrollHeight) * clientHeight) : clientHeight;
+      const thumbTravel = Math.max(0, clientHeight - thumbHeight);
+      const progress = scrollRange > 0 ? scrollTop / scrollRange : 0;
+      setScrollbarMetrics({
+        thumbHeight,
+        thumbTop: thumbTravel * progress,
+        scrollable: scrollRange > 0,
+        valueNow: Math.round(progress * 100)
+      });
+    };
+
+    updateScrollbar();
+    stream.addEventListener('scroll', updateScrollbar, { passive: true });
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollbar);
+    resizeObserver?.observe(stream);
+    Array.from(stream.children).forEach((child) => resizeObserver?.observe(child));
+    window.addEventListener('resize', updateScrollbar);
+
+    return () => {
+      stream.removeEventListener('scroll', updateScrollbar);
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateScrollbar);
+    };
+  }, [displayNotes, hasMoreNotes]);
+
+  const scrollFromTrackPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const stream = notesStreamRef.current;
+    if (!stream || !scrollbarMetrics.scrollable) return;
+    const trackRect = event.currentTarget.getBoundingClientRect();
+    const thumbTravel = Math.max(1, trackRect.height - scrollbarMetrics.thumbHeight);
+    const targetThumbTop = Math.min(thumbTravel, Math.max(0, event.clientY - trackRect.top - scrollbarMetrics.thumbHeight / 2));
+    stream.scrollTop = (targetThumbTop / thumbTravel) * (stream.scrollHeight - stream.clientHeight);
+  };
+
+  const dragScrollbarThumb = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const stream = notesStreamRef.current;
+    if (!stream || !scrollbarMetrics.scrollable) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startScrollTop = stream.scrollTop;
+    const thumbTravel = Math.max(1, stream.clientHeight - scrollbarMetrics.thumbHeight);
+    const scrollRange = stream.scrollHeight - stream.clientHeight;
+
+    const moveThumb = (moveEvent: PointerEvent) => {
+      stream.scrollTop = startScrollTop + ((moveEvent.clientY - startY) / thumbTravel) * scrollRange;
+    };
+    const stopDragging = () => {
+      window.removeEventListener('pointermove', moveThumb);
+      window.removeEventListener('pointerup', stopDragging);
+    };
+
+    window.addEventListener('pointermove', moveThumb);
+    window.addEventListener('pointerup', stopDragging, { once: true });
+  };
 
   const selectAllNotes = () => onSelectTag?.({ id: null });
 
@@ -153,7 +225,7 @@ export function NotesPage({
           </div>
           <div className="stat-card">
             <strong>{activeDays}</strong>
-            <span>记录天数</span>
+            <span>天</span>
           </div>
         </section>
 
@@ -190,7 +262,7 @@ export function NotesPage({
         </section>
       </aside>
 
-      <section className="jifo-workspace" aria-label="笔记工作区">
+      <section className={`jifo-workspace${trash ? ' jifo-workspace--trash' : ''}`} aria-label="笔记工作区">
         <header className="workspace-header">
           <div className="workspace-heading">
             <h2 className="workspace-title">{trash ? '回收站' : selectedTag ? selectedTag.name : '全部笔记'}</h2>
@@ -216,24 +288,42 @@ export function NotesPage({
           </section>
         ) : null}
 
-        <section className="notes-stream" aria-label="笔记流">
-          {displayNotes.map((note) => (
-            <NoteCard
-              key={note.id}
-              note={note}
-              onDelete={(id) => onDeleteNote?.(id)}
-              onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
-              onTagSelect={selectTagFromNote}
-              tags={tags}
-              trash={trash}
-              onRestore={(id) => onRestoreNote?.(id)}
-              onUploadImage={onUploadImage}
-              resolveMediaUrl={resolveMediaUrl}
+        <div className="notes-stream-shell">
+          <section ref={notesStreamRef} id="notes-stream" className="notes-stream" aria-label="笔记流">
+            {displayNotes.map((note) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                onDelete={(id) => onDeleteNote?.(id)}
+                onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
+                onTagSelect={selectTagFromNote}
+                tags={tags}
+                trash={trash}
+                onRestore={(id) => onRestoreNote?.(id)}
+                onUploadImage={onUploadImage}
+                resolveMediaUrl={resolveMediaUrl}
+              />
+            ))}
+            {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
+            {displayNotes.length === 0 ? <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} /> : null}
+          </section>
+          <div
+            className={`notes-scrollbar${scrollbarMetrics.scrollable ? '' : ' notes-scrollbar--hidden'}`}
+            role="scrollbar"
+            aria-controls="notes-stream"
+            aria-orientation="vertical"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={scrollbarMetrics.valueNow}
+            onPointerDown={scrollFromTrackPointer}
+          >
+            <div
+              className="notes-scrollbar__thumb"
+              style={{ height: scrollbarMetrics.thumbHeight, transform: `translateY(${scrollbarMetrics.thumbTop}px)` }}
+              onPointerDown={dragScrollbarThumb}
             />
-          ))}
-          {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
-          {displayNotes.length === 0 ? <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} /> : null}
-        </section>
+          </div>
+        </div>
       </section>
 
       <SettingsModal

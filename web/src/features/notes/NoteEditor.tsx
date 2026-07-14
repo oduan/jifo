@@ -158,7 +158,6 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
   const [suggestionPosition, setSuggestionPosition] = useState<SuggestionPosition>({ left: 10, top: 0 });
   const [focusedTagIndex, setFocusedTagIndex] = useState(0);
   const [images, setImages] = useState<Extract<NoteBlock, { type: 'image' }>[]>([]);
-  const [isUploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const blocks = [...toParagraphBlocks(text), ...images];
   const hasContent = blocks.length > 0;
@@ -171,7 +170,7 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
 
     const isActive = isFocused || text.length > 0 || images.length > 0;
     textarea.style.height = '0px';
-    const nextHeight = isActive ? Math.min(224, Math.max(112, textarea.scrollHeight)) : 72;
+    const nextHeight = isActive ? Math.min(180, Math.max(68, textarea.scrollHeight)) : 44;
     textarea.style.height = `${nextHeight}px`;
   }, [images.length, isFocused, text]);
 
@@ -186,15 +185,12 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
 
   const uploadImages = async (files: File[]) => {
     if (files.length === 0 || !onUploadImage) return;
-    setUploading(true);
     setUploadError(null);
     try {
       const uploadedImages = await Promise.all(files.map((file) => onUploadImage(file)));
       setImages((current) => [...current, ...uploadedImages]);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : '图片上传失败。');
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -244,6 +240,14 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      if (hasContent) {
+        event.currentTarget.form?.requestSubmit();
+      }
+      return;
+    }
+
     if (!showTagSuggestions) return;
 
     if (event.key === 'ArrowDown') {
@@ -324,16 +328,17 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onUploadImag
             })}
           </div>
         ) : null}
-        {onUploadImage ? <span className="note-editor__paste-hint">{isUploading ? '正在粘贴图片…' : '可直接粘贴图片'}</span> : null}
-        <button
-          type="submit"
-          className="send-icon-button"
-          aria-label="发送笔记"
-          title="发送笔记"
-          disabled={!hasContent}
-        >
-          <span aria-hidden="true">➤</span>
-        </button>
+        <div className="note-editor__footer">
+          <button
+            type="submit"
+            className="send-icon-button"
+            aria-label="发送笔记"
+            title="发送笔记"
+            disabled={!hasContent}
+          >
+            <span aria-hidden="true">➤</span>
+          </button>
+        </div>
       </div>
       {images.length > 0 ? (
         <div className="note-editor__image-preview">

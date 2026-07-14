@@ -13,7 +13,7 @@ describe('NoteEditor', () => {
 
     const textarea = screen.getByLabelText('笔记内容');
     expect(textarea).toHaveAttribute('rows', '2');
-    expect(textarea).toHaveStyle({ height: '72px' });
+    expect(textarea).toHaveStyle({ height: '44px' });
 
     const sendButton = screen.getByRole('button', { name: '发送笔记' });
     expect(sendButton).toBeDisabled();
@@ -28,15 +28,29 @@ describe('NoteEditor', () => {
     ]);
   });
 
+  test('按 Ctrl+Enter 可直接发送笔记', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(<NoteEditor onSubmit={onSubmit} />);
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, '快捷发送');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    expect(onSubmit).toHaveBeenCalledWith([{ type: 'paragraph', content: '快捷发送' }]);
+    expect(textarea).toHaveValue('');
+  });
+
   test('聚焦时自动展开输入框', async () => {
     const user = userEvent.setup();
 
     render(<NoteEditor onSubmit={vi.fn()} />);
 
     const textarea = screen.getByLabelText('笔记内容');
-    expect(textarea).toHaveStyle({ height: '72px' });
+    expect(textarea).toHaveStyle({ height: '44px' });
     await user.click(textarea);
-    expect(textarea).toHaveStyle({ height: '112px' });
+    expect(textarea).toHaveStyle({ height: '68px' });
   });
 
   test('输入独立 # 后显示标签下拉并可用键盘选择插入', async () => {
