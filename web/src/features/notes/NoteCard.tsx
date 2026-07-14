@@ -1,6 +1,7 @@
 import { FocusEvent, MouseEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
+import { formatLocalDateTime } from '../../shared/time';
 import { TagNode } from '../tags/TagTree';
 import { NoteBlock, NoteEditor } from './NoteEditor';
 
@@ -206,7 +207,7 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
   return (
     <article className="note-card">
       <header className="note-card__header">
-        <time dateTime={note.createdAt}>{note.createdAt}</time>
+        <time dateTime={note.createdAt}>{formatLocalDateTime(note.createdAt)}</time>
         <div ref={menuRef} className="note-menu" onBlur={closeMenuOnBlur}>
           <Button type="button" variant="ghost" className="note-menu__trigger" aria-label="更多操作" onClick={() => setMenuOpen((open) => !open)}>
             ⋯

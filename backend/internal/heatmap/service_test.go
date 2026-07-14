@@ -43,6 +43,18 @@ func TestMergeDailyCountsIncludesCreatedAndRealUpdatedTotals(t *testing.T) {
 	}
 }
 
+func TestStartOfDayUsesLocalDSTBoundary(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := startOfDay(time.Date(2026, 3, 8, 12, 0, 0, 0, location), location)
+	nextDay := day.AddDate(0, 0, 1)
+	if got := nextDay.Sub(day); got != 23*time.Hour {
+		t.Fatalf("DST transition day length = %s, want 23h", got)
+	}
+}
+
 func TestAggregateExcludesPermanentlyDeletedNotes(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)

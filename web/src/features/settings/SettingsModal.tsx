@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 
 import { Button } from '../../shared/ui/Button';
 import { TextInput } from '../../shared/ui/Input';
+import { formatLocalDateTime } from '../../shared/time';
 import { AccessKeySummary, CreateAccessKeyResult } from './api';
 
 type SettingsModalProps = {
@@ -16,14 +17,6 @@ type SettingsModalProps = {
   onDeleteAccessKey?: (id: string) => Promise<void>;
   onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
 };
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString('zh-CN', { hour12: false });
-}
 
 export function SettingsModal({ open, accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey, onDeleteAccessKey, onChangePassword }: SettingsModalProps) {
   const [activeSection, setActiveSection] = useState<'account' | 'keys'>('keys');
@@ -217,7 +210,7 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
                       <span>{key.maskedKey}</span>
                     </div>
                     <div className="access-key-list__actions">
-                      <time dateTime={key.createdAt}>{formatDate(key.createdAt)}</time>
+                      <time dateTime={key.createdAt}>{formatLocalDateTime(key.createdAt)}</time>
                       <Button type="button" variant="ghost" className="access-key-action access-key-action--danger" aria-label={`删除 ${key.label} 访问密钥`} onClick={() => void deleteKey(key)}>
                         删除
                       </Button>

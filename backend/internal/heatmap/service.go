@@ -24,18 +24,19 @@ func NewService(db *pgxpool.Pool) *Service {
 }
 
 func (s *Service) Aggregate(ctx context.Context, userID uuid.UUID, from time.Time, to time.Time) ([]DayCount, error) {
-	fromDay := startOfDayUTC(from)
-	toDay := startOfDayUTC(to)
+	location := from.Location()
+	fromDay := startOfDay(from, location)
+	toDay := startOfDay(to, location)
 	if toDay.Before(fromDay) {
 		fromDay, toDay = toDay, fromDay
 	}
 	toExclusive := toDay.AddDate(0, 0, 1)
 
-	created, err := s.countByDay(ctx, userID, fromDay, toExclusive, "created_at")
+	created, err := s.countByDay(ctx, userID, fromDay, toExclusive, "created_at", location.String())
 	if err != nil {
 		return nil, err
 	}
-	updated, err := s.countByDay(ctx, userID, fromDay, toExclusive, "updated_at")
+	updated, err := s.countByDay(ctx, userID, fromDay, toExclusive, "updated_at", location.String())
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func (s *Service) Aggregate(ctx context.Context, userID uuid.UUID, from time.Tim
 	return mergeDailyCounts(fromDay, toDay, created, updated), nil
 }
 
-func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Time, toExclusive time.Time, field string) (map[time.Time]int64, error) {
+func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Time, toExclusive time.Time, field string, timezone string) (map[time.Time]int64, error) {
 	additionalCondition := ""
 	if field == "updated_at" {
 		// A newly created note starts with updated_at equal to created_at. Do not
@@ -51,7 +52,7 @@ func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Ti
 		additionalCondition = " AND updated_at > created_at"
 	}
 	rows, err := s.db.Query(ctx, `
-		SELECT date_trunc('day', `+field+`)::date AS day, count(*)
+		SELECT (`+field+` AT TIME ZONE $4)::date AS day, count(*)
 		FROM notes
 		WHERE user_id = $1
 		  AND permanently_deleted_at IS NULL
@@ -59,7 +60,7 @@ func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Ti
 		  AND `+field+` < $3
 		  `+additionalCondition+`
 		GROUP BY day
-	`, userID, from, toExclusive)
+	`, userID, from.UTC(), toExclusive.UTC(), timezone)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +73,7 @@ func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Ti
 		if err := rows.Scan(&day, &count); err != nil {
 			return nil, err
 		}
-		result[startOfDayUTC(day)] = count
+		result[calendarDay(day)] = count
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -81,18 +82,19 @@ func (s *Service) countByDay(ctx context.Context, userID uuid.UUID, from time.Ti
 }
 
 func mergeDailyCounts(from time.Time, to time.Time, created map[time.Time]int64, updated map[time.Time]int64) []DayCount {
-	fromDay := startOfDayUTC(from)
-	toDay := startOfDayUTC(to)
+	fromDay := startOfDay(from, from.Location())
+	toDay := startOfDay(to, from.Location())
 	if toDay.Before(fromDay) {
 		fromDay, toDay = toDay, fromDay
 	}
 
-	days := make([]DayCount, 0, int(toDay.Sub(fromDay).Hours()/24)+1)
+	days := make([]DayCount, 0)
 	for d := fromDay; !d.After(toDay); d = d.AddDate(0, 0, 1) {
-		c := created[d]
-		u := updated[d]
+		date := calendarDay(d)
+		c := created[date]
+		u := updated[date]
 		days = append(days, DayCount{
-			Date:         d,
+			Date:         date,
 			CreatedCount: c,
 			UpdatedCount: u,
 			TotalCount:   c + u,
@@ -101,7 +103,11 @@ func mergeDailyCounts(from time.Time, to time.Time, created map[time.Time]int64,
 	return days
 }
 
-func startOfDayUTC(t time.Time) time.Time {
-	t = t.UTC()
+func startOfDay(t time.Time, location *time.Location) time.Time {
+	t = t.In(location)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, location)
+}
+
+func calendarDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

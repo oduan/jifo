@@ -39,12 +39,21 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
 		return
 	}
-	from, err := time.Parse("2006-01-02", r.URL.Query().Get("from"))
+	timezone := r.URL.Query().Get("timezone")
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid timezone")
+		return
+	}
+	from, err := time.ParseInLocation("2006-01-02", r.URL.Query().Get("from"), location)
 	if err != nil {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid from date")
 		return
 	}
-	to, err := time.Parse("2006-01-02", r.URL.Query().Get("to"))
+	to, err := time.ParseInLocation("2006-01-02", r.URL.Query().Get("to"), location)
 	if err != nil {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid to date")
 		return
@@ -56,7 +65,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]dayCountDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, dayCountDTO{Date: item.Date.UTC().Format("2006-01-02"), CreatedCount: item.CreatedCount, UpdatedCount: item.UpdatedCount, TotalCount: item.TotalCount})
+		out = append(out, dayCountDTO{Date: item.Date.Format("2006-01-02"), CreatedCount: item.CreatedCount, UpdatedCount: item.UpdatedCount, TotalCount: item.TotalCount})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"days": out})
 }
