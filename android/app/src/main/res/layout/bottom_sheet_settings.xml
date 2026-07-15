@@ -1,6 +1,53 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp" android:background="@drawable/bg_bottom_sheet">
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="设置" android:textColor="@color/jifo_ink" android:textSize="18sp" android:textStyle="bold" />
-    <EditText android:id="@+id/input_key_label" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="访问密钥备注" />
-    <Button android:id="@+id/button_create_key" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="创建访问密钥" />
-    <TextView android:id="@+id/text_secret" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/jifo_tag_text" />
-</LinearLayout>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="@drawable/bg_bottom_sheet">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="设置"
+            android:textColor="@color/jifo_ink"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="账户 · 修改密码"
+            android:textColor="@color/jifo_ink"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <EditText android:id="@+id/input_current_password" android:layout_width="match_parent" android:layout_height="48dp" android:hint="当前密码" android:inputType="textPassword" android:autofillHints="password" />
+        <EditText android:id="@+id/input_new_password" android:layout_width="match_parent" android:layout_height="48dp" android:hint="新密码（8–72 位）" android:inputType="textPassword" android:autofillHints="newPassword" />
+        <EditText android:id="@+id/input_confirm_password" android:layout_width="match_parent" android:layout_height="48dp" android:hint="确认新密码" android:inputType="textPassword" android:autofillHints="newPassword" />
+        <Button android:id="@+id/button_change_password" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="修改密码" />
+
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="16dp" android:background="@color/jifo_line" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="访问密钥"
+            android:textColor="@color/jifo_ink"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="用于 CLI、MCP 或其它程序访问 Jifo。" android:textColor="@color/jifo_muted" android:textSize="13sp" />
+        <EditText android:id="@+id/input_key_label" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:hint="密钥备注，例如 Android CLI" />
+        <Button android:id="@+id/button_create_key" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="生成密钥" />
+        <TextView android:id="@+id/text_secret" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:padding="10dp" android:textColor="@color/jifo_tag_text" android:textIsSelectable="true" android:visibility="gone" />
+        <LinearLayout android:id="@+id/key_list" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="vertical" />
+        <TextView android:id="@+id/text_settings_error" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textColor="@color/jifo_danger" android:visibility="gone" />
+
+        <Button android:id="@+id/button_logout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="退出登录" />
+    </LinearLayout>
+</ScrollView>

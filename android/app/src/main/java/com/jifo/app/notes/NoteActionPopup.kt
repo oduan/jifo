@@ -11,7 +11,7 @@ import android.widget.PopupWindow
 import android.widget.TextView
 
 object NoteActionPopup {
-    fun show(anchor: View, onCopy: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+    fun show(anchor: View, onCopy: () -> Unit, onEdit: (() -> Unit)? = null, onDelete: (() -> Unit)? = null, onRestore: (() -> Unit)? = null) {
         val context = anchor.context
         val popup = PopupWindow(context)
         val container = LinearLayout(context).apply {
@@ -19,8 +19,9 @@ object NoteActionPopup {
             setBackgroundResource(com.jifo.app.R.drawable.bg_note_action_popup)
             clipToOutline = true
             addView(row(context, "复制") { popup.dismiss(); onCopy() })
-            addView(row(context, "编辑") { popup.dismiss(); onEdit() })
-            addView(row(context, "删除") { popup.dismiss(); onDelete() })
+            onEdit?.let { addView(row(context, "编辑") { popup.dismiss(); it() }) }
+            onRestore?.let { addView(row(context, "恢复") { popup.dismiss(); it() }) }
+            onDelete?.let { addView(row(context, "删除") { popup.dismiss(); it() }) }
         }
         popup.contentView = container
         popup.width = dp(anchor, 96)

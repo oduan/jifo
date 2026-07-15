@@ -5,7 +5,7 @@ backend/bin/
 backend/.env
 .env
 .env.production
-data/
+/data/
 web/node_modules/
 web/dist/
 .DS_Store
@@ -13,3 +13,6 @@ web/dist/
 .worktrees/
 
 .gradle-local/
+*.jks
+*.keystore
+android/key.properties

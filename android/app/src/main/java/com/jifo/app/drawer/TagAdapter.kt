@@ -8,7 +8,10 @@ import com.jifo.app.R
 import com.jifo.app.data.local.TagEntity
 import com.jifo.app.databinding.ItemDrawerTagBinding
 
-class TagAdapter(private val onClick: (TagEntity) -> Unit) : RecyclerView.Adapter<TagAdapter.ViewHolder>() {
+class TagAdapter(
+    private val onLongClick: ((TagEntity, View) -> Unit)? = null,
+    private val onClick: (TagEntity) -> Unit
+) : RecyclerView.Adapter<TagAdapter.ViewHolder>() {
     private val allItems = mutableListOf<TagEntity>()
     private val visibleItems = mutableListOf<TagEntity>()
     private val expandedPaths = mutableSetOf<String>()
@@ -25,15 +28,15 @@ class TagAdapter(private val onClick: (TagEntity) -> Unit) : RecyclerView.Adapte
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = visibleItems[position]
-        val hasChildren = allItems.any { it.parentId == item.path }
-        val isExpanded = expandedPaths.contains(item.path)
+        val hasChildren = allItems.any { it.parentId == item.id }
+        val isExpanded = expandedPaths.contains(item.id)
         holder.bind(item, hasChildren, isExpanded)
     }
 
     override fun getItemCount(): Int = visibleItems.size
 
     private fun toggle(item: TagEntity) {
-        if (expandedPaths.contains(item.path)) expandedPaths.remove(item.path) else expandedPaths.add(item.path)
+        if (expandedPaths.contains(item.id)) expandedPaths.remove(item.id) else expandedPaths.add(item.id)
         rebuildVisibleItems()
     }
 
@@ -46,8 +49,8 @@ class TagAdapter(private val onClick: (TagEntity) -> Unit) : RecyclerView.Adapte
         fun appendBranch(parentId: String?) {
             childrenByParent[parentId].orEmpty().forEach { item ->
                 visibleItems.add(item)
-                if (expandedPaths.contains(item.path)) {
-                    appendBranch(item.path)
+                if (expandedPaths.contains(item.id)) {
+                    appendBranch(item.id)
                 }
             }
         }
@@ -63,6 +66,7 @@ class TagAdapter(private val onClick: (TagEntity) -> Unit) : RecyclerView.Adapte
                 width = (item.depth * binding.root.resources.displayMetrics.density * 18).toInt()
             }
             binding.root.setOnClickListener { onClick(item) }
+            binding.root.setOnLongClickListener { anchor -> onLongClick?.invoke(item, anchor); onLongClick != null }
             binding.buttonExpandTag.visibility = if (hasChildren) View.VISIBLE else View.GONE
             if (hasChildren) {
                 binding.buttonExpandTag.setImageResource(if (isExpanded) R.drawable.ic_chevron_left_20 else R.drawable.ic_chevron_down_20)

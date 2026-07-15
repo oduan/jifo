@@ -7,6 +7,11 @@ import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Multipart
+import retrofit2.http.Part
+import retrofit2.http.Streaming
+import okhttp3.MultipartBody
+import okhttp3.ResponseBody
 
 // Auth
 data class AuthRequest(val email: String, val password: String, val username: String? = null, val deviceCode: String)
@@ -33,6 +38,10 @@ data class AccessKeyDto(val id: String, val label: String, val maskedKey: String
 data class AccessKeyListResponse(val items: List<AccessKeyDto> = emptyList())
 data class CreateAccessKeyRequest(val label: String)
 data class CreateAccessKeyResponse(val item: AccessKeyDto, val secret: String)
+data class ChangePasswordRequest(val currentPassword: String, val newPassword: String)
+data class RenameTagRequest(val path: String)
+data class MediaAssetDto(val id: String, val kind: String, val mimeType: String, val sizeBytes: Long, val checksum: String, val url: String, val createdAt: String)
+data class MediaItemResponse(val item: MediaAssetDto)
 
 data class SyncPushRequest(val operations: List<SyncOperationDto>)
 data class SyncOperationDto(val opId: String, val entity: String, val action: String, val clientId: String, val noteId: String? = null, val baseVersion: Long, val payload: Map<String, Any?>)
@@ -47,18 +56,29 @@ interface JifoApi {
     @POST("auth/refresh") suspend fun refresh(@Body body: RefreshRequest): AuthResponse
 
     @GET("notes/stats") suspend fun noteStats(): NoteStatsDto
-    @GET("notes") suspend fun listNotes(@Query("search") search: String? = null, @Query("tagPath") tagPath: String? = null, @Query("limit") limit: Int = 20, @Query("offset") offset: Int = 0): ListNotesResponse
+    @GET("notes") suspend fun listNotes(@Query("search") search: String? = null, @Query("tagPath") tagPath: String? = null, @Query("trash") trash: Boolean = false, @Query("limit") limit: Int = 20, @Query("offset") offset: Int = 0): ListNotesResponse
     @POST("notes") suspend fun createNote(@Body body: NotePayload): NoteItemResponse
     @PATCH("notes/{id}") suspend fun updateNote(@Path("id") id: String, @Body body: NotePayload): NoteItemResponse
     @DELETE("notes/{id}") suspend fun deleteNote(@Path("id") id: String): NoteItemResponse
     @POST("notes/{id}/restore") suspend fun restoreNote(@Path("id") id: String): NoteItemResponse
 
     @GET("tags/tree") suspend fun tagTree(): TagTreeResponse
-    @GET("heatmap") suspend fun heatmap(@Query("from") from: String? = null, @Query("to") to: String? = null): HeatmapResponse
+    @PATCH("tags/{id}") suspend fun renameTag(@Path("id") id: String, @Body body: RenameTagRequest)
+    @DELETE("tags/{id}") suspend fun deleteTag(@Path("id") id: String, @Query("deleteNotes") deleteNotes: Boolean = false)
+    @GET("heatmap") suspend fun heatmap(
+        @Query("from") from: String,
+        @Query("to") to: String,
+        @Query("timezone") timezone: String
+    ): HeatmapResponse
+
+    @Multipart @POST("media") suspend fun uploadMedia(@Part file: MultipartBody.Part): MediaItemResponse
+    @Streaming @GET("media/{id}") suspend fun media(@Path("id") id: String): ResponseBody
 
     @GET("settings/access-keys") suspend fun accessKeys(): AccessKeyListResponse
     @POST("settings/access-keys") suspend fun createAccessKey(@Body body: CreateAccessKeyRequest): CreateAccessKeyResponse
     @DELETE("settings/access-keys/{id}") suspend fun deleteAccessKey(@Path("id") id: String)
+    @POST("me/password") suspend fun changePassword(@Body body: ChangePasswordRequest)
+    @POST("auth/logout") suspend fun logout()
 
     @POST("sync/push") suspend fun push(@Body body: SyncPushRequest): SyncPushResponse
     @GET("sync/pull") suspend fun pull(@Query("updatedAt") updatedAt: String? = null, @Query("id") id: String? = null, @Query("limit") limit: Int = 100): SyncPullResponse

@@ -4,6 +4,13 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+val releaseKeystoreFile = providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull
+val releaseKeystorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.jifo.app"
     compileSdk = 35
@@ -12,9 +19,20 @@ android {
         applicationId = "com.jifo.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toIntOrNull() ?: 1
+        versionName = providers.environmentVariable("VERSION_NAME").orNull?.takeIf { it.isNotBlank() } ?: "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystoreFile!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -22,7 +40,8 @@ android {
             buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://10.1.13.2:8080/api/\"")
         }
         release {
-            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://jifo.connor.run/api/\"")
+            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://jifo.apecho.com/api/\"")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = false
         }
     }

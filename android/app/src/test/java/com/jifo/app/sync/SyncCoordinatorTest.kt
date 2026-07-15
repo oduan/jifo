@@ -2,6 +2,7 @@ package com.jifo.app.sync
 
 import com.jifo.app.data.local.NoteEntity
 import com.jifo.app.data.local.OutboxOperationEntity
+import com.jifo.app.data.local.PendingMediaEntity
 import com.jifo.app.network.*
 import com.jifo.app.test.TestDatabaseFactory
 import kotlinx.coroutines.test.runTest
@@ -89,6 +90,7 @@ class SyncCoordinatorTest {
                 return SyncPushResponse(listOf(PushResultDto(op.opId, "created", "11111111-1111-1111-1111-111111111111", 1)))
             }
             override suspend fun pull(updatedAt: String?, id: String?, limit: Int): SyncPullResponse = SyncPullResponse()
+            override suspend fun uploadMedia(media: PendingMediaEntity): MediaAssetDto = error("unexpected upload")
         }
         val sync = SyncCoordinator(db, remote)
 
@@ -112,5 +114,26 @@ class SyncCoordinatorTest {
 
         assertNull(db.outboxDao().getByOpId("op-1"))
         assertEquals("远端原始", db.noteDao().getById(noteId)!!.plainText)
+    }
+
+    @Test fun pendingImageIsUploadedAndRewrittenBeforeNotePush() = runTest {
+        val db = database()
+        val localId = "local-image-1"
+        val localUrl = "local-media://$localId"
+        val content = """[{"type":"paragraph","text":"offline"},{"type":"image","url":"$localUrl","alt":"photo.jpg"}]"""
+        val payload = """{"content":{"blocks":[{"type":"paragraph","text":"offline"},{"type":"image","url":"$localUrl","alt":"photo.jpg"}]},"plainText":"offline"}"""
+        db.pendingMediaDao().put(PendingMediaEntity(localId, byteArrayOf(1, 2, 3), "image/jpeg", "photo.jpg", "2026-05-31T08:00:00Z"))
+        db.noteDao().upsert(NoteEntity(id = "client-1", clientId = "client-1", contentJson = content, plainText = "offline", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 0, syncStatus = "PENDING"))
+        db.outboxDao().insert(OutboxOperationEntity(opId = "op-1", entity = "note", action = "create", clientId = "client-1", baseVersion = 0, payloadJson = payload, createdAt = "2026-05-31T08:00:00Z"))
+        val api = FakeSyncApi(listOf(PushResultDto("op-1", "created", "11111111-1111-1111-1111-111111111111", 1)), emptyList())
+
+        SyncCoordinator(db, api).runOnce()
+
+        assertEquals(listOf(localId), api.uploadedMediaIds)
+        val pushedImage = api.pushedBodies.single().operations.single().payload["content"] as Map<*, *>
+        val blocks = pushedImage["blocks"] as List<*>
+        assertEquals("media-$localId", (blocks[1] as Map<*, *>)["mediaId"])
+        assertNull(db.pendingMediaDao().get(localId))
+        assertEquals(true, db.noteDao().getById("11111111-1111-1111-1111-111111111111")!!.contentJson.contains("media-$localId"))
     }
 }

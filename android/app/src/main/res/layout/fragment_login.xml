@@ -6,9 +6,16 @@
     android:padding="24dp"
     android:background="@color/jifo_bg">
 
+    <ImageView
+        android:layout_width="96dp"
+        android:layout_height="96dp"
+        android:contentDescription="Jifo Logo"
+        android:src="@drawable/jifo_icon_foreground" />
+
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
         android:text="Jifo"
         android:textColor="@color/jifo_ink"
         android:textStyle="bold"

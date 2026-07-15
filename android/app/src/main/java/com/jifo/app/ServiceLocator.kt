@@ -2,6 +2,8 @@ package com.jifo.app
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
@@ -18,6 +20,9 @@ import com.jifo.app.network.AuthResponse
 import com.jifo.app.network.JifoApi
 import com.jifo.app.network.TokenStore
 import com.jifo.app.notes.NotesRepository
+import com.jifo.app.notes.OfflineMediaRepository
+import com.jifo.app.settings.JifoSettingsRemote
+import com.jifo.app.settings.SettingsRepository
 import com.jifo.app.sync.JifoSyncRemote
 import com.jifo.app.sync.JifoSyncWorker
 import com.jifo.app.sync.SyncCoordinator
@@ -28,7 +33,9 @@ object ServiceLocator {
     @Volatile private var db: JifoDatabase? = null
 
     fun database(context: Context): JifoDatabase = db ?: synchronized(this) {
-        db ?: Room.databaseBuilder(context.applicationContext, JifoDatabase::class.java, "jifo.db").build().also { db = it }
+        db ?: Room.databaseBuilder(context.applicationContext, JifoDatabase::class.java, "jifo.db")
+            .addMigrations(MIGRATION_1_2)
+            .build().also { db = it }
     }
 
     fun tokenStore(context: Context): RoomTokenStore = RoomTokenStore(database(context))
@@ -51,6 +58,16 @@ object ServiceLocator {
     )
 
     fun syncCoordinator(context: Context): SyncCoordinator = SyncCoordinator(database(context), JifoSyncRemote(api(context)))
+
+    fun settingsRepository(context: Context): SettingsRepository = SettingsRepository(JifoSettingsRemote(api(context)))
+
+    fun offlineMediaRepository(context: Context): OfflineMediaRepository = OfflineMediaRepository(database(context))
+
+    private val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `pending_media` (`localId` TEXT NOT NULL, `bytes` BLOB NOT NULL, `mimeType` TEXT NOT NULL, `fileName` TEXT NOT NULL, `createdAt` TEXT NOT NULL, PRIMARY KEY(`localId`))")
+        }
+    }
 }
 
 class WorkManagerSyncScheduler(context: Context) : SyncScheduler {

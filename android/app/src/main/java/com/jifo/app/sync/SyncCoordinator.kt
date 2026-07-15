@@ -8,6 +8,10 @@ import com.jifo.app.data.local.SyncStateEntity
 import com.jifo.app.network.ApiNoteDto
 import com.jifo.app.network.PushResultDto
 import com.jifo.app.notes.LocalTagIndex
+import com.jifo.app.notes.OfflineMediaRepository
+import com.jifo.app.network.MediaAssetDto
+import org.json.JSONArray
+import org.json.JSONObject
 import retrofit2.HttpException
 import java.util.UUID
 
@@ -26,7 +30,8 @@ class SyncCoordinator(
 
     private suspend fun pushOperation(op: OutboxOperationEntity) {
         try {
-            val response = remote.push(SyncDtoMapper.toPushRequest(listOf(op)))
+            val prepared = preparePendingMedia(op)
+            val response = remote.push(SyncDtoMapper.toPushRequest(listOf(prepared)))
             response.results.forEach { result -> applyPushResult(result) }
         } catch (error: HttpException) {
             if (error.code() == 404) {
@@ -35,6 +40,44 @@ class SyncCoordinator(
                 throw error
             }
         }
+    }
+
+    private suspend fun preparePendingMedia(original: OutboxOperationEntity): OutboxOperationEntity {
+        if (original.action == "delete") return original
+        var current = original
+        val root = runCatching { JSONObject(current.payloadJson) }.getOrNull() ?: return current
+        val blocks = root.optJSONObject("content")?.optJSONArray("blocks") ?: return current
+        for (index in 0 until blocks.length()) {
+            val block = blocks.optJSONObject(index) ?: continue
+            if (block.optString("type") != "image" || block.optString("mediaId").isNotBlank()) continue
+            val localUrl = block.optString("url")
+            val localId = OfflineMediaRepository.localId(localUrl) ?: continue
+            val pending = db.pendingMediaDao().get(localId) ?: error("pending media $localId is missing")
+            val asset = remote.uploadMedia(pending)
+            block.put("mediaId", asset.id).put("url", asset.url)
+            val updatedPayload = root.toString()
+            db.withTransaction {
+                db.outboxDao().updatePayload(current.opId, updatedPayload)
+                val note = current.noteId?.let { db.noteDao().getById(it) } ?: db.noteDao().getByClientId(current.clientId)
+                if (note != null) {
+                    db.noteDao().upsert(note.copy(contentJson = replaceLocalMedia(note.contentJson, localUrl, asset)))
+                }
+                db.pendingMediaDao().delete(localId)
+            }
+            current = current.copy(payloadJson = updatedPayload)
+        }
+        return current
+    }
+
+    private fun replaceLocalMedia(contentJson: String, localUrl: String, asset: MediaAssetDto): String {
+        val blocks = runCatching { JSONArray(contentJson) }.getOrNull() ?: return contentJson
+        for (index in 0 until blocks.length()) {
+            val block = blocks.optJSONObject(index) ?: continue
+            if (block.optString("type") == "image" && block.optString("url") == localUrl) {
+                block.put("mediaId", asset.id).put("url", asset.url)
+            }
+        }
+        return blocks.toString()
     }
 
     private suspend fun handlePushNotFound(op: OutboxOperationEntity) {

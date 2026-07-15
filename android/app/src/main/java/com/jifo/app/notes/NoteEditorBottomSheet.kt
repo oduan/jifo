@@ -3,6 +3,7 @@ package com.jifo.app.notes
 import android.content.Context
 import android.content.DialogInterface
 import android.os.Bundle
+import android.net.Uri
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -16,14 +17,28 @@ import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.jifo.app.R
 import com.jifo.app.data.local.TagEntity
 import com.jifo.app.databinding.BottomSheetNoteEditorBinding
+import com.jifo.app.ServiceLocator
+import com.jifo.app.core.model.NoteBlock
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class NoteEditorBottomSheet(
     private val tags: List<TagEntity> = emptyList(),
     private val onDismissed: (() -> Unit)? = null,
-    private val onSubmit: ((String) -> Unit)? = null
+    private val onSubmit: ((List<NoteBlock>) -> Unit)? = null
 ) : BottomSheetDialogFragment() {
     private var binding: BottomSheetNoteEditorBinding? = null
     private var tagAutocomplete: NoteTagAutocomplete? = null
+    private var selectedImage: Uri? = null
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        selectedImage = uri
+        binding?.imagePreview?.apply {
+            visibility = if (uri == null) View.GONE else View.VISIBLE
+            setImageURI(uri)
+        }
+        renderState()
+    }
 
     override fun onStart() {
         super.onStart()
@@ -41,23 +56,29 @@ class NoteEditorBottomSheet(
     }
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
-        fun render() {
-            val state = NoteEditorState(b.editNote.text?.toString().orEmpty())
-            b.buttonSend.isEnabled = state.canSend
-            b.buttonSend.setBackgroundResource(if (state.canSend) R.drawable.bg_send_button_enabled else R.drawable.bg_send_button_disabled)
-        }
         b.editNote.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = render()
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = renderState()
             override fun afterTextChanged(s: Editable?) = Unit
         })
         tagAutocomplete = NoteTagAutocomplete(b.editNote, tags)
         b.buttonInsertTag.setOnClickListener {
             insertHashAtCursor()
         }
+        b.buttonInsertImage.setOnClickListener { imagePicker.launch("image/*") }
         b.buttonSend.setOnClickListener {
             val text = b.editNote.text?.toString().orEmpty()
-            if (NoteEditorState(text).canSend) { onSubmit?.invoke(text); dismiss() }
+            if (!NoteEditorState(text).canSend && selectedImage == null) return@setOnClickListener
+            b.buttonSend.isEnabled = false
+            viewLifecycleOwner.lifecycleScope.launch {
+                val blocks = mutableListOf<NoteBlock>()
+                if (text.isNotBlank()) blocks += NoteBlock.Paragraph(text.trim())
+                selectedImage?.let { uri ->
+                    blocks += ServiceLocator.offlineMediaRepository(requireContext()).stage(requireContext().contentResolver, uri)
+                }
+                onSubmit?.invoke(blocks)
+                dismiss()
+            }
         }
         b.editNote.postDelayed({
             val current = binding ?: return@postDelayed
@@ -65,7 +86,13 @@ class NoteEditorBottomSheet(
             val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(current.editNote, InputMethodManager.SHOW_IMPLICIT)
         }, 180L)
-        render()
+        renderState()
+    }
+    private fun renderState() {
+        val b = binding ?: return
+        val canSend = NoteEditorState(b.editNote.text?.toString().orEmpty()).canSend || selectedImage != null
+        b.buttonSend.isEnabled = canSend
+        b.buttonSend.setBackgroundResource(if (canSend) R.drawable.bg_send_button_enabled else R.drawable.bg_send_button_disabled)
     }
     private fun insertHashAtCursor() {
         val b = binding ?: return

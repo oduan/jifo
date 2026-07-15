@@ -11,4 +11,9 @@
     <color name="jifo_danger">#A94438</color>
     <color name="jifo_tag_text">#7D5CA6</color>
     <color name="jifo_tag_bg">#EFE7FB</color>
+    <color name="jifo_heatmap_0">#E8E2D8</color>
+    <color name="jifo_heatmap_1">#B9D2B5</color>
+    <color name="jifo_heatmap_2">#72A46F</color>
+    <color name="jifo_heatmap_3">#3D7C4A</color>
+    <color name="jifo_icon_background">#F5F0E8</color>
 </resources>

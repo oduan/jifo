@@ -2,6 +2,7 @@ package com.jifo.app.notes
 
 import android.content.Context
 import android.os.Bundle
+import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -12,11 +13,15 @@ import com.jifo.app.ServiceLocator
 import com.jifo.app.core.model.NoteBlock
 import com.jifo.app.databinding.FragmentNoteEditBinding
 import kotlinx.coroutines.launch
+import androidx.activity.result.contract.ActivityResultContracts
 
 class NoteEditFragment : Fragment() {
     private var binding: FragmentNoteEditBinding? = null
     private var tagAutocomplete: NoteTagAutocomplete? = null
     private val noteId: String by lazy { requireArguments().getString(ARG_NOTE_ID).orEmpty() }
+    private var originalImages: List<NoteBlock.Image> = emptyList()
+    private var selectedImage: Uri? = null
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { selectedImage = it }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val next = FragmentNoteEditBinding.inflate(inflater, container, false)
@@ -34,7 +39,11 @@ class NoteEditFragment : Fragment() {
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
-            repository.getNote(noteId)?.let { note -> b.editNoteFull.setText(note.plainText) }
+            repository.getNote(noteId)?.let { note ->
+                val blocks = NoteJson.decodeBlocks(note.contentJson)
+                originalImages = blocks.filterIsInstance<NoteBlock.Image>()
+                b.editNoteFull.setText(blocks.filterIsInstance<NoteBlock.Paragraph>().joinToString("\n\n") { it.text }.ifBlank { note.plainText })
+            }
             b.editNoteFull.post {
                 b.editNoteFull.requestFocus()
                 b.editNoteFull.setSelection(b.editNoteFull.text?.length ?: 0)
@@ -43,10 +52,17 @@ class NoteEditFragment : Fragment() {
             }
         }
         b.buttonBack.setOnClickListener { parentFragmentManager.popBackStack() }
+        b.buttonAddImage.setOnClickListener { imagePicker.launch("image/*") }
         b.buttonSave.setOnClickListener {
             val text = b.editNoteFull.text?.toString().orEmpty()
             viewLifecycleOwner.lifecycleScope.launch {
-                repository.updateNote(noteId, listOf(NoteBlock.Paragraph(text.trim())))
+                val blocks = mutableListOf<NoteBlock>()
+                if (text.isNotBlank()) blocks += NoteBlock.Paragraph(text.trim())
+                blocks += originalImages
+                selectedImage?.let { uri ->
+                    blocks += ServiceLocator.offlineMediaRepository(requireContext()).stage(requireContext().contentResolver, uri)
+                }
+                repository.updateNote(noteId, blocks)
                 runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
                 parentFragmentManager.popBackStack()
             }
