@@ -17,12 +17,15 @@ import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.TextView
+import android.widget.EditText
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.GridLayoutManager
 import com.jifo.app.R
 import com.jifo.app.ServiceLocator
 import com.jifo.app.core.model.NoteBlock
@@ -31,9 +34,14 @@ import com.google.android.material.snackbar.Snackbar
 import com.jifo.app.data.local.NoteEntity
 import com.jifo.app.data.local.TagEntity
 import com.jifo.app.drawer.TagAdapter
+import com.jifo.app.drawer.HeatmapAdapter
+import com.jifo.app.data.local.HeatmapDayEntity
+import com.jifo.app.settings.SettingsBottomSheet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.ZoneId
 
 class NotesFragment : Fragment() {
     private var binding: FragmentNotesBinding? = null
@@ -43,6 +51,7 @@ class NotesFragment : Fragment() {
     private var refreshInFlight = false
     private var pullAnimator: ValueAnimator? = null
     private var currentTags: List<TagEntity> = emptyList()
+    private var showTrash = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val next = FragmentNotesBinding.inflate(inflater, container, false)
@@ -57,7 +66,11 @@ class NotesFragment : Fragment() {
             onTagClick = { tagPath -> selectTag(tagPath) }
         )
         lateinit var tagAdapter: TagAdapter
-        tagAdapter = TagAdapter { tag -> selectTag(tag.path, closeDrawer = true) }
+        tagAdapter = TagAdapter(
+            onClick = { tag -> selectTag(tag.path, closeDrawer = true) },
+            onLongClick = { tag, _ -> showTagActions(tag) }
+        )
+        val heatmapAdapter = HeatmapAdapter()
         val repository = ServiceLocator.notesRepository(requireContext())
         val tagRecycler = view.findViewById<RecyclerView>(R.id.tag_recycler)
         val textUserName = view.findViewById<TextView>(R.id.text_user_name)
@@ -65,6 +78,7 @@ class NotesFragment : Fragment() {
         val textTagCount = view.findViewById<TextView>(R.id.text_tag_count)
         val textRecordDays = view.findViewById<TextView>(R.id.text_record_days)
         val buttonAllNotes = view.findViewById<TextView>(R.id.button_all_notes)
+        val buttonTrash = view.findViewById<TextView>(R.id.button_trash)
         val notesLayoutManager = LinearLayoutManager(requireContext())
         b.notesRecycler.layoutManager = notesLayoutManager
         b.notesRecycler.adapter = adapter
@@ -81,6 +95,16 @@ class NotesFragment : Fragment() {
         })
         tagRecycler.layoutManager = LinearLayoutManager(requireContext())
         tagRecycler.adapter = tagAdapter
+        view.findViewById<RecyclerView>(R.id.heatmap_recycler).apply {
+            layoutManager = GridLayoutManager(requireContext(), 7, RecyclerView.HORIZONTAL, false)
+            this.adapter = heatmapAdapter
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            ServiceLocator.database(requireContext()).heatmapDao().observeDays().collect { days ->
+                heatmapAdapter.submitList(days)
+                textRecordDays.text = days.count { it.totalCount > 0 }.toString()
+            }
+        }
         viewLifecycleOwner.lifecycleScope.launch {
             ServiceLocator.authRepository(requireContext()).current()?.let { session ->
                 textUserName.text = session.username ?: session.userEmail ?: "Jifo 用户"
@@ -94,9 +118,8 @@ class NotesFragment : Fragment() {
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
-            repository.observeNotes(search = null, tagPath = null).collect { notes ->
+            repository.observeNotes(search = null, tagPath = null, limit = Int.MAX_VALUE).collect { notes ->
                 textNoteCount.text = notes.size.toString()
-                textRecordDays.text = notes.map { it.createdAt.take(10) }.filter { it.isNotBlank() }.distinct().size.toString()
                 buttonAllNotes.text = "▦ 全部笔记  ${notes.size}"
             }
         }
@@ -108,18 +131,39 @@ class NotesFragment : Fragment() {
                 .commit()
         }
         buttonAllNotes.setOnClickListener {
+            showTrash = false
+            b.buttonAddNote.visibility = View.VISIBLE
             selectedTagPath = null
             adapter.selectedTagPath = null
+            b.textWorkspaceTitle.text = "全部笔记"
             resetPaging()
             observeNotes()
             b.drawerLayout.closeDrawer(GravityCompat.START)
         }
-        observeNotes()
-        viewLifecycleOwner.lifecycleScope.launch {
-            runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
+        buttonTrash.setOnClickListener {
+            showTrash = true
+            selectedTagPath = null
+            adapter.selectedTagPath = null
+            b.textWorkspaceTitle.text = "回收站"
+            resetPaging()
+            observeNotes()
+            b.buttonAddNote.visibility = View.GONE
+            b.drawerLayout.closeDrawer(GravityCompat.START)
         }
+        textUserName.setOnClickListener {
+            SettingsBottomSheet(
+                onLoggedOut = {
+                    parentFragmentManager.beginTransaction()
+                        .replace(R.id.main_container, com.jifo.app.auth.LoginFragment())
+                        .commit()
+                }
+            ).show(parentFragmentManager, "settings")
+        }
+        observeNotes()
+        viewLifecycleOwner.lifecycleScope.launch { refreshWorkspace() }
         b.buttonMenu.setOnClickListener { b.drawerLayout.openDrawer(GravityCompat.START) }
         b.buttonAddNote.setOnClickListener {
+            if (showTrash) return@setOnClickListener
             val previousSoftInputMode = requireActivity().window.attributes.softInputMode
             b.buttonAddNote.visibility = View.INVISIBLE
             requireActivity().window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
@@ -129,9 +173,9 @@ class NotesFragment : Fragment() {
                     activity?.window?.setSoftInputMode(previousSoftInputMode)
                     binding?.buttonAddNote?.postDelayed({ binding?.buttonAddNote?.visibility = View.VISIBLE }, 220L)
                 }
-            ) { text ->
+            ) { blocks ->
                 viewLifecycleOwner.lifecycleScope.launch {
-                    repository.createNote(listOf(NoteBlock.Paragraph(text.trim())))
+                    repository.createNote(blocks)
                     runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
                 }
             }.show(parentFragmentManager, "note-editor")
@@ -232,7 +276,7 @@ class NotesFragment : Fragment() {
         animateSettle?.invoke()
         viewLifecycleOwner.lifecycleScope.launch {
             val startedAt = SystemClock.elapsedRealtime()
-            runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
+            refreshWorkspace()
             binding?.refreshProgress?.visibility = View.GONE
             val elapsed = SystemClock.elapsedRealtime() - startedAt
             if (elapsed < 1000L) delay(1000L - elapsed)
@@ -253,7 +297,10 @@ class NotesFragment : Fragment() {
     private fun selectTag(tagPath: String, closeDrawer: Boolean = false) {
         val b = binding ?: return
         selectedTagPath = tagPath
+        showTrash = false
+        b.buttonAddNote.visibility = View.VISIBLE
         (b.notesRecycler.adapter as? NoteAdapter)?.selectedTagPath = tagPath
+        b.textWorkspaceTitle.text = "#$tagPath"
         resetPaging()
         observeNotes()
         if (closeDrawer) b.drawerLayout.closeDrawer(GravityCompat.START)
@@ -263,9 +310,93 @@ class NotesFragment : Fragment() {
         NoteActionPopup.show(
             anchor = anchor,
             onCopy = { copyNote(note) },
-            onEdit = { openEdit(note) },
-            onDelete = { deleteNote(note) }
+            onEdit = if (showTrash) null else ({ openEdit(note) }),
+            onDelete = if (showTrash) null else ({ deleteNote(note) }),
+            onRestore = if (showTrash) ({ restoreNote(note) }) else null
         )
+    }
+
+    private fun restoreNote(note: NoteEntity) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            ServiceLocator.notesRepository(requireContext()).restoreNote(note.id)
+            Snackbar.make(requireView(), "笔记已恢复", Snackbar.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showTagActions(tag: TagEntity) {
+        val choices = arrayOf("重命名", "仅删除标签", "删除标签和笔记")
+        AlertDialog.Builder(requireContext())
+            .setTitle("#${tag.path}")
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> showRenameTag(tag)
+                    1 -> confirmDeleteTag(tag, false)
+                    2 -> confirmDeleteTag(tag, true)
+                }
+            }
+            .show()
+    }
+
+    private fun showRenameTag(tag: TagEntity) {
+        val input = EditText(requireContext()).apply {
+            setText(tag.path)
+            setSelection(text.length)
+            hint = "标签/次级标签"
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("重命名标签")
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val path = input.text.toString().trim()
+                if (path.isNotEmpty()) mutateTag { ServiceLocator.api(requireContext()).renameTag(tag.id, com.jifo.app.network.RenameTagRequest(path)) }
+            }
+            .show()
+    }
+
+    private fun confirmDeleteTag(tag: TagEntity, deleteNotes: Boolean) {
+        val message = if (deleteNotes) "将删除此标签及使用它的笔记，笔记会进入回收站。" else "只移除标签，笔记内容会保留。"
+        AlertDialog.Builder(requireContext())
+            .setTitle("删除 #${tag.path}")
+            .setMessage(message)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("删除") { _, _ -> mutateTag { ServiceLocator.api(requireContext()).deleteTag(tag.id, deleteNotes) } }
+            .show()
+    }
+
+    private fun mutateTag(action: suspend () -> Unit) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching { action(); refreshWorkspace() }
+                .onFailure { Snackbar.make(requireView(), "标签操作失败，请稍后重试", Snackbar.LENGTH_LONG).show() }
+        }
+    }
+
+    private suspend fun refreshWorkspace() {
+        runCatching { ServiceLocator.syncCoordinator(requireContext()).runOnce() }
+        val api = ServiceLocator.api(requireContext())
+        runCatching {
+            val tree = api.tagTree().items
+            val flattened = mutableListOf<TagEntity>()
+            fun append(nodes: List<com.jifo.app.network.TagDto>) {
+                nodes.forEach { node ->
+                    flattened += TagEntity(node.id, node.name, node.path ?: node.name, node.parentId, node.depth, node.noteCount)
+                    append(node.children)
+                }
+            }
+            append(tree)
+            val dao = ServiceLocator.database(requireContext()).tagDao()
+            dao.clear()
+            if (flattened.isNotEmpty()) dao.upsertAll(flattened)
+        }
+        runCatching {
+            val to = LocalDate.now()
+            val from = to.minusDays(83)
+            val days = api.heatmap(from.toString(), to.toString(), ZoneId.systemDefault().id).days
+                .map { HeatmapDayEntity(it.date, it.createdCount, it.updatedCount, it.totalCount) }
+            val dao = ServiceLocator.database(requireContext()).heatmapDao()
+            dao.clear()
+            if (days.isNotEmpty()) dao.upsertAll(days)
+        }
     }
 
     private fun copyNote(note: NoteEntity) {
@@ -304,8 +435,13 @@ class NotesFragment : Fragment() {
             repository.observeNotes(
                 search = null,
                 tagPath = selectedTagPath,
-                limit = visibleLimit
-            ).collect { adapter.submitList(it) }
+                limit = visibleLimit,
+                trash = showTrash
+            ).collect { notes ->
+                adapter.submitList(notes)
+                b.textEmptyState.visibility = if (notes.isEmpty()) View.VISIBLE else View.GONE
+                b.textEmptyState.text = if (showTrash) "回收站是空的\n删除的笔记会在这里保留 30 天" else "还没有笔记\n写下第一条想法吧"
+            }
         }
     }
 

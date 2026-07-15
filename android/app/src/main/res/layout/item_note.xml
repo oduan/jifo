@@ -37,4 +37,11 @@
         android:textColor="#3A322A"
         android:textSize="14sp"
         android:lineSpacingExtra="2dp" />
+
+    <LinearLayout
+        android:id="@+id/note_images"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="vertical" />
 </LinearLayout>

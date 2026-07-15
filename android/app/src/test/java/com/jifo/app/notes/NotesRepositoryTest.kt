@@ -110,4 +110,17 @@ class NotesRepositoryTest {
         assertEquals("old", note.plainText)
         assertEquals(emptyList<String>(), db.outboxDao().pendingOrFailed().map { it.action })
     }
+
+    @Test fun trashQueryAndRestoreRoundTripQueueRestoreOperation() = runTest {
+        val db = database()
+        db.noteDao().upsert(NoteEntity(id = "note-1", clientId = "client-1", contentJson = "[{\"type\":\"paragraph\",\"text\":\"old\"}]", plainText = "old", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 4, deletedAt = "2026-05-31T09:00:00Z"))
+        val repo = NotesRepository(db, FakeSyncScheduler(), FixedIdGenerator("client-unused", "op-restore"), FixedClock("2026-05-31T10:00:00Z"))
+
+        assertEquals("note-1", repo.observeNotes(null, null, trash = true).first().single().id)
+        repo.restoreNote("note-1")
+
+        assertEquals(null, db.noteDao().getById("note-1")!!.deletedAt)
+        assertEquals("restore", db.outboxDao().pendingOrFailed().single().action)
+        assertEquals("note-1", repo.observeNotes(null, null).first().single().id)
+    }
 }

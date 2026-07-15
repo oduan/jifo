@@ -13,7 +13,11 @@
         android:text="Jifo 用户"
         android:textColor="@color/jifo_ink"
         android:textSize="15sp"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:drawableEnd="@drawable/ic_chevron_down_20"
+        android:contentDescription="打开账户设置"
+        android:clickable="true"
+        android:focusable="true" />
 
     <LinearLayout
         android:id="@+id/stats_row"
@@ -94,8 +98,10 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/heatmap_recycler"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:visibility="gone" />
+        android:layout_height="140dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="6dp"
+        android:contentDescription="最近记录热力图" />
 
     <TextView
         android:id="@+id/button_all_notes"
@@ -104,6 +110,23 @@
         android:gravity="center_vertical"
         android:text="▦ 全部笔记"
         android:textColor="@color/jifo_green_dark" />
+
+    <TextView
+        android:id="@+id/button_trash"
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:gravity="center_vertical"
+        android:text="♲ 回收站"
+        android:textColor="@color/jifo_muted" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="4dp"
+        android:text="全部标签"
+        android:textColor="@color/jifo_muted"
+        android:textSize="12sp" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/tag_recycler"

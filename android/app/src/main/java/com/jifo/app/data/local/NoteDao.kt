@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 interface NoteDao {
     @Query("""
         SELECT * FROM notes
-        WHERE deletedAt IS NULL
+        WHERE ((:trash = 0 AND deletedAt IS NULL) OR (:trash = 1 AND deletedAt IS NOT NULL))
           AND (:search IS NULL OR plainText LIKE '%' || :search || '%')
           AND (
               :tagPath IS NULL
@@ -20,7 +20,7 @@ interface NoteDao {
         ORDER BY createdAt DESC
         LIMIT :limit
     """)
-    fun observeNotes(search: String?, tagPath: String?, limit: Int): Flow<List<NoteEntity>>
+    fun observeNotes(search: String?, tagPath: String?, limit: Int, trash: Boolean = false): Flow<List<NoteEntity>>
 
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): NoteEntity?

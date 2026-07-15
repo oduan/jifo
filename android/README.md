@@ -30,4 +30,6 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 ./gradlew assembleDebug
 ```
 
-Debug builds use `http://10.1.13.2:8080/api/` and allow HTTP cleartext traffic. Release builds use `https://jifo.connor.run/api/` and do not enable debug cleartext configuration.
+Debug builds use `http://10.1.13.2:8080/api/` and allow HTTP cleartext traffic. Release builds use `https://jifo.apecho.com/api/` and do not enable debug cleartext configuration.
+
+Text and image notes are stored locally first. Pending images are kept in Room together with the note outbox and uploaded automatically by WorkManager when a network connection is available.

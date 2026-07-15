@@ -11,6 +11,8 @@ import com.jifo.app.ServiceLocator
 import com.jifo.app.databinding.FragmentLoginBinding
 import com.jifo.app.notes.NotesFragment
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
+import java.io.IOException
 
 class LoginFragment : Fragment() {
     private var binding: FragmentLoginBinding? = null
@@ -39,6 +41,7 @@ class LoginFragment : Fragment() {
             b.textError.text = "密码至少 8 位"
             return
         }
+        b.textError.text = ""
         setLoading(true)
         viewLifecycleOwner.lifecycleScope.launch {
             try {
@@ -49,17 +52,28 @@ class LoginFragment : Fragment() {
                     .replace(R.id.main_container, NotesFragment())
                     .commit()
             } catch (error: Throwable) {
-                binding?.textError?.text = error.message ?: "登录失败，请稍后重试"
                 setLoading(false)
+                binding?.textError?.text = errorMessage(error, register)
             }
         }
+    }
+
+    private fun errorMessage(error: Throwable, register: Boolean): String = when {
+        error is HttpException && error.code() == 401 -> "邮箱或密码不正确"
+        error is HttpException && error.code() == 409 -> "邮箱已被注册"
+        error is HttpException && error.code() == 429 -> "尝试次数过多，请稍后再试"
+        error is IOException -> "无法连接本地服务器，请检查网络"
+        register -> "注册失败，请稍后重试"
+        else -> "登录失败，请稍后重试"
     }
 
     private fun setLoading(loading: Boolean) {
         val b = binding ?: return
         b.buttonSubmit.isEnabled = !loading
         b.buttonRegister.isEnabled = !loading
-        b.textError.text = if (loading) "正在连接服务器…" else ""
+        b.buttonSubmit.text = if (loading) "连接中…" else "登录"
+        b.buttonRegister.text = if (loading) "请稍候…" else "注册并登录"
+        if (loading) b.textError.text = "正在连接服务器…"
     }
 
     override fun onDestroyView() { binding = null; super.onDestroyView() }

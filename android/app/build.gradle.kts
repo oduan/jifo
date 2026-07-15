@@ -22,7 +22,7 @@ android {
             buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://10.1.13.2:8080/api/\"")
         }
         release {
-            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://jifo.connor.run/api/\"")
+            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://jifo.apecho.com/api/\"")
             isMinifyEnabled = false
         }
     }

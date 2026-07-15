@@ -16,4 +16,5 @@ class AuthRepositoryTest {
         assertEquals("android-device-1", api.lastAuthRequest!!.deviceCode)
         assertEquals("access-token", store.current()!!.accessToken)
     }
+
 }

@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         TagEntity::class,
         HeatmapDayEntity::class,
         AuthSessionEntity::class,
-        SyncStateEntity::class
+        SyncStateEntity::class,
+        PendingMediaEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class JifoDatabase : RoomDatabase() {
@@ -22,4 +23,5 @@ abstract class JifoDatabase : RoomDatabase() {
     abstract fun heatmapDao(): HeatmapDao
     abstract fun authSessionDao(): AuthSessionDao
     abstract fun syncStateDao(): SyncStateDao
+    abstract fun pendingMediaDao(): PendingMediaDao
 }

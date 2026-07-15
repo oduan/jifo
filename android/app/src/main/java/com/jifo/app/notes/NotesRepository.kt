@@ -17,8 +17,8 @@ class NotesRepository(
     private val idGenerator: IdGenerator,
     private val clock: Clock
 ) {
-    fun observeNotes(search: String?, tagPath: String?, limit: Int = 50) = db.noteDao()
-        .observeNotes(search?.takeIf { it.isNotBlank() }, tagPath?.takeIf { it.isNotBlank() }, limit.coerceAtLeast(1))
+    fun observeNotes(search: String?, tagPath: String?, limit: Int = 50, trash: Boolean = false) = db.noteDao()
+        .observeNotes(search?.takeIf { it.isNotBlank() }, tagPath?.takeIf { it.isNotBlank() }, limit.coerceAtLeast(1), trash)
         .map { it }
 
     suspend fun getNote(id: String): NoteEntity? = db.noteDao().getById(id)
@@ -134,5 +134,27 @@ class NotesRepository(
             LocalTagIndex.rebuild(db)
         }
         if (snapshot.version == 0L) syncScheduler.scheduleNow()
+    }
+
+    suspend fun restoreNote(id: String) {
+        val current = db.noteDao().getById(id) ?: return
+        if (current.deletedAt == null) return
+        val now = clock.nowIso()
+        db.withTransaction {
+            db.noteDao().upsert(current.copy(deletedAt = null, updatedAt = now, syncStatus = "PENDING", lastError = null))
+            db.outboxDao().deletePendingDeleteForNote(current.id, current.clientId)
+            db.outboxDao().insert(OutboxOperationEntity(
+                opId = idGenerator.newOpId(),
+                entity = "note",
+                action = "restore",
+                noteId = current.id,
+                clientId = current.clientId,
+                baseVersion = current.version,
+                payloadJson = NoteJson.encodePayload(NoteJson.decodeBlocks(current.contentJson), current.plainText),
+                createdAt = now
+            ))
+            LocalTagIndex.rebuild(db)
+        }
+        syncScheduler.scheduleNow()
     }
 }
