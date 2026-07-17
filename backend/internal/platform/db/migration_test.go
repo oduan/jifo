@@ -67,6 +67,23 @@ func TestLoadMigrationFilesSortsByVersion(t *testing.T) {
 	}
 }
 
+func TestRepairActiveTagCountsMigrationExcludesDeletedNotes(t *testing.T) {
+	sql := normalizeSQL(loadMigration(t, "004_repair_active_tag_counts.sql"))
+
+	requiredSnippets := []string{
+		"DELETE FROM note_tags nt USING notes n",
+		"n.deleted_at IS NOT NULL OR n.permanently_deleted_at IS NOT NULL",
+		"UPDATE tags t SET note_count =",
+		"n.deleted_at IS NULL",
+		"n.permanently_deleted_at IS NULL",
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(sql, normalizeSQL(snippet)) {
+			t.Fatalf("repair migration must contain snippet: %s", snippet)
+		}
+	}
+}
+
 func TestInitMigrationExecutesAndCreatesConstraintsWhenDatabaseAvailable(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -135,6 +152,7 @@ func TestRunMigrationsExecutesAndSkipsWhenDatabaseAvailable(t *testing.T) {
 	assertMigrationRecorded(t, ctx, pool, "001_init")
 	assertMigrationRecorded(t, ctx, pool, "002_access_keys")
 	assertMigrationRecorded(t, ctx, pool, "003_rebuild_special_character_tags")
+	assertMigrationRecorded(t, ctx, pool, "004_repair_active_tag_counts")
 }
 
 func assertTableExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool, table string) {
@@ -216,13 +234,17 @@ WHERE schemaname = current_schema()
 }
 
 func loadInitMigration(t *testing.T) string {
+	return loadMigration(t, "001_init.sql")
+}
+
+func loadMigration(t *testing.T, name string) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve caller: failed")
 	}
 
-	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", "001_init.sql")
+	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", name)
 	content, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
