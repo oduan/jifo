@@ -79,6 +79,29 @@ describe('NoteEditor', () => {
     expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
   });
 
+  test('标签下拉不显示仅存在于回收站或已彻底删除笔记中的标签', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteEditor
+        tags={[
+          { id: 'active', name: '使用中', path: '使用中', noteCount: 1 },
+          { id: 'deleted', name: '已删除', path: '已删除', noteCount: 0 }
+        ]}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, '#');
+
+    expect(screen.getByRole('option', { name: '使用中' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '已删除' })).not.toBeInTheDocument();
+
+    await user.type(textarea, '已删除');
+    expect(screen.getByRole('option', { name: '已删除 新建' })).toBeInTheDocument();
+  });
+
   test('光标离开输入框时关闭标签建议，重新聚焦到 # 后再次打开', async () => {
     const user = userEvent.setup();
 

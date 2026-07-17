@@ -10,6 +10,7 @@ export type NoteEditorTag = {
   id: string;
   name: string;
   path?: string;
+  noteCount?: number;
 };
 
 type NoteEditorProps = {
@@ -70,6 +71,7 @@ function filterTags(tags: NoteEditorTag[], query: string): NoteEditorTag[] {
   const normalized = query.trim().toLocaleLowerCase();
   const unique = new Map<string, NoteEditorTag>();
   tags.forEach((tag) => {
+    if (tag.noteCount !== undefined && tag.noteCount <= 0) return;
     const label = tagInsertText(tag);
     if (!label) return;
     const haystack = `${label} ${tag.name}`.toLocaleLowerCase();
