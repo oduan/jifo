@@ -258,7 +258,7 @@ describe('NoteCard', () => {
     expect(screen.getByRole('link', { name: '链接' })).toHaveAttribute('target', '_blank');
   });
 
-  test('点击任务框会更新原始 Markdown 标记', async () => {
+  test('点击任意任务框会更新对应的原始 Markdown 标记', async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();
     render(
@@ -274,8 +274,8 @@ describe('NoteCard', () => {
       />
     );
 
-    await user.click(screen.getByRole('checkbox', { name: '标记任务为已完成' }));
-    expect(onUpdate).toHaveBeenCalledWith('n1', [{ type: 'paragraph', content: '- [x] 待办\n- [x] 已完成' }]);
+    await user.click(screen.getByRole('checkbox', { name: '标记任务为未完成' }));
+    expect(onUpdate).toHaveBeenCalledWith('n1', [{ type: 'paragraph', content: '- [ ] 待办\n- [ ] 已完成' }]);
   });
 
   test('图片显示在底部缩略图栏并可打开和关闭大图预览', async () => {

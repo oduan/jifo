@@ -75,19 +75,30 @@ class NoteTagAutocomplete(
     private var focusedIndex = 0
     private var suppressTextChange = false
     private var skipNextRefresh = false
+    private var textBeforeChange = ""
 
     private val watcher = object : TextWatcher {
-        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+            textBeforeChange = s?.toString().orEmpty()
+        }
+
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-            if (suppressTextChange || popup?.isShowing != true || count <= 0) return
+            if (suppressTextChange || count <= 0) return
             val inserted = s?.subSequence(start, (start + count).coerceAtMost(s.length))?.toString().orEmpty()
-            if (inserted.contains('\n')) {
+            if (inserted == "\n" && popup?.isShowing == true) {
                 val item = suggestions.getOrNull(focusedIndex) ?: suggestions.firstOrNull() ?: return
                 skipNextRefresh = true
                 suppressTextChange = true
                 editText.text?.delete(start, (start + count).coerceAtMost(editText.text?.length ?: start))
                 suppressTextChange = false
                 choose(item)
+            } else if (inserted == "\n") {
+                val continuation = MarkdownListContinuation.apply(textBeforeChange, start, start + before) ?: return
+                skipNextRefresh = true
+                suppressTextChange = true
+                editText.setText(continuation.text)
+                editText.setSelection(continuation.caret.coerceIn(0, continuation.text.length))
+                suppressTextChange = false
             }
         }
         override fun afterTextChanged(s: Editable?) {

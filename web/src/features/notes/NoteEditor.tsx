@@ -36,6 +36,43 @@ type SuggestionPosition = {
   top: number;
 };
 
+type ListContinuation = {
+  text: string;
+  caret: number;
+};
+
+const MARKDOWN_LIST_PATTERN = /^(\s*)([-+*]|\d+[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/;
+
+export function continueMarkdownList(text: string, selectionStart: number, selectionEnd = selectionStart): ListContinuation | null {
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  const lineEndIndex = text.indexOf('\n', end);
+  const lineEnd = lineEndIndex === -1 ? text.length : lineEndIndex;
+  const lineBeforeCaret = text.slice(lineStart, start);
+  const wholeLine = text.slice(lineStart, lineEnd);
+  const match = MARKDOWN_LIST_PATTERN.exec(wholeLine);
+  if (!match || start !== lineStart + lineBeforeCaret.length) return null;
+
+  const indent = match[1];
+  const marker = match[2];
+  const taskState = match[3];
+  const content = match[4];
+  const prefixLength = wholeLine.length - content.length;
+
+  if (!content.trim() && start >= lineStart + prefixLength) {
+    const nextText = text.slice(0, lineStart) + text.slice(lineStart + prefixLength);
+    return { text: nextText, caret: lineStart };
+  }
+
+  const nextMarker = /^\d/.test(marker)
+    ? `${Number.parseInt(marker, 10) + 1}${marker.endsWith(')') ? ')' : '.'}`
+    : marker;
+  const continuation = `${indent}${nextMarker} ${taskState === undefined ? '' : '[ ] '}`;
+  const nextText = `${text.slice(0, start)}\n${continuation}${text.slice(end)}`;
+  return { text: nextText, caret: start + 1 + continuation.length };
+}
+
 function toParagraphBlocks(text: string): NoteBlock[] {
   return text
     .split(/\n\s*\n/g)
@@ -262,27 +299,39 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onCancel, on
       return;
     }
 
-    if (!showTagSuggestions) return;
+    if (showTagSuggestions) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setFocusedTagIndex((index) => (index + 1) % suggestions.length);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setFocusedTagIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        chooseSuggestion(suggestions[focusedTagIndex] ?? suggestions[0]);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setTagTrigger(null);
+        setFocusedTagIndex(0);
+        return;
+      }
+    }
 
-    if (event.key === 'ArrowDown') {
+    if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const continuation = continueMarkdownList(text, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+      if (!continuation) return;
       event.preventDefault();
-      setFocusedTagIndex((index) => (index + 1) % suggestions.length);
-      return;
-    }
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setFocusedTagIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
-      return;
-    }
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      chooseSuggestion(suggestions[focusedTagIndex] ?? suggestions[0]);
-      return;
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
+      setText(continuation.text);
       setTagTrigger(null);
-      setFocusedTagIndex(0);
+      window.requestAnimationFrame(() => {
+        textareaRef.current?.setSelectionRange(continuation.caret, continuation.caret);
+      });
     }
   };
 

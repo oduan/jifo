@@ -42,6 +42,23 @@ describe('NoteEditor', () => {
     expect(textarea).toHaveValue('');
   });
 
+  test('回车自动续写普通列表和任务列表，空列表项再次回车退出列表', async () => {
+    const user = userEvent.setup();
+    render(<NoteEditor onSubmit={vi.fn()} />);
+    const textarea = screen.getByLabelText('笔记内容');
+
+    await user.type(textarea, '- 第一项{Enter}');
+    expect(textarea).toHaveValue('- 第一项\n- ');
+
+    await user.type(textarea, '{Enter}');
+    expect(textarea).toHaveValue('- 第一项\n');
+
+    const taskText = '- 第一项\n- [x] 完成项';
+    fireEvent.change(textarea, { target: { value: taskText, selectionStart: taskText.length, selectionEnd: taskText.length } });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    expect(textarea).toHaveValue('- 第一项\n- [x] 完成项\n- [ ] ');
+  });
+
   test('聚焦时自动展开输入框', async () => {
     const user = userEvent.setup();
 

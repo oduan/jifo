@@ -109,7 +109,11 @@ type HastNode = {
 
 function rehypeNoteTags() {
   return (tree: HastNode) => {
+    let taskIndex = 0;
     const visit = (node: HastNode, excluded = false) => {
+      if (node.tagName === 'input' && node.properties?.type === 'checkbox') {
+        node.properties.dataTaskIndex = taskIndex++;
+      }
       const skip = excluded || node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a';
       if (!node.children || skip) return;
 
@@ -140,16 +144,6 @@ function rehypeNoteTags() {
     };
     visit(tree);
   };
-}
-
-function taskIndexAtOffset(text: string, offset: number): number {
-  let index = 0;
-  for (const match of text.matchAll(TASK_MARKER_PATTERN)) {
-    const markerStart = (match.index ?? 0) + match[1].length;
-    if (offset <= markerStart + 3) return index;
-    index += 1;
-  }
-  return Math.max(0, index - 1);
 }
 
 function toggleTaskInBlocks(blocks: NoteBlock[], taskIndex: number): NoteBlock[] {
@@ -298,14 +292,14 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
               a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
               input: ({ node, ...props }) => {
                 if (props.type !== 'checkbox') return <input {...props} />;
-                const offset = node?.position?.start.offset ?? 0;
+                const taskIndex = Number(node?.properties?.dataTaskIndex ?? 0);
                 return (
                   <input
                     {...props}
                     disabled={trash}
                     aria-label={props.checked ? '标记任务为未完成' : '标记任务为已完成'}
                     onClick={(event) => event.stopPropagation()}
-                    onChange={() => toggleTask(taskIndexAtOffset(visibleContent, offset))}
+                    onChange={() => toggleTask(taskIndex)}
                   />
                 );
               }
