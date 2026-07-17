@@ -61,9 +61,17 @@ class NotesFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
+        val repository = ServiceLocator.notesRepository(requireContext())
         val adapter = NoteAdapter(
             onMoreClick = { note, anchor -> showNoteActions(note, anchor) },
-            onTagClick = { tagPath -> selectTag(tagPath) }
+            onTagClick = { tagPath -> selectTag(tagPath) },
+            onTaskClick = { note, taskIndex ->
+                if (!showTrash) {
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        repository.updateNote(note.id, MarkdownTasks.toggle(NoteJson.decodeBlocks(note.contentJson), taskIndex))
+                    }
+                }
+            }
         )
         lateinit var tagAdapter: TagAdapter
         tagAdapter = TagAdapter(
@@ -71,7 +79,6 @@ class NotesFragment : Fragment() {
             onLongClick = { tag, _ -> showTagActions(tag) }
         )
         val heatmapAdapter = HeatmapAdapter()
-        val repository = ServiceLocator.notesRepository(requireContext())
         val tagRecycler = view.findViewById<RecyclerView>(R.id.tag_recycler)
         val textUserName = view.findViewById<TextView>(R.id.text_user_name)
         val textNoteCount = view.findViewById<TextView>(R.id.text_note_count)

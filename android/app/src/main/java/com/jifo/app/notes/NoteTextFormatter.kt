@@ -3,6 +3,7 @@ package com.jifo.app.notes
 import android.content.Context
 import android.graphics.Color
 import android.text.SpannableString
+import android.text.Spannable
 import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.ClickableSpan
@@ -19,10 +20,19 @@ object NoteTextFormatter {
         selectedTagPath: String?,
         onTagClick: ((String) -> Unit)?
     ): CharSequence {
-        val matches = tagPattern.findAll(text).toList()
-        if (matches.isEmpty()) return text
-
         val spannable = SpannableString(text)
+        applyTags(context, spannable, selectedTagPath, onTagClick)
+        return spannable
+    }
+
+    fun applyTags(
+        context: Context,
+        spannable: Spannable,
+        selectedTagPath: String?,
+        onTagClick: ((String) -> Unit)?
+    ) {
+        val matches = tagPattern.findAll(spannable).toList()
+        if (matches.isEmpty()) return
         val tagTextColor = ContextCompat.getColor(context, R.color.jifo_tag_text)
         val tagBackground = ContextCompat.getColor(context, R.color.jifo_tag_bg)
         val activeBackground = Color.rgb(95, 142, 232)
@@ -62,7 +72,6 @@ object NoteTextFormatter {
                 )
             }
         }
-        return spannable
     }
 
     private fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).toInt()

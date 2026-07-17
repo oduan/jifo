@@ -236,6 +236,48 @@ describe('NoteCard', () => {
     expect(onTagSelect).toHaveBeenCalledWith('工作/前端');
   });
 
+  test('渲染常见 Markdown 格式', () => {
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '## 标题\n\n**粗体**、*斜体*、~~删除线~~、`代码`和[链接](https://example.com)\n\n- 列表项' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('heading', { name: '标题' })).toBeInTheDocument();
+    expect(screen.getByText('粗体').tagName).toBe('STRONG');
+    expect(screen.getByText('斜体').tagName).toBe('EM');
+    expect(screen.getByText('删除线').tagName).toBe('DEL');
+    expect(screen.getByText('代码').tagName).toBe('CODE');
+    expect(screen.getByRole('link', { name: '链接' })).toHaveAttribute('target', '_blank');
+  });
+
+  test('点击任务框会更新原始 Markdown 标记', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '- [ ] 待办\n- [x] 已完成' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={onUpdate}
+      />
+    );
+
+    await user.click(screen.getByRole('checkbox', { name: '标记任务为已完成' }));
+    expect(onUpdate).toHaveBeenCalledWith('n1', [{ type: 'paragraph', content: '- [x] 待办\n- [x] 已完成' }]);
+  });
+
   test('图片显示在底部缩略图栏并可打开和关闭大图预览', async () => {
     const user = userEvent.setup();
 

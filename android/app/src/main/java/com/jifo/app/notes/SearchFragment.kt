@@ -30,7 +30,14 @@ class SearchFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
-        val adapter = NoteAdapter()
+        val repository = ServiceLocator.notesRepository(requireContext())
+        val adapter = NoteAdapter(
+            onTaskClick = { note, taskIndex ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    repository.updateNote(note.id, MarkdownTasks.toggle(NoteJson.decodeBlocks(note.contentJson), taskIndex))
+                }
+            }
+        )
         val layoutManager = LinearLayoutManager(requireContext())
         b.searchResultsRecycler.layoutManager = layoutManager
         b.searchResultsRecycler.adapter = adapter

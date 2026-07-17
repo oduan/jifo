@@ -15,7 +15,8 @@ import com.jifo.app.core.model.NoteBlock
 
 class NoteAdapter(
     private val onMoreClick: ((NoteEntity, View) -> Unit)? = null,
-    private val onTagClick: ((String) -> Unit)? = null
+    private val onTagClick: ((String) -> Unit)? = null,
+    private val onTaskClick: ((NoteEntity, Int) -> Unit)? = null
 ) : ListAdapter<NoteEntity, NoteAdapter.NoteViewHolder>(Diff) {
     var selectedTagPath: String? = null
         set(value) {
@@ -26,15 +27,30 @@ class NoteAdapter(
         }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): NoteViewHolder = NoteViewHolder(ItemNoteBinding.inflate(LayoutInflater.from(parent.context), parent, false))
-    override fun onBindViewHolder(holder: NoteViewHolder, position: Int) = holder.bind(getItem(position), selectedTagPath, onMoreClick, onTagClick)
+    override fun onBindViewHolder(holder: NoteViewHolder, position: Int) =
+        holder.bind(getItem(position), selectedTagPath, onMoreClick, onTagClick, onTaskClick)
 
     class NoteViewHolder(private val binding: ItemNoteBinding) : RecyclerView.ViewHolder(binding.root) {
-        fun bind(note: NoteEntity, selectedTagPath: String?, onMoreClick: ((NoteEntity, View) -> Unit)?, onTagClick: ((String) -> Unit)?) {
+        private val markdownRenderer = NoteMarkdownRenderer(binding.root.context)
+
+        fun bind(
+            note: NoteEntity,
+            selectedTagPath: String?,
+            onMoreClick: ((NoteEntity, View) -> Unit)?,
+            onTagClick: ((String) -> Unit)?,
+            onTaskClick: ((NoteEntity, Int) -> Unit)?
+        ) {
             binding.textNoteTime.text = note.createdAt.replace('T', ' ').take(19)
             val blocks = NoteJson.decodeBlocks(note.contentJson)
             val displayText = blocks.filterIsInstance<NoteBlock.Paragraph>().joinToString("\n\n") { it.text }.ifBlank { note.plainText }
-            binding.textNoteContent.text = NoteTextFormatter.format(binding.root.context, displayText, selectedTagPath, onTagClick)
-            binding.textNoteContent.movementMethod = if (onTagClick == null) null else LinkMovementMethod.getInstance()
+            binding.textNoteContent.text = markdownRenderer.render(
+                binding.root.context,
+                displayText,
+                selectedTagPath,
+                onTagClick,
+                onTaskClick?.let { callback -> { taskIndex -> callback(note, taskIndex) } }
+            )
+            binding.textNoteContent.movementMethod = LinkMovementMethod.getInstance()
             binding.textNoteContent.highlightColor = android.graphics.Color.TRANSPARENT
             binding.buttonNoteMore.visibility = if (onMoreClick == null) View.GONE else View.VISIBLE
             binding.buttonNoteMore.setOnClickListener { anchor -> onMoreClick?.invoke(note, anchor) }

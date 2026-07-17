@@ -1,4 +1,6 @@
-import { FocusEvent, MouseEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FocusEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { Button } from '../../shared/ui/Button';
 import { formatLocalDateTime } from '../../shared/time';
@@ -29,6 +31,7 @@ type NoteCardProps = {
 };
 
 const NOTE_TAG_PATTERN = /#[^\s#]+/g;
+const TASK_MARKER_PATTERN = /^(\s*(?:[-+*]|\d+[.)])\s+)\[([ xX])\]/gm;
 
 function blockText(block: NoteBlock): string {
   if (block.type === 'paragraph') {
@@ -96,43 +99,69 @@ function NoteImage({ block, resolveMediaUrl, onPreview }: {
   );
 }
 
-function renderContentWithTags(text: string, onTagSelect?: (tagPath: string) => void): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
+type HastNode = {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
+  properties?: Record<string, unknown>;
+};
 
-  for (const match of text.matchAll(NOTE_TAG_PATTERN)) {
-    const tagText = match[0];
-    const index = match.index ?? 0;
+function rehypeNoteTags() {
+  return (tree: HastNode) => {
+    const visit = (node: HastNode, excluded = false) => {
+      const skip = excluded || node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a';
+      if (!node.children || skip) return;
 
-    if (index > lastIndex) {
-      nodes.push(text.slice(lastIndex, index));
-    }
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== 'text' || !child.value || !NOTE_TAG_PATTERN.test(child.value)) {
+          NOTE_TAG_PATTERN.lastIndex = 0;
+          visit(child, skip);
+          return [child];
+        }
 
-    const tagPath = tagText.slice(1);
-    const stopAndSelect = (event: MouseEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      onTagSelect?.(tagPath);
+        NOTE_TAG_PATTERN.lastIndex = 0;
+        const result: HastNode[] = [];
+        let lastIndex = 0;
+        for (const match of child.value.matchAll(NOTE_TAG_PATTERN)) {
+          const index = match.index ?? 0;
+          if (index > lastIndex) result.push({ type: 'text', value: child.value.slice(lastIndex, index) });
+          result.push({
+            type: 'element',
+            tagName: 'button',
+            properties: { type: 'button', className: ['note-card__tag'], dataTagPath: match[0].slice(1) },
+            children: [{ type: 'text', value: match[0] }]
+          });
+          lastIndex = index + match[0].length;
+        }
+        if (lastIndex < child.value.length) result.push({ type: 'text', value: child.value.slice(lastIndex) });
+        return result;
+      });
     };
+    visit(tree);
+  };
+}
 
-    nodes.push(
-      <button
-        key={`${tagText}-${index}`}
-        type="button"
-        className="note-card__tag"
-        onClick={stopAndSelect}
-        onDoubleClick={(event) => event.stopPropagation()}
-      >
-        {tagText}
-      </button>
-    );
-    lastIndex = index + tagText.length;
+function taskIndexAtOffset(text: string, offset: number): number {
+  let index = 0;
+  for (const match of text.matchAll(TASK_MARKER_PATTERN)) {
+    const markerStart = (match.index ?? 0) + match[1].length;
+    if (offset <= markerStart + 3) return index;
+    index += 1;
   }
+  return Math.max(0, index - 1);
+}
 
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes.length > 0 ? nodes : [text];
+function toggleTaskInBlocks(blocks: NoteBlock[], taskIndex: number): NoteBlock[] {
+  let currentIndex = 0;
+  return blocks.map((block) => {
+    if (block.type !== 'paragraph') return block;
+    const content = block.content.replace(TASK_MARKER_PATTERN, (marker, prefix: string, state: string) => {
+      if (currentIndex++ !== taskIndex) return marker;
+      return `${prefix}[${state === ' ' ? 'x' : ' '}]`;
+    });
+    return content === block.content ? block : { ...block, content };
+  });
 }
 
 export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl }: NoteCardProps) {
@@ -147,6 +176,10 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
   const lines = content.split('\n');
   const shouldCollapse = lines.length > 5;
   const visibleContent = !expanded && shouldCollapse ? lines.slice(0, 5).join('\n') : content;
+  const toggleTask = (taskIndex: number) => {
+    if (trash) return;
+    onUpdate(note.id, toggleTaskInBlocks(note.blocks, taskIndex));
+  };
 
   useEffect(() => {
     if (!menuOpen) {
@@ -245,8 +278,41 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
           }}
         />
       ) : (
-        <div className="note-card__content" onDoubleClick={() => !trash && setEditing(true)}>
-          {renderContentWithTags(visibleContent, onTagSelect)}
+        <div
+          className="note-card__content"
+          onClick={(event) => {
+            const tag = (event.target as Element).closest<HTMLButtonElement>('[data-tag-path]');
+            if (!tag) return;
+            event.stopPropagation();
+            onTagSelect?.(tag.dataset.tagPath ?? '');
+          }}
+          onDoubleClick={(event) => {
+            if ((event.target as Element).closest('button, a, input')) return;
+            if (!trash) setEditing(true);
+          }}
+        >
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeNoteTags]}
+            components={{
+              a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+              input: ({ node, ...props }) => {
+                if (props.type !== 'checkbox') return <input {...props} />;
+                const offset = node?.position?.start.offset ?? 0;
+                return (
+                  <input
+                    {...props}
+                    disabled={trash}
+                    aria-label={props.checked ? '标记任务为未完成' : '标记任务为已完成'}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => toggleTask(taskIndexAtOffset(visibleContent, offset))}
+                  />
+                );
+              }
+            }}
+          >
+            {visibleContent}
+          </ReactMarkdown>
         </div>
       )}
 

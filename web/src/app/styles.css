@@ -564,12 +564,121 @@ h3 {
 }
 
 .note-card__content {
-  white-space: pre-wrap;
   color: #3a322a;
   font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
   cursor: text;
+}
+
+.note-card__content > :first-child {
+  margin-top: 0;
+}
+
+.note-card__content > :last-child {
+  margin-bottom: 0;
+}
+
+.note-card__content p,
+.note-card__content ul,
+.note-card__content ol,
+.note-card__content blockquote,
+.note-card__content pre,
+.note-card__content table {
+  margin: 0.45em 0;
+}
+
+.note-card__content h1,
+.note-card__content h2,
+.note-card__content h3,
+.note-card__content h4,
+.note-card__content h5,
+.note-card__content h6 {
+  margin: 0.7em 0 0.35em;
+  line-height: 1.25;
+}
+
+.note-card__content h1 { font-size: 1.55em; }
+.note-card__content h2 { font-size: 1.35em; }
+.note-card__content h3 { font-size: 1.18em; }
+
+.note-card__content ul,
+.note-card__content ol {
+  padding-left: 1.65em;
+}
+
+.note-card__content .contains-task-list {
+  padding-left: 0.25em;
+  list-style: none;
+}
+
+.note-card__content .task-list-item {
+  display: flex;
+  gap: 0.45em;
+  align-items: baseline;
+}
+
+.note-card__content input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--jifo-green);
+  cursor: pointer;
+  transform: translateY(2px);
+}
+
+.note-card__content blockquote {
+  padding-left: 0.85em;
+  border-left: 3px solid var(--jifo-line-strong);
+  color: var(--jifo-muted);
+}
+
+.note-card__content code {
+  padding: 0.12em 0.32em;
+  border-radius: 4px;
+  background: #f1ece4;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.note-card__content pre {
+  overflow-x: auto;
+  padding: 0.75em 0.9em;
+  border-radius: 7px;
+  background: #2f2a25;
+  color: #f8f4ee;
+}
+
+.note-card__content pre code {
+  padding: 0;
+  background: none;
+  color: inherit;
+}
+
+.note-card__content a {
+  color: #376fc9;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.note-card__content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.note-card__content th,
+.note-card__content td {
+  padding: 0.3em 0.55em;
+  border: 1px solid var(--jifo-line);
+  text-align: left;
+}
+
+.note-card__content hr {
+  border: 0;
+  border-top: 1px solid var(--jifo-line);
 }
 
 .note-card__tag {
