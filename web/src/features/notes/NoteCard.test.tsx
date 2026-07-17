@@ -258,6 +258,27 @@ describe('NoteCard', () => {
     expect(screen.getByRole('link', { name: '链接' })).toHaveAttribute('target', '_blank');
   });
 
+  test('普通列表和任务列表混排时保留普通项目标记', () => {
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '- 普通项目\n- [ ] 任务项目' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    const plainItem = screen.getByText('普通项目').closest('li');
+    const taskItem = screen.getByText('任务项目').closest('li');
+    expect(plainItem).not.toHaveClass('task-list-item');
+    expect(plainItem?.closest('ul')).toHaveClass('contains-task-list');
+    expect(taskItem).toHaveClass('task-list-item');
+  });
+
   test('点击任意任务框会更新对应的原始 Markdown 标记', async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();
