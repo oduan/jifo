@@ -7,6 +7,7 @@ import { SettingsPopover } from '../settings/SettingsPopover';
 import { TagNode, TagTree } from '../tags/TagTree';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { TextInput } from '../../shared/ui/Input';
+import { ToastHost, ToastItem } from '../../shared/ui/Toast';
 import { Note, NoteCard } from './NoteCard';
 import { NoteBlock, NoteEditor } from './NoteEditor';
 
@@ -33,9 +34,6 @@ type NotesPageProps = {
   hasMoreNotes?: boolean;
   isLoadingMoreNotes?: boolean;
   isLoading?: boolean;
-  isMutating?: boolean;
-  error?: string | null;
-  onRetry?: () => void;
   onSearchChange?: (query: string) => void;
   onSelectTag?: (tag: SelectedTag) => void;
   onRenameTag?: (tagId: string, path: string) => void | Promise<void>;
@@ -52,6 +50,8 @@ type NotesPageProps = {
   isLoadingAccessKeys?: boolean;
   isCreatingAccessKey?: boolean;
   settingsError?: string | null;
+  toasts?: ToastItem[];
+  onDismissToast?: (id: number) => void;
   onLoadAccessKeys?: () => void | Promise<void>;
   onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
   onDeleteAccessKey?: (id: string) => Promise<void>;
@@ -65,6 +65,8 @@ function createdAtTime(note: Note): number {
   return Number.isNaN(value) ? 0 : value;
 }
 
+function dismissToastNoop() {}
+
 export function NotesPage({
   userName,
   notes,
@@ -75,6 +77,7 @@ export function NotesPage({
   selectedTagId = null,
   hasMoreNotes = false,
   isLoadingMoreNotes = false,
+  isLoading = false,
   onSearchChange,
   onSelectTag,
   onRenameTag,
@@ -91,6 +94,8 @@ export function NotesPage({
   isLoadingAccessKeys = false,
   isCreatingAccessKey = false,
   settingsError,
+  toasts = [],
+  onDismissToast,
   onLoadAccessKeys,
   onCreateAccessKey,
   onDeleteAccessKey,
@@ -99,6 +104,10 @@ export function NotesPage({
   resolveMediaUrl
 }: NotesPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tagsDrawerOpen, setTagsDrawerOpen] = useState(false);
+  const [isNarrowLayout, setIsNarrowLayout] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 920px)').matches
+  );
   const [scrollbarMetrics, setScrollbarMetrics] = useState<ScrollbarMetrics>({ thumbHeight: 36, thumbTop: 0, scrollable: false, valueNow: 0 });
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const notesStreamRef = useRef<HTMLElement>(null);
@@ -192,6 +201,32 @@ export function NotesPage({
     window.addEventListener('pointerup', stopDragging, { once: true });
   };
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const mediaQuery = window.matchMedia('(max-width: 920px)');
+    const handleLayoutChange = (event: MediaQueryListEvent) => setIsNarrowLayout(event.matches);
+    mediaQuery.addEventListener('change', handleLayoutChange);
+    return () => mediaQuery.removeEventListener('change', handleLayoutChange);
+  }, []);
+
+  useEffect(() => {
+    const focusSearchOnSlash = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      event.preventDefault();
+      document.getElementById('notes-search-input')?.focus();
+    };
+    window.addEventListener('keydown', focusSearchOnSlash);
+    return () => window.removeEventListener('keydown', focusSearchOnSlash);
+  }, []);
+
   const selectAllNotes = () => onSelectTag?.({ id: null });
 
   const selectTagById = (tagId: string) => {
@@ -229,7 +264,7 @@ export function NotesPage({
           </div>
           <div className="stat-card">
             <strong>{activeDays}</strong>
-            <span>天</span>
+            <span>活跃天</span>
           </div>
         </section>
 
@@ -260,10 +295,29 @@ export function NotesPage({
           </button>
         </section>
 
-        <section className="sidebar-section">
-          <h2>全部标签</h2>
-          <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={selectTagById} onRename={onRenameTag} onDelete={onDeleteTag} />
-        </section>
+        {isNarrowLayout ? (
+          <details className="sidebar-tags-drawer" open={tagsDrawerOpen} onToggle={(event) => setTagsDrawerOpen(event.currentTarget.open)}>
+            <summary>
+              全部标签
+              <span className="sidebar-tags-drawer__count">{visibleTagCount}</span>
+            </summary>
+            <TagTree
+              tags={tags}
+              selectedTagId={selectedTagId}
+              onSelect={(tagId) => {
+                selectTagById(tagId);
+                setTagsDrawerOpen(false);
+              }}
+              onRename={onRenameTag}
+              onDelete={onDeleteTag}
+            />
+          </details>
+        ) : (
+          <section className="sidebar-section">
+            <h2>全部标签</h2>
+            <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={selectTagById} onRename={onRenameTag} onDelete={onDeleteTag} />
+          </section>
+        )}
       </aside>
 
       <section className={`jifo-workspace${trash ? ' jifo-workspace--trash' : ''}`} aria-label="笔记工作区">
@@ -273,6 +327,7 @@ export function NotesPage({
           </div>
           <div className="workspace-search" role="search" aria-label="搜索笔记">
             <TextInput
+              id="notes-search-input"
               type="search"
               name="notes-search"
               role="searchbox"
@@ -309,7 +364,20 @@ export function NotesPage({
               />
             ))}
             {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
-            {displayNotes.length === 0 ? <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} /> : null}
+            {isLoading && displayNotes.length === 0 ? (
+              <>
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="note-skeleton" aria-hidden="true">
+                    <div className="note-skeleton__line note-skeleton__line--meta" />
+                    <div className="note-skeleton__line" />
+                    <div className="note-skeleton__line note-skeleton__line--short" />
+                  </div>
+                ))}
+              </>
+            ) : null}
+            {!isLoading && displayNotes.length === 0 ? (
+              <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} />
+            ) : null}
           </section>
           <div
             className={`notes-scrollbar${scrollbarMetrics.scrollable ? '' : ' notes-scrollbar--hidden'}`}
@@ -342,6 +410,7 @@ export function NotesPage({
         onDeleteAccessKey={onDeleteAccessKey}
         onChangePassword={onChangePassword}
       />
+      <ToastHost toasts={toasts} onDismiss={onDismissToast ?? dismissToastNoop} />
     </main>
   );
 }

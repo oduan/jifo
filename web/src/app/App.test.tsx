@@ -48,6 +48,18 @@ function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: stri
     if (path.includes('/settings/access-keys/') && method === 'DELETE') {
       return new Response(null, { status: 204 });
     }
+    if (method === 'DELETE' && /\/notes\/[^/]+$/.test(path)) {
+      return new Response(JSON.stringify({ item: note('note-1', '#工作 第一条真实笔记') }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    if (method === 'POST' && path.endsWith('/restore')) {
+      return new Response(JSON.stringify({ item: note('note-1', '#工作 第一条真实笔记') }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
     if (path.endsWith('/auth/logout') && method === 'POST') {
       return new Response(null, { status: 204 });
     }
@@ -320,5 +332,38 @@ describe('App', () => {
     } finally {
       globalThis.IntersectionObserver = originalIntersectionObserver;
     }
+  });
+
+  test('工作区加载失败时以 toast 提示错误并提供重试', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response(JSON.stringify({ error: { code: 'server_error', message: 'boom' } }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    });
+
+    authenticateAndRender();
+
+    await waitFor(() => expect(screen.getByText('请求失败（500），请稍后重试。')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+  });
+
+  test('删除笔记后展示 toast，撤销会调用恢复接口', async () => {
+    const user = userEvent.setup();
+    const requestedUrls: string[] = [];
+    mockWorkspaceFetch(requestedUrls);
+
+    authenticateAndRender();
+    await waitFor(() => expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '删除' }));
+
+    await waitFor(() => expect(screen.getByText('已移入回收站')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '撤销' }));
+
+    await waitFor(() => expect(screen.queryByText('已移入回收站')).not.toBeInTheDocument());
+    expect(requestedUrls.some((url) => url.endsWith('/notes/note-1/restore'))).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 import { FocusEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 
 import { Button } from '../../shared/ui/Button';
@@ -55,13 +56,15 @@ function noteText(blocks: NoteBlock[]): string {
   return blocks.filter((block) => block.type === 'paragraph').map(blockText).join('\n');
 }
 
-function NoteImage({ block, resolveMediaUrl, onPreview }: {
+function NoteImage({ block, resolveMediaUrl, onPreview, onResolved }: {
   block: Extract<NoteBlock, { type: 'image' }>;
   resolveMediaUrl?: (mediaId: string) => Promise<string>;
-  onPreview: (image: { source: string; alt: string }) => void;
+  onPreview: () => void;
+  onResolved: (image: { source: string; alt: string }) => void;
 }) {
   const [source, setSource] = useState(block.mediaId ? undefined : block.url);
   const [failed, setFailed] = useState(false);
+  const alt = block.alt ?? '笔记图片';
 
   useEffect(() => {
     if (!block.mediaId || !resolveMediaUrl) return;
@@ -80,9 +83,12 @@ function NoteImage({ block, resolveMediaUrl, onPreview }: {
     };
   }, [block.mediaId, resolveMediaUrl]);
 
+  useEffect(() => {
+    if (source) onResolved({ source, alt });
+  }, [alt, onResolved, source]);
+
   if (failed) return <div className="note-card__image-error">图片加载失败</div>;
   if (!source) return <div className="note-card__image-loading">正在加载图片…</div>;
-  const alt = block.alt ?? '笔记图片';
   return (
     <button
       type="button"
@@ -90,7 +96,7 @@ function NoteImage({ block, resolveMediaUrl, onPreview }: {
       aria-label={`放大预览 ${alt}`}
       onClick={(event) => {
         event.stopPropagation();
-        onPreview({ source, alt });
+        onPreview();
       }}
       onDoubleClick={(event) => event.stopPropagation()}
     >
@@ -158,18 +164,29 @@ function toggleTaskInBlocks(blocks: NoteBlock[], taskIndex: number): NoteBlock[]
   });
 }
 
+function stepPreview(index: number | null, delta: number, count: number): number | null {
+  if (index === null || count === 0) {
+    return index;
+  }
+  return (index + delta + count) % count;
+}
+
 export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down');
-  const [previewImage, setPreviewImage] = useState<{ source: string; alt: string } | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [resolvedImages, setResolvedImages] = useState<Record<number, { source: string; alt: string }>>({});
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPanelRef = useRef<HTMLDivElement>(null);
+  const noteImages = imageBlocks(note.blocks);
   const content = noteText(note.blocks);
   const lines = content.split('\n');
-  const shouldCollapse = lines.length > 5;
-  const visibleContent = !expanded && shouldCollapse ? lines.slice(0, 5).join('\n') : content;
+  const nonEmptyLineEndIndexes = lines.flatMap((line, index) => (line.trim() ? [index] : []));
+  const collapsibleLineEndIndex = nonEmptyLineEndIndexes.length > 6 ? nonEmptyLineEndIndexes[5] : undefined;
+  const shouldCollapse = collapsibleLineEndIndex !== undefined;
+  const visibleContent = !expanded && shouldCollapse ? lines.slice(0, collapsibleLineEndIndex + 1).join('\n') : content;
   const toggleTask = (taskIndex: number) => {
     if (trash) return;
     onUpdate(note.id, toggleTaskInBlocks(note.blocks, taskIndex));
@@ -201,14 +218,32 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
     };
   }, [menuOpen]);
 
+  const handleImageResolved = (index: number, image: { source: string; alt: string }) => {
+    setResolvedImages((current) => {
+      const existing = current[index];
+      if (existing && existing.source === image.source && existing.alt === image.alt) {
+        return current;
+      }
+      return { ...current, [index]: image };
+    });
+  };
+
   useEffect(() => {
-    if (!previewImage) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPreviewImage(null);
+    if (previewIndex === null) return;
+    const handlePreviewKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewIndex(null);
+      }
+      if (event.key === 'ArrowLeft') {
+        setPreviewIndex((index) => stepPreview(index, -1, noteImages.length));
+      }
+      if (event.key === 'ArrowRight') {
+        setPreviewIndex((index) => stepPreview(index, 1, noteImages.length));
+      }
     };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [previewImage]);
+    document.addEventListener('keydown', handlePreviewKey);
+    return () => document.removeEventListener('keydown', handlePreviewKey);
+  }, [previewIndex, noteImages.length]);
 
   useLayoutEffect(() => {
     if (!menuOpen || !menuRef.current || !menuPanelRef.current) return;
@@ -232,11 +267,12 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
   };
 
   return (
-    <article className="note-card">
+    <article className={`note-card${editing ? ' note-card--editing' : ''}`}>
+      {editing ? null : (
       <header className="note-card__header">
         <time dateTime={note.createdAt}>{formatLocalDateTime(note.createdAt)}</time>
         <div ref={menuRef} className="note-menu" onBlur={closeMenuOnBlur}>
-          <Button type="button" variant="ghost" className="note-menu__trigger" aria-label="更多操作" onClick={() => setMenuOpen((open) => !open)}>
+          <Button type="button" variant="ghost" className="note-menu__trigger" aria-label="更多操作" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
             ⋯
           </Button>
           {menuOpen ? (
@@ -259,12 +295,14 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
           ) : null}
         </div>
       </header>
+      )}
 
       {editing ? (
         <NoteEditor
           initialText={paragraphText(note.blocks)}
           tags={tags}
           onUploadImage={onUploadImage}
+          autoFocus
           onCancel={() => setEditing(false)}
           onSubmit={(blocks) => {
             onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
@@ -273,7 +311,8 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
         />
       ) : (
         <div
-          className="note-card__content"
+          className={`note-card__content${!expanded && shouldCollapse ? ' note-card__content--collapsed' : ''}`}
+          title={trash ? undefined : '双击进入编辑'}
           onClick={(event) => {
             const tag = (event.target as Element).closest<HTMLButtonElement>('[data-tag-path]');
             if (!tag) return;
@@ -286,7 +325,7 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
           }}
         >
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             rehypePlugins={[rehypeNoteTags]}
             components={{
               a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
@@ -310,30 +349,48 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
         </div>
       )}
 
-      {shouldCollapse ? (
-        <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>
+      {!editing && shouldCollapse ? (
+        <button type="button" className="note-card__toggle" onClick={() => setExpanded((value) => !value)}>
           {expanded ? '收起' : '展开'}
-        </Button>
+        </button>
       ) : null}
 
-      {!editing && imageBlocks(note.blocks).length > 0 ? (
+      {!editing && noteImages.length > 0 ? (
         <div className="note-card__images">
-          {imageBlocks(note.blocks).map((block, index) => (
+          {noteImages.map((block, index) => (
             <NoteImage
               key={`${block.mediaId ?? block.url}-${index}`}
               block={block}
               resolveMediaUrl={resolveMediaUrl}
-              onPreview={setPreviewImage}
+              onPreview={() => setPreviewIndex(index)}
+              onResolved={(image) => handleImageResolved(index, image)}
             />
           ))}
         </div>
       ) : null}
 
-      {previewImage ? (
-        <div className="note-image-preview" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewImage(null)}>
+      {previewIndex !== null ? (
+        <div className="note-image-preview" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewIndex(null)}>
           <div className="note-image-preview__surface" onClick={(event) => event.stopPropagation()}>
-            <img src={previewImage.source} alt={previewImage.alt} />
-            <button type="button" className="note-image-preview__close" aria-label="关闭图片预览" onClick={() => setPreviewImage(null)}>
+            {resolvedImages[previewIndex] ? (
+              <img src={resolvedImages[previewIndex].source} alt={resolvedImages[previewIndex].alt} />
+            ) : (
+              <div className="note-card__image-loading">正在加载图片…</div>
+            )}
+            {noteImages.length > 1 ? (
+              <>
+                <button type="button" className="note-image-preview__nav note-image-preview__nav--prev" aria-label="上一张图片" onClick={() => setPreviewIndex((index) => stepPreview(index, -1, noteImages.length))}>
+                  <span aria-hidden="true">‹</span>
+                </button>
+                <button type="button" className="note-image-preview__nav note-image-preview__nav--next" aria-label="下一张图片" onClick={() => setPreviewIndex((index) => stepPreview(index, 1, noteImages.length))}>
+                  <span aria-hidden="true">›</span>
+                </button>
+                <span className="note-image-preview__counter">
+                  {previewIndex + 1} / {noteImages.length}
+                </span>
+              </>
+            ) : null}
+            <button type="button" className="note-image-preview__close" aria-label="关闭图片预览" onClick={() => setPreviewIndex(null)}>
               <span aria-hidden="true">×</span>
             </button>
           </div>

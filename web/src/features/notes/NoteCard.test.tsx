@@ -30,7 +30,7 @@ describe('NoteCard', () => {
         note={{
           id: 'n1',
           createdAt: '2026-05-27',
-          blocks: [{ type: 'paragraph', content: '1\n2\n3\n4\n5\n6' }],
+          blocks: [{ type: 'paragraph', content: '1\n2\n3\n4\n5\n6\n7' }],
           tagIds: []
         }}
         onDelete={vi.fn()}
@@ -42,7 +42,113 @@ describe('NoteCard', () => {
     expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument();
   });
 
-  test('双击进入编辑状态，菜单删除可触发回调', async () => {
+  test('折叠判断按实际显示行计算，不计算空行', () => {
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '一\n\n二\n\n三\n\n四\n\n五\n\n六' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: '展开' })).not.toBeInTheDocument();
+  });
+
+  test('非空行超过 6 行时折叠且折叠内容保留空行结构', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '一\n\n二\n\n三\n\n四\n\n五\n\n六\n\n七' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('六')).toBeInTheDocument();
+    expect(screen.queryByText('七')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '展开' }));
+    expect(screen.getByText('七')).toBeInTheDocument();
+  });
+
+  test('进入编辑模式后隐藏展开/收起开关', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '1\n2\n3\n4\n5\n6\n7' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: '展开' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+
+    expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '展开' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '收起' })).not.toBeInTheDocument();
+  });
+
+  test('编辑模式下笔记块变为输入框样式，提供取消和发送', async () => {
+    const user = userEvent.setup();
+
+    const { container } = render(
+      <NoteCard
+        note={{ id: 'n1', createdAt: '2026-05-27', blocks: [{ type: 'paragraph', content: '原内容' }], tagIds: [] }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    await user.dblClick(screen.getByText('原内容'));
+
+    expect(container.querySelector('.note-card')).toHaveClass('note-card--editing');
+    expect(container.querySelector('.note-card__header')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('笔记内容')).toHaveFocus();
+    expect(screen.getByRole('button', { name: '取消编辑' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送笔记' })).toBeInTheDocument();
+  });
+
+  test('双击进入编辑状态', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '原内容' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+      />
+    );
+
+    await user.dblClick(screen.getByText('原内容'));
+    expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
+  });
+
+  test('菜单删除可触发回调', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
 
@@ -58,9 +164,6 @@ describe('NoteCard', () => {
         onUpdate={vi.fn()}
       />
     );
-
-    await user.dblClick(screen.getByText('原内容'));
-    expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
 
     const trigger = screen.getByRole('button', { name: '更多操作' });
     expect(trigger).toHaveClass('note-menu__trigger');

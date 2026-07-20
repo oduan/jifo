@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { LoginPage, LoginPayload, LoginResult } from '../features/auth/LoginPage';
 import { logoutAuth, refreshAuth, submitAuth } from '../features/auth/api';
@@ -14,6 +14,7 @@ import { NotesPage } from '../features/notes/NotesPage';
 import { deleteTag, listTagTree, renameTag } from '../features/tags/api';
 import { TagNode } from '../features/tags/TagTree';
 import { ApiError, createApiClient } from '../shared/api/client';
+import { ToastItem } from '../shared/ui/Toast';
 import { CachedNote, CachedNoteBlock, createJifoDb } from '../storage/db';
 import { pullChanges, pushOutbox } from '../features/sync/api';
 import { runSync } from '../features/sync/syncEngine';
@@ -116,6 +117,16 @@ export function App() {
   const [hasMoreNotes, setHasMoreNotes] = useState(false);
   const [isLoadingMoreNotes, setLoadingMoreNotes] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
+  const pushToast = useCallback((message: string, action?: ToastItem['action']) => {
+    setToasts((current) => [...current.slice(-2), { id: ++toastIdRef.current, message, action }]);
+  }, []);
 
   const authApi = useMemo(() => {
     const baseUrl = apiBaseUrl();
@@ -243,6 +254,17 @@ export function App() {
       setLoading(false);
     }
   }, [client, debouncedNoteQuery, localDb, noteListOptions, selectedTagPath, showTrash]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+    pushToast(error, {
+      label: '重试',
+      onClick: () => void loadWorkspace()
+    });
+    setError(null);
+  }, [error, loadWorkspace, pushToast]);
 
   const syncNow = useCallback(async () => {
     await runSync({
@@ -392,6 +414,26 @@ export function App() {
     [loadWorkspace]
   );
 
+  const restoreNoteById = useCallback(
+    (id: string) =>
+      withMutation(async () => {
+        try {
+          await restoreNote(client, id);
+        } catch (restoreError) {
+          if (!isNetworkFailure(restoreError)) throw restoreError;
+          const current = notes.find((note) => note.id === id);
+          if (!current) throw restoreError;
+          const blocks = toCachedBlocks(current.blocks);
+          const operation = restoreNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version, blocks });
+          await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+            await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: new Date().toISOString(), blocks });
+            await localDb.outbox.add(operation);
+          });
+        }
+      }),
+    [client, localDb, notes, withMutation]
+  );
+
   const loadMoreNotes = useCallback(async () => {
     if (!authStore.getAccessToken() || isLoading || isLoadingMoreNotes || !hasMoreNotes) {
       return;
@@ -444,9 +486,8 @@ export function App() {
       hasMoreNotes={hasMoreNotes}
       isLoadingMoreNotes={isLoadingMoreNotes}
       isLoading={isLoading}
-      isMutating={isMutating}
-      error={error}
-      onRetry={() => void loadWorkspace()}
+      toasts={toasts}
+      onDismissToast={dismissToast}
       onSearchChange={setNoteQuery}
       onSelectTag={(tag) => {
         setShowTrash(false);
@@ -531,25 +572,10 @@ export function App() {
               await localDb.outbox.add(operation);
             });
           }
+          pushToast('已移入回收站', { label: '撤销', onClick: () => void restoreNoteById(id) });
         })
       }
-      onRestoreNote={(id: string) =>
-        withMutation(async () => {
-          try {
-            await restoreNote(client, id);
-          } catch (restoreError) {
-            if (!isNetworkFailure(restoreError)) throw restoreError;
-            const current = notes.find((note) => note.id === id);
-            if (!current) throw restoreError;
-            const blocks = toCachedBlocks(current.blocks);
-            const operation = restoreNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version, blocks });
-            await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
-              await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: new Date().toISOString(), blocks });
-              await localDb.outbox.add(operation);
-            });
-          }
-        })
-      }
+      onRestoreNote={restoreNoteById}
       onLogout={() => void logout()}
       accessKeys={accessKeys}
       isLoadingAccessKeys={isLoadingAccessKeys}
