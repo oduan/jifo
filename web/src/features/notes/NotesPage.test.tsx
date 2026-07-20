@@ -194,25 +194,14 @@ describe('NotesPage', () => {
     }
   });
 
-  test('加载、保存和错误状态都不在编辑器上方插入全局提示条', () => {
-    render(
-      <NotesPage
-        userName="oisin"
-        notes={[]}
-        tags={[]}
-        heatmapCells={[]}
-        isLoading
-        isMutating
-        isLoadingMoreNotes
-        error="请求失败，请稍后重试。"
-        onRetry={vi.fn()}
-      />
-    );
+  test('初始加载时用骨架屏占位，不遮挡编辑器也不插入全局提示条', () => {
+    const { container } = render(<NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} isLoading isLoadingMoreNotes />);
 
+    expect(container.querySelectorAll('.note-skeleton').length).toBeGreaterThan(0);
     expect(screen.queryByText('正在加载真实笔记数据…')).not.toBeInTheDocument();
     expect(screen.queryByText('正在保存更改…')).not.toBeInTheDocument();
     expect(screen.queryByText('正在加载更多笔记…')).not.toBeInTheDocument();
-    expect(screen.queryByText('请求失败，请稍后重试。')).not.toBeInTheDocument();
+    expect(screen.queryByText('还没有笔记')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
   });

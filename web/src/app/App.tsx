@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { LoginPage, LoginPayload, LoginResult } from '../features/auth/LoginPage';
 import { logoutAuth, refreshAuth, submitAuth } from '../features/auth/api';
@@ -14,6 +14,7 @@ import { NotesPage } from '../features/notes/NotesPage';
 import { deleteTag, listTagTree, renameTag } from '../features/tags/api';
 import { TagNode } from '../features/tags/TagTree';
 import { ApiError, createApiClient } from '../shared/api/client';
+import { ToastItem } from '../shared/ui/Toast';
 import { CachedNote, CachedNoteBlock, createJifoDb } from '../storage/db';
 import { pullChanges, pushOutbox } from '../features/sync/api';
 import { runSync } from '../features/sync/syncEngine';
@@ -94,6 +95,11 @@ function cachedPlainText(note: CachedNote) {
   return note.blocks.filter((block): block is Extract<CachedNoteBlock, { type: 'paragraph' }> => block.type === 'paragraph').map((block) => block.content).join('\n\n');
 }
 
+type AppErrorState = {
+  message: string;
+  retryWorkspace: boolean;
+};
+
 export function App() {
   const authState = useAuthState();
   const accessToken = authState.accessToken;
@@ -105,7 +111,7 @@ export function App() {
   const [accessKeys, setAccessKeys] = useState<AccessKeySummary[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [isMutating, setMutating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppErrorState | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isLoadingAccessKeys, setLoadingAccessKeys] = useState(false);
   const [isCreatingAccessKey, setCreatingAccessKey] = useState(false);
@@ -116,6 +122,30 @@ export function App() {
   const [hasMoreNotes, setHasMoreNotes] = useState(false);
   const [isLoadingMoreNotes, setLoadingMoreNotes] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
+  const pushToast = useCallback((message: string, action?: ToastItem['action']) => {
+    setToasts((current) => {
+      if (current.some((toast) => toast.message === message)) {
+        return current;
+      }
+      return [...current.slice(-2), { id: ++toastIdRef.current, message, action }];
+    });
+  }, []);
+
+  const reportError = useCallback((message: string, retryWorkspace: boolean) => {
+    setError((current) => {
+      if (current?.message === message && current.retryWorkspace === retryWorkspace) {
+        return current;
+      }
+      return { message, retryWorkspace };
+    });
+  }, []);
 
   const authApi = useMemo(() => {
     const baseUrl = apiBaseUrl();
@@ -228,7 +258,7 @@ export function App() {
       setHeatmapCells(nextHeatmap);
     } catch (loadError) {
       const message = errorMessage(loadError);
-      setError(message);
+      reportError(message, true);
       const cached = await localDb.notes_cache.toArray();
       const query = debouncedNoteQuery.trim().toLocaleLowerCase();
       setNotes(cached
@@ -242,7 +272,23 @@ export function App() {
     } finally {
       setLoading(false);
     }
-  }, [client, debouncedNoteQuery, localDb, noteListOptions, selectedTagPath, showTrash]);
+  }, [client, debouncedNoteQuery, localDb, noteListOptions, reportError, selectedTagPath, showTrash]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+    pushToast(
+      error.message,
+      error.retryWorkspace
+        ? {
+            label: '重试',
+            onClick: () => void loadWorkspace()
+          }
+        : undefined
+    );
+    setError(null);
+  }, [error, loadWorkspace, pushToast]);
 
   const syncNow = useCallback(async () => {
     await runSync({
@@ -384,12 +430,48 @@ export function App() {
         await operation();
         await loadWorkspace();
       } catch (mutationError) {
-        setError(errorMessage(mutationError));
+        reportError(errorMessage(mutationError), false);
       } finally {
         setMutating(false);
       }
     },
-    [loadWorkspace]
+    [loadWorkspace, reportError]
+  );
+
+  const restoreNoteById = useCallback(
+    (id: string) =>
+      withMutation(async () => {
+        const pendingDeletes = await localDb.outbox
+          .filter((operation) => operation.entity === 'note' && operation.noteId === id && operation.action === 'delete' && operation.status === 'pending')
+          .toArray();
+        if (pendingDeletes.length > 0) {
+          const restoredAt = new Date().toISOString();
+          await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+            await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: restoredAt });
+            for (const operation of pendingDeletes) {
+              if (operation.localSeq !== undefined) {
+                await localDb.outbox.delete(operation.localSeq);
+              }
+            }
+          });
+          return;
+        }
+
+        try {
+          await restoreNote(client, id);
+        } catch (restoreError) {
+          if (!isNetworkFailure(restoreError)) throw restoreError;
+          const current = notes.find((note) => note.id === id);
+          if (!current) throw restoreError;
+          const blocks = toCachedBlocks(current.blocks);
+          const operation = restoreNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version, blocks });
+          await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+            await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: new Date().toISOString(), blocks });
+            await localDb.outbox.add(operation);
+          });
+        }
+      }),
+    [client, localDb, notes, withMutation]
   );
 
   const loadMoreNotes = useCallback(async () => {
@@ -413,11 +495,11 @@ export function App() {
       setNotes((current) => [...current, ...next.items.map((note) => fromApiNote(note, tags))]);
       setHasMoreNotes(next.page.hasMore);
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      reportError(errorMessage(loadError), true);
     } finally {
       setLoadingMoreNotes(false);
     }
-  }, [client, hasMoreNotes, isLoading, isLoadingMoreNotes, localDb, noteListOptions, notes.length, tags]);
+  }, [client, hasMoreNotes, isLoading, isLoadingMoreNotes, localDb, noteListOptions, notes.length, reportError, tags]);
 
   if (!accessToken) {
     return (
@@ -444,9 +526,8 @@ export function App() {
       hasMoreNotes={hasMoreNotes}
       isLoadingMoreNotes={isLoadingMoreNotes}
       isLoading={isLoading}
-      isMutating={isMutating}
-      error={error}
-      onRetry={() => void loadWorkspace()}
+      toasts={toasts}
+      onDismissToast={dismissToast}
       onSearchChange={setNoteQuery}
       onSelectTag={(tag) => {
         setShowTrash(false);
@@ -462,7 +543,7 @@ export function App() {
           setSelectedTagPath(undefined);
           await loadWorkspace();
         } catch (tagError) {
-          setError(errorMessage(tagError));
+          reportError(errorMessage(tagError), false);
           throw tagError;
         } finally {
           setMutating(false);
@@ -477,7 +558,7 @@ export function App() {
           setSelectedTagPath(undefined);
           await loadWorkspace();
         } catch (tagError) {
-          setError(errorMessage(tagError));
+          reportError(errorMessage(tagError), false);
           throw tagError;
         } finally {
           setMutating(false);
@@ -531,25 +612,10 @@ export function App() {
               await localDb.outbox.add(operation);
             });
           }
+          pushToast('已移入回收站', { label: '撤销', onClick: () => void restoreNoteById(id) });
         })
       }
-      onRestoreNote={(id: string) =>
-        withMutation(async () => {
-          try {
-            await restoreNote(client, id);
-          } catch (restoreError) {
-            if (!isNetworkFailure(restoreError)) throw restoreError;
-            const current = notes.find((note) => note.id === id);
-            if (!current) throw restoreError;
-            const blocks = toCachedBlocks(current.blocks);
-            const operation = restoreNoteOutboxOperation({ noteId: id, clientId: current.clientId, baseVersion: current.version, blocks });
-            await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
-              await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: new Date().toISOString(), blocks });
-              await localDb.outbox.add(operation);
-            });
-          }
-        })
-      }
+      onRestoreNote={restoreNoteById}
       onLogout={() => void logout()}
       accessKeys={accessKeys}
       isLoadingAccessKeys={isLoadingAccessKeys}

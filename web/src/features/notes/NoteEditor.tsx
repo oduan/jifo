@@ -16,6 +16,7 @@ export type NoteEditorTag = {
 type NoteEditorProps = {
   initialText?: string;
   tags?: NoteEditorTag[];
+  autoFocus?: boolean;
   onSubmit: (blocks: NoteBlock[]) => void;
   onCancel?: () => void;
   onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
@@ -190,7 +191,7 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
   };
 }
 
-export function NoteEditor({ initialText = '', tags = [], onSubmit, onCancel, onUploadImage }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onSubmit, onCancel, onUploadImage }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(initialText);
   const [isFocused, setFocused] = useState(false);
@@ -345,6 +346,7 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onCancel, on
           name="note-content"
           rows={2}
           value={text}
+          autoFocus={autoFocus}
           onChange={(event) => {
             const nextText = event.target.value;
             setText(nextText);
@@ -409,6 +411,9 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onCancel, on
           </div>
         ) : null}
         <div className="note-editor__footer">
+          <span className="note-editor__hint" aria-hidden="true">
+            Ctrl+Enter 发送
+          </span>
           {onCancel ? (
             <button type="button" className="note-editor__cancel-button" aria-label="取消编辑" onClick={onCancel}>
               取消
@@ -418,10 +423,13 @@ export function NoteEditor({ initialText = '', tags = [], onSubmit, onCancel, on
             type="submit"
             className="send-icon-button"
             aria-label="发送笔记"
-            title="发送笔记"
+            title="发送笔记（Ctrl+Enter）"
             disabled={!hasContent}
           >
-            <span aria-hidden="true">➤</span>
+            <svg className="send-icon-button__icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2 8.6 14.5 1.5l-4.2 12.4-2.9-5.3L2 8.6z" />
+              <path d="M14.5 1.5 7.4 8.6" />
+            </svg>
           </button>
         </div>
       </div>
