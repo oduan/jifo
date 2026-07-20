@@ -1,4 +1,4 @@
-import { ClipboardEvent, FormEvent, KeyboardEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ClipboardEvent, FormEvent, KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { Textarea } from '../../shared/ui/Input';
 
@@ -193,6 +193,7 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
 
 export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onSubmit, onCancel, onUploadImage }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState(initialText);
   const [isFocused, setFocused] = useState(false);
   const [tagTrigger, setTagTrigger] = useState<TagTrigger | null>(null);
@@ -215,6 +216,12 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
     const nextHeight = isActive ? Math.min(maxTextareaHeight, Math.max(68, textarea.scrollHeight)) : 44;
     textarea.style.height = `${nextHeight}px`;
   }, [images.length, isFocused, text]);
+
+  useEffect(() => {
+    if (!showTagSuggestions) return;
+    const activeOption = suggestionsRef.current?.children[focusedTagIndex];
+    activeOption?.scrollIntoView?.({ block: 'nearest' });
+  }, [focusedTagIndex, showTagSuggestions]);
 
   const refreshTagTrigger = (nextText: string, caret: number, textarea: HTMLTextAreaElement | null = textareaRef.current) => {
     const nextTrigger = findTagTrigger(nextText, caret);
@@ -363,6 +370,7 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
         />
         {showTagSuggestions ? (
           <div
+            ref={suggestionsRef}
             className="note-editor__tag-suggestions"
             role="listbox"
             aria-label="标签建议"

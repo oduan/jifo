@@ -96,6 +96,28 @@ describe('NoteEditor', () => {
     expect(screen.queryByRole('listbox', { name: '标签建议' })).not.toBeInTheDocument();
   });
 
+  test('键盘移动选中标签时会自动滚动到可见区域', async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    render(
+      <NoteEditor
+        tags={Array.from({ length: 12 }, (_, index) => ({ id: `tag-${index}`, name: `标签${index}`, path: `标签${index}` }))}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByLabelText('笔记内容');
+    await user.type(textarea, '#');
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
+
+    expect(screen.getByRole('option', { name: '标签3' })).toHaveAttribute('aria-selected', 'true');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+
+    delete (window.HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  });
+
   test('标签下拉不显示仅存在于回收站或已彻底删除笔记中的标签', async () => {
     const user = userEvent.setup();
 
