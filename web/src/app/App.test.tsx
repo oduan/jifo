@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { authStore } from '../features/auth/authStore';
+import { createJifoDb } from '../storage/db';
 import { App } from './App';
 
 afterEach(() => {
@@ -365,5 +366,94 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.queryByText('已移入回收站')).not.toBeInTheDocument());
     expect(requestedUrls.some((url) => url.endsWith('/notes/note-1/restore'))).toBe(true);
+  });
+
+  test('离线删除后撤销会取消待同步删除，不追加恢复操作', async () => {
+    const user = userEvent.setup();
+    let offline = false;
+    const requestedUrls: string[] = [];
+    const fetchMock = mockWorkspaceFetch(requestedUrls);
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input).replace(/^https?:\/\/[^/]+/, '');
+      const method = init?.method ?? 'GET';
+      if (offline) {
+        throw new TypeError('network offline');
+      }
+      if (method === 'DELETE' && /\/notes\/[^/]+$/.test(path)) {
+        offline = true;
+        throw new TypeError('network offline');
+      }
+      if (path.endsWith('/notes/stats')) {
+        return new Response(JSON.stringify({ total: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (path.endsWith('/tags/tree')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (path.includes('/notes')) {
+        return new Response(JSON.stringify({ items: [note('offline-note', '离线撤销笔记')], page: { limit: 20, offset: 0, hasMore: false } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.includes('/heatmap')) {
+        return new Response(JSON.stringify({ days: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    authenticateAndRender({ accessToken: 'demo-token', refreshToken: null, user: { id: 'offline-user', email: 'offline@example.com', username: 'offline' } });
+    await waitFor(() => expect(screen.getByText('离线撤销笔记')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '删除' }));
+    await waitFor(() => expect(screen.getByText('已移入回收站')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(screen.getByText('离线撤销笔记')).toBeInTheDocument());
+
+    const db = createJifoDb('jifo-offline-user');
+    const operations = await db.outbox.filter((operation) => operation.noteId === 'offline-note').toArray();
+    expect(operations).toEqual([]);
+    expect((await db.notes_cache.get('offline-note'))?.deletedAt).toBeNull();
+    db.close();
+  });
+
+  test('修改操作失败时提示错误，但不显示无效的工作区重试动作', async () => {
+    const user = userEvent.setup();
+    const requestedUrls: string[] = [];
+    const fetchMock = mockWorkspaceFetch(requestedUrls);
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input).replace(/^https?:\/\/[^/]+/, '');
+      const method = init?.method ?? 'GET';
+      if (method === 'DELETE' && /\/notes\/[^/]+$/.test(path)) {
+        return new Response(JSON.stringify({ error: { code: 'server_error', message: 'delete failed' } }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.endsWith('/notes/stats')) {
+        return new Response(JSON.stringify({ total: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (path.endsWith('/tags/tree')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (path.includes('/notes')) {
+        return new Response(JSON.stringify({ items: [note('note-1', '删除失败笔记')], page: { limit: 20, offset: 0, hasMore: false } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      if (path.includes('/heatmap')) {
+        return new Response(JSON.stringify({ days: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    authenticateAndRender();
+    await waitFor(() => expect(screen.getByText('删除失败笔记')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '删除' }));
+
+    await waitFor(() => expect(screen.getByText('请求失败（500），请稍后重试。')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 });

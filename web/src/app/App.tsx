@@ -95,6 +95,11 @@ function cachedPlainText(note: CachedNote) {
   return note.blocks.filter((block): block is Extract<CachedNoteBlock, { type: 'paragraph' }> => block.type === 'paragraph').map((block) => block.content).join('\n\n');
 }
 
+type AppErrorState = {
+  message: string;
+  retryWorkspace: boolean;
+};
+
 export function App() {
   const authState = useAuthState();
   const accessToken = authState.accessToken;
@@ -106,7 +111,7 @@ export function App() {
   const [accessKeys, setAccessKeys] = useState<AccessKeySummary[]>([]);
   const [isLoading, setLoading] = useState(false);
   const [isMutating, setMutating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppErrorState | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isLoadingAccessKeys, setLoadingAccessKeys] = useState(false);
   const [isCreatingAccessKey, setCreatingAccessKey] = useState(false);
@@ -125,7 +130,21 @@ export function App() {
   }, []);
 
   const pushToast = useCallback((message: string, action?: ToastItem['action']) => {
-    setToasts((current) => [...current.slice(-2), { id: ++toastIdRef.current, message, action }]);
+    setToasts((current) => {
+      if (current.some((toast) => toast.message === message)) {
+        return current;
+      }
+      return [...current.slice(-2), { id: ++toastIdRef.current, message, action }];
+    });
+  }, []);
+
+  const reportError = useCallback((message: string, retryWorkspace: boolean) => {
+    setError((current) => {
+      if (current?.message === message && current.retryWorkspace === retryWorkspace) {
+        return current;
+      }
+      return { message, retryWorkspace };
+    });
   }, []);
 
   const authApi = useMemo(() => {
@@ -239,7 +258,7 @@ export function App() {
       setHeatmapCells(nextHeatmap);
     } catch (loadError) {
       const message = errorMessage(loadError);
-      setError(message);
+      reportError(message, true);
       const cached = await localDb.notes_cache.toArray();
       const query = debouncedNoteQuery.trim().toLocaleLowerCase();
       setNotes(cached
@@ -253,16 +272,21 @@ export function App() {
     } finally {
       setLoading(false);
     }
-  }, [client, debouncedNoteQuery, localDb, noteListOptions, selectedTagPath, showTrash]);
+  }, [client, debouncedNoteQuery, localDb, noteListOptions, reportError, selectedTagPath, showTrash]);
 
   useEffect(() => {
     if (!error) {
       return;
     }
-    pushToast(error, {
-      label: '重试',
-      onClick: () => void loadWorkspace()
-    });
+    pushToast(
+      error.message,
+      error.retryWorkspace
+        ? {
+            label: '重试',
+            onClick: () => void loadWorkspace()
+          }
+        : undefined
+    );
     setError(null);
   }, [error, loadWorkspace, pushToast]);
 
@@ -406,17 +430,33 @@ export function App() {
         await operation();
         await loadWorkspace();
       } catch (mutationError) {
-        setError(errorMessage(mutationError));
+        reportError(errorMessage(mutationError), false);
       } finally {
         setMutating(false);
       }
     },
-    [loadWorkspace]
+    [loadWorkspace, reportError]
   );
 
   const restoreNoteById = useCallback(
     (id: string) =>
       withMutation(async () => {
+        const pendingDeletes = await localDb.outbox
+          .filter((operation) => operation.entity === 'note' && operation.noteId === id && operation.action === 'delete' && operation.status === 'pending')
+          .toArray();
+        if (pendingDeletes.length > 0) {
+          const restoredAt = new Date().toISOString();
+          await localDb.transaction('rw', localDb.notes_cache, localDb.outbox, async () => {
+            await localDb.notes_cache.update(id, { deletedAt: null, updatedAt: restoredAt });
+            for (const operation of pendingDeletes) {
+              if (operation.localSeq !== undefined) {
+                await localDb.outbox.delete(operation.localSeq);
+              }
+            }
+          });
+          return;
+        }
+
         try {
           await restoreNote(client, id);
         } catch (restoreError) {
@@ -455,11 +495,11 @@ export function App() {
       setNotes((current) => [...current, ...next.items.map((note) => fromApiNote(note, tags))]);
       setHasMoreNotes(next.page.hasMore);
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      reportError(errorMessage(loadError), true);
     } finally {
       setLoadingMoreNotes(false);
     }
-  }, [client, hasMoreNotes, isLoading, isLoadingMoreNotes, localDb, noteListOptions, notes.length, tags]);
+  }, [client, hasMoreNotes, isLoading, isLoadingMoreNotes, localDb, noteListOptions, notes.length, reportError, tags]);
 
   if (!accessToken) {
     return (
@@ -503,7 +543,7 @@ export function App() {
           setSelectedTagPath(undefined);
           await loadWorkspace();
         } catch (tagError) {
-          setError(errorMessage(tagError));
+          reportError(errorMessage(tagError), false);
           throw tagError;
         } finally {
           setMutating(false);
@@ -518,7 +558,7 @@ export function App() {
           setSelectedTagPath(undefined);
           await loadWorkspace();
         } catch (tagError) {
-          setError(errorMessage(tagError));
+          reportError(errorMessage(tagError), false);
           throw tagError;
         } finally {
           setMutating(false);
