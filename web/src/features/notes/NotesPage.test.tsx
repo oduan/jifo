@@ -206,6 +206,17 @@ describe('NotesPage', () => {
     expect(screen.getByLabelText('笔记内容')).toBeInTheDocument();
   });
 
+  test('首次进入工作区时侧栏与笔记流整体使用骨架占位', () => {
+    const { container } = render(<NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} isInitialLoading />);
+
+    expect(container.querySelectorAll('.note-skeleton').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('.stat-card__skeleton')).toHaveLength(3);
+    expect(container.querySelector('.heatmap-skeleton')).toBeInTheDocument();
+    expect(container.querySelector('.tag-tree-skeleton')).toBeInTheDocument();
+    expect(screen.queryByText('还没有笔记')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('笔记热力图')).not.toBeInTheDocument();
+  });
+
   test('没有下一页时不注册加载更多 sentinel', () => {
     const { container } = render(<NotesPage userName="oisin" notes={[]} tags={[]} heatmapCells={[]} hasMoreNotes={false} />);
 
@@ -227,7 +238,9 @@ describe('NotesPage', () => {
     );
 
     expect(screen.getByRole('heading', { name: '回收站' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('新笔记编辑器')).not.toBeInTheDocument();
+    const composerShell = screen.getByLabelText('新笔记编辑器').closest('.composer-shell');
+    expect(composerShell).toHaveClass('composer-shell--collapsed');
+    expect(composerShell).toHaveAttribute('aria-hidden', 'true');
     await user.click(screen.getByRole('button', { name: '更多操作' }));
     await user.click(screen.getByRole('button', { name: '恢复' }));
     expect(onRestoreNote).toHaveBeenCalledWith('n1');

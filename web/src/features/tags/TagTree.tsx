@@ -63,8 +63,7 @@ function renderTagItems(options: RenderTagItemsOptions): JSX.Element[] {
           {hasChildren ? (
             <button type="button" className="tag-expander" aria-label={`${isExpanded ? '收起' : '展开'} ${tag.name}`} aria-expanded={isExpanded} onClick={() => onToggle(tag.id)}>
               <svg className="sidebar-icon tag-expander__hash" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1 3.5 15M12.5 1 11 15M1.5 6h13M1 11h13" /></svg>
-              <svg className="sidebar-icon tag-expander__triangle tag-expander__triangle--right" viewBox="0 0 16 16" aria-hidden="true"><path d="m1 1 10 7-10 7Z" /></svg>
-              <svg className="sidebar-icon tag-expander__triangle tag-expander__triangle--down" viewBox="0 0 16 16" aria-hidden="true"><path d="m1 3 7 10 7-10Z" /></svg>
+              <svg className="sidebar-icon tag-expander__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5-4.5 4.5" /></svg>
             </button>
           ) : (
             <span className="tag-prefix" aria-hidden="true"><svg className="sidebar-icon tag-prefix__icon" viewBox="0 0 16 16"><path d="M5 1 3.5 15M12.5 1 11 15M1.5 6h13M1 11h13" /></svg></span>
@@ -199,7 +198,7 @@ export function TagTree({ tags, selectedTagId, onSelect, onRename, onDelete }: T
         </div>,
         document.body
       ) : null}
-      {editingTag ? (
+      {editingTag ? createPortal(
         <div className="tag-edit-modal" role="dialog" aria-modal="true" aria-label="编辑标签名称" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEditingTag(null); }}>
           <form className="tag-edit-modal__panel" onSubmit={submitEdit}>
             <div className="tag-edit-modal__controls">
@@ -209,7 +208,8 @@ export function TagTree({ tags, selectedTagId, onSelect, onRename, onDelete }: T
             <p>使用 标签/次级标签 格式创建<span>多级标签</span></p>
             {editError ? <div className="tag-edit-modal__error" role="alert">{editError}</div> : null}
           </form>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

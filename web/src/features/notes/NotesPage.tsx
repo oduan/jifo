@@ -34,6 +34,7 @@ type NotesPageProps = {
   hasMoreNotes?: boolean;
   isLoadingMoreNotes?: boolean;
   isLoading?: boolean;
+  isInitialLoading?: boolean;
   onSearchChange?: (query: string) => void;
   onSelectTag?: (tag: SelectedTag) => void;
   onRenameTag?: (tagId: string, path: string) => void | Promise<void>;
@@ -67,6 +68,19 @@ function createdAtTime(note: Note): number {
 
 function dismissToastNoop() {}
 
+function TagTreeSkeleton() {
+  return (
+    <div className="tag-tree-skeleton" aria-hidden="true">
+      {[0, 1, 2, 3].map((index) => (
+        <div key={index} className="tag-tree-skeleton__row">
+          <span className="skeleton-block tag-tree-skeleton__icon" />
+          <span className="skeleton-block tag-tree-skeleton__line" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function NotesPage({
   userName,
   notes,
@@ -78,6 +92,7 @@ export function NotesPage({
   hasMoreNotes = false,
   isLoadingMoreNotes = false,
   isLoading = false,
+  isInitialLoading = false,
   onSearchChange,
   onSelectTag,
   onRenameTag,
@@ -255,21 +270,21 @@ export function NotesPage({
 
         <section className="stats-grid" aria-label="账户统计">
           <div className="stat-card">
-            <strong>{allNotesCount}</strong>
+            <strong>{isInitialLoading ? <span className="skeleton-block stat-card__skeleton" aria-hidden="true" /> : allNotesCount}</strong>
             <span>笔记</span>
           </div>
           <div className="stat-card">
-            <strong>{visibleTagCount}</strong>
+            <strong>{isInitialLoading ? <span className="skeleton-block stat-card__skeleton" aria-hidden="true" /> : visibleTagCount}</strong>
             <span>标签</span>
           </div>
           <div className="stat-card">
-            <strong>{activeDays}</strong>
+            <strong>{isInitialLoading ? <span className="skeleton-block stat-card__skeleton" aria-hidden="true" /> : activeDays}</strong>
             <span>活跃天</span>
           </div>
         </section>
 
         <section className="sidebar-section sidebar-section--heatmap">
-          <Heatmap cells={heatmapCells} />
+          {isInitialLoading ? <div className="skeleton-block heatmap-skeleton" aria-hidden="true" /> : <Heatmap cells={heatmapCells} />}
         </section>
 
         <section className="sidebar-section sidebar-section--primary-filter">
@@ -301,26 +316,34 @@ export function NotesPage({
               全部标签
               <span className="sidebar-tags-drawer__count">{visibleTagCount}</span>
             </summary>
-            <TagTree
-              tags={tags}
-              selectedTagId={selectedTagId}
-              onSelect={(tagId) => {
-                selectTagById(tagId);
-                setTagsDrawerOpen(false);
-              }}
-              onRename={onRenameTag}
-              onDelete={onDeleteTag}
-            />
+            {isInitialLoading ? (
+              <TagTreeSkeleton />
+            ) : (
+              <TagTree
+                tags={tags}
+                selectedTagId={selectedTagId}
+                onSelect={(tagId) => {
+                  selectTagById(tagId);
+                  setTagsDrawerOpen(false);
+                }}
+                onRename={onRenameTag}
+                onDelete={onDeleteTag}
+              />
+            )}
           </details>
         ) : (
           <section className="sidebar-section">
             <h2>全部标签</h2>
-            <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={selectTagById} onRename={onRenameTag} onDelete={onDeleteTag} />
+            {isInitialLoading ? (
+              <TagTreeSkeleton />
+            ) : (
+              <TagTree tags={tags} selectedTagId={selectedTagId} onSelect={selectTagById} onRename={onRenameTag} onDelete={onDeleteTag} />
+            )}
           </section>
         )}
       </aside>
 
-      <section className={`jifo-workspace${trash ? ' jifo-workspace--trash' : ''}`} aria-label="笔记工作区">
+      <section className="jifo-workspace" aria-label="笔记工作区">
         <header className="workspace-header">
           <div className="workspace-heading">
             <h2 className="workspace-title">{trash ? '回收站' : selectedTag ? selectedTag.name : '全部笔记'}</h2>
@@ -341,14 +364,16 @@ export function NotesPage({
           </div>
         </header>
 
-        {!trash ? (
-          <section className="composer-card" aria-label="新笔记编辑器">
-            <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} onUploadImage={onUploadImage} />
-          </section>
-        ) : null}
+        <div className={`composer-shell${trash ? ' composer-shell--collapsed' : ''}`} aria-hidden={trash}>
+          <div className="composer-shell__inner">
+            <section className="composer-card" aria-label="新笔记编辑器">
+              <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} onUploadImage={onUploadImage} />
+            </section>
+          </div>
+        </div>
 
         <div className="notes-stream-shell">
-          <section ref={notesStreamRef} id="notes-stream" className="notes-stream" aria-label="笔记流">
+          <section ref={notesStreamRef} id="notes-stream" className={`notes-stream${isLoading && displayNotes.length > 0 ? ' notes-stream--refreshing' : ''}`} aria-label="笔记流">
             {displayNotes.map((note) => (
               <NoteCard
                 key={note.id}
@@ -364,7 +389,7 @@ export function NotesPage({
               />
             ))}
             {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
-            {isLoading && displayNotes.length === 0 ? (
+            {(isLoading || isInitialLoading) && displayNotes.length === 0 ? (
               <>
                 {[0, 1, 2].map((index) => (
                   <div key={index} className="note-skeleton" aria-hidden="true">
@@ -375,7 +400,7 @@ export function NotesPage({
                 ))}
               </>
             ) : null}
-            {!isLoading && displayNotes.length === 0 ? (
+            {!isLoading && !isInitialLoading && displayNotes.length === 0 ? (
               <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} />
             ) : null}
           </section>

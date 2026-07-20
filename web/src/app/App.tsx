@@ -110,6 +110,7 @@ export function App() {
   const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
   const [accessKeys, setAccessKeys] = useState<AccessKeySummary[]>([]);
   const [isLoading, setLoading] = useState(false);
+  const [hasWorkspaceLoaded, setHasWorkspaceLoaded] = useState(false);
   const [isMutating, setMutating] = useState(false);
   const [error, setError] = useState<AppErrorState | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -271,6 +272,7 @@ export function App() {
       }
     } finally {
       setLoading(false);
+      setHasWorkspaceLoaded(true);
     }
   }, [client, debouncedNoteQuery, localDb, noteListOptions, reportError, selectedTagPath, showTrash]);
 
@@ -322,6 +324,7 @@ export function App() {
       setHasMoreNotes(false);
       setLoadingMoreNotes(false);
       setShowTrash(false);
+      setHasWorkspaceLoaded(false);
     }
   }, [accessToken, loadWorkspace]);
 
@@ -526,6 +529,7 @@ export function App() {
       hasMoreNotes={hasMoreNotes}
       isLoadingMoreNotes={isLoadingMoreNotes}
       isLoading={isLoading}
+      isInitialLoading={!hasWorkspaceLoaded}
       toasts={toasts}
       onDismissToast={dismissToast}
       onSearchChange={setNoteQuery}
