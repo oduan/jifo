@@ -99,6 +99,88 @@ describe('runSync', () => {
     db = createJifoDb('task11-sync');
   });
 
+  test('离线创建后的连续编辑会合并为一个 create 并回填服务端 ID', async () => {
+    await createOfflineNote(db, {
+      noteId: 'local-note-1',
+      clientId: 'client-offline-1',
+      blocks: [{ type: 'paragraph', content: 'draft' }],
+      opId: 'op-create-1'
+    });
+    await db.outbox.add(updateNoteOutboxOperation({
+      noteId: 'local-note-1',
+      clientId: 'client-offline-1',
+      baseVersion: 0,
+      blocks: [{ type: 'paragraph', content: 'final text' }],
+      opId: 'op-update-1'
+    }));
+    await db.notes_cache.update('local-note-1', { blocks: [{ type: 'paragraph', content: 'final text' }] });
+    const pushed: Array<ReturnType<typeof createNoteOutboxOperation>> = [];
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async (operations) => {
+        pushed.push(...operations);
+        return [{ opId: 'op-create-1', status: 'created', noteId: 'server-note-1', version: 1 }];
+      },
+      pullChanges: async () => ({ notes: [] })
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toMatchObject({ action: 'create', noteId: 'local-note-1' });
+    expect(pushed[0].payload.blocks).toEqual([{ type: 'paragraph', content: 'final text' }]);
+    expect(await db.notes_cache.get('local-note-1')).toBeUndefined();
+    expect((await db.notes_cache.get('server-note-1'))?.blocks).toEqual([{ type: 'paragraph', content: 'final text' }]);
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('离线创建后删除会取消整组操作且不向服务端创建笔记', async () => {
+    await createOfflineNote(db, {
+      noteId: 'local-note-delete',
+      clientId: 'client-offline-delete',
+      blocks: [{ type: 'paragraph', content: 'discard me' }],
+      opId: 'op-create-delete'
+    });
+    await db.outbox.add(deleteNoteOutboxOperation({
+      noteId: 'local-note-delete',
+      clientId: 'client-offline-delete',
+      baseVersion: 0,
+      opId: 'op-delete-draft'
+    }));
+    const pushOutbox = vi.fn(async () => []);
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox,
+      pullChanges: async () => ({ notes: [] })
+    });
+
+    expect(pushOutbox).not.toHaveBeenCalled();
+    expect(await db.notes_cache.get('local-note-delete')).toBeUndefined();
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('同一远端笔记的多次离线更新只推送最后内容和原始版本', async () => {
+    await db.outbox.add(updateNoteOutboxOperation({ noteId: 'n1', clientId: 'c1', baseVersion: 4, blocks: [{ type: 'paragraph', content: 'first' }], opId: 'op-first' }));
+    await db.outbox.add(updateNoteOutboxOperation({ noteId: 'n1', clientId: 'c1', baseVersion: 4, blocks: [{ type: 'paragraph', content: 'last' }], opId: 'op-last' }));
+    const pushed: Array<ReturnType<typeof updateNoteOutboxOperation>> = [];
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async (operations) => {
+        pushed.push(...operations);
+        return [{ opId: 'op-first', status: 'updated', noteId: 'n1', version: 5 }];
+      },
+      pullChanges: async () => ({ notes: [] })
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toMatchObject({ opId: 'op-first', baseVersion: 4, action: 'update' });
+    expect(pushed[0].payload.blocks).toEqual([{ type: 'paragraph', content: 'last' }]);
+  });
+
   test('媒体优先上传：先上传 media，再替换 blocks.mediaId，最后 push note', async () => {
     const calls: string[] = [];
 
@@ -147,6 +229,7 @@ describe('runSync', () => {
   });
 
   test('push→pull 后更新本地 cache；遇到 conflict_copied 时增加 conflict note', async () => {
+    await db.sync_state.put({ key: 'cursor', value: { updatedAt: '2026-05-26T00:00:00Z', id: 'old-cursor' } });
     await db.outbox.add({
       opId: 'op-update-1',
       entity: 'note',
@@ -158,6 +241,20 @@ describe('runSync', () => {
       createdAt: '2026-05-27T00:00:00Z',
       status: 'pending'
     });
+
+    const pullChanges = vi.fn(async () => ({
+      cursor: { updatedAt: '2026-05-27T01:00:01Z', id: 'n1' },
+      notes: [
+        {
+          id: 'n1',
+          clientId: 'client-1',
+          blocks: [{ type: 'paragraph' as const, content: 'server text' }],
+          updatedAt: '2026-05-27T01:00:01Z',
+          createdAt: '2026-05-27T00:00:00Z',
+          version: 2
+        }
+      ]
+    }));
 
     await runSync({
       db,
@@ -180,19 +277,7 @@ describe('runSync', () => {
           }
         }
       ],
-      pullChanges: async () => ({
-        cursor: { updatedAt: '2026-05-27T01:00:01Z', id: 'n1' },
-        notes: [
-          {
-            id: 'n1',
-            clientId: 'client-1',
-            blocks: [{ type: 'paragraph', content: 'server text' }],
-            updatedAt: '2026-05-27T01:00:01Z',
-            createdAt: '2026-05-27T00:00:00Z',
-            version: 2
-          }
-        ]
-      })
+      pullChanges
     });
 
     const conflict = await db.notes_cache.get('conflict-1');
@@ -200,6 +285,7 @@ describe('runSync', () => {
 
     expect(conflict?.conflictReason).toBe('version_conflict');
     expect(serverNote?.blocks).toEqual([{ type: 'paragraph', content: 'server text' }]);
+    expect(pullChanges).toHaveBeenCalledWith(undefined);
     expect((await db.sync_state.get('cursor'))?.value).toEqual({ updatedAt: '2026-05-27T01:00:01Z', id: 'n1' });
     expect((await db.outbox.toArray())).toHaveLength(0);
   });

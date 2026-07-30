@@ -681,14 +681,7 @@ func insertTestSession(t *testing.T, ctx context.Context, db *pgxpool.Pool, user
 
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
-
-	dropSQL := "DROP TABLE IF EXISTS sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
-	if _, err := db.Exec(ctx, dropSQL); err != nil {
-		t.Fatalf("drop existing tables: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(ctx, dropSQL)
-	})
+	testutil.ResetDatabase(t, ctx, db)
 
 	if _, err := db.Exec(ctx, loadInitMigration(t)); err != nil {
 		t.Fatalf("execute migration: %v", err)

@@ -2,11 +2,16 @@ package heatmap
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const MaxRangeDays = 366
+
+var ErrRangeTooLarge = errors.New("heatmap range is too large")
 
 type Service struct {
 	db *pgxpool.Pool
@@ -29,6 +34,9 @@ func (s *Service) Aggregate(ctx context.Context, userID uuid.UUID, from time.Tim
 	toDay := startOfDay(to, location)
 	if toDay.Before(fromDay) {
 		fromDay, toDay = toDay, fromDay
+	}
+	if toDay.After(fromDay.AddDate(0, 0, MaxRangeDays-1)) {
+		return nil, ErrRangeTooLarge
 	}
 	toExclusive := toDay.AddDate(0, 0, 1)
 

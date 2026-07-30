@@ -160,11 +160,7 @@ func TestCreateWithoutExpiryStaysPermanent(t *testing.T) {
 
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
-	dropSQL := "DROP TABLE IF EXISTS schema_migrations, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
-	if _, err := db.Exec(ctx, dropSQL); err != nil {
-		t.Fatalf("drop existing tables: %v", err)
-	}
-	t.Cleanup(func() { _, _ = db.Exec(ctx, dropSQL) })
+	testutil.ResetDatabase(t, ctx, db)
 
 	for _, migration := range []string{"001_init.sql", "002_access_keys.sql", "007_access_key_expiry.sql"} {
 		if _, err := db.Exec(ctx, loadMigration(t, migration)); err != nil {

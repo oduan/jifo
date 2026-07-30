@@ -15,7 +15,10 @@ import (
 	"jifo/backend/internal/tags"
 )
 
-var ErrNoteNotFound = errors.New("note not found")
+var (
+	ErrNoteNotFound          = errors.New("note not found")
+	ErrMediaAssetUnavailable = errors.New("media asset is unavailable")
+)
 
 // tagWriter 是 notes 包对 tag 写入能力的窄接口，解除对 *tags.Service 具体类型的耦合。
 type tagWriter interface {
@@ -495,6 +498,28 @@ func (s *Service) rebuildMediaRefs(ctx context.Context, tx pgx.Tx, userID uuid.U
 			continue
 		}
 		seen[mediaID] = struct{}{}
+		// Purging and re-referencing share the media row lock. If a cleanup
+		// worker wins first, purged_at makes the reference invalid; if this
+		// transaction wins first, cleanup will observe the new reference.
+		var valid bool
+		if err := tx.QueryRow(ctx, `
+			SELECT true
+			FROM media_assets
+			WHERE user_id = $1 AND id = $2 AND purged_at IS NULL
+			FOR UPDATE
+		`, userID, mediaID).Scan(&valid); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrMediaAssetUnavailable
+			}
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE media_assets
+			SET deleted_at = NULL, purge_after = NULL
+			WHERE user_id = $1 AND id = $2
+		`, userID, mediaID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO note_media_refs (user_id, note_id, media_id)
 			VALUES ($1, $2, $3)

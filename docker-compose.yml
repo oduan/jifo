@@ -27,14 +27,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # Override Dockerfile's non-root user so bind-mounted media storage can be
-    # created and managed without a separate permission-init container.
-    user: "0:0"
+      media-init:
+        condition: service_completed_successfully
+    user: "10001:10001"
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       APP_ENV: production
       ADDR: :8080
-      DATABASE_URL: postgres://${POSTGRES_USER:-jifo}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-jifo}?sslmode=disable
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-jifo}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-jifo}
+      PGSSLMODE: disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       MEDIA_ROOT: /data/media
       JIFO_MIGRATIONS_DIR: /app/migrations
@@ -57,6 +62,16 @@ services:
     stop_grace_period: 30s
     networks:
       - jifo-internal
+
+  media-init:
+    image: alpine:3.22
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /data/media && chown -R 10001:10001 /data/media"]
+    volumes:
+      - type: bind
+        source: ./data/media
+        target: /data/media
+    restart: "no"
 
   web:
     build:

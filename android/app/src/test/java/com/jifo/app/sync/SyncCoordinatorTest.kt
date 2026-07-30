@@ -3,6 +3,7 @@ package com.jifo.app.sync
 import com.jifo.app.data.local.NoteEntity
 import com.jifo.app.data.local.OutboxOperationEntity
 import com.jifo.app.data.local.PendingMediaEntity
+import com.jifo.app.data.local.AuthSessionEntity
 import com.jifo.app.network.*
 import com.jifo.app.test.TestDatabaseFactory
 import kotlinx.coroutines.test.runTest
@@ -13,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -102,10 +104,10 @@ class SyncCoordinatorTest {
         assertNotNull(db.noteDao().getById("11111111-1111-1111-1111-111111111111"))
     }
 
-    @Test fun conflictCopiedClearsOutboxAndDoesNotOverwriteOriginalNote() = runTest {
+    @Test fun conflictCopiedRemapsPendingLocalEditSoPullCanRestoreOriginal() = runTest {
         val db = database()
         val noteId = "11111111-1111-1111-1111-111111111111"
-        db.noteDao().upsert(NoteEntity(id = noteId, clientId = "client-1", contentJson = "[]", plainText = "远端原始", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 2))
+        db.noteDao().upsert(NoteEntity(id = noteId, clientId = "client-1", contentJson = "[]", plainText = "本地冲突编辑", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 2, syncStatus = "PENDING"))
         db.outboxDao().insert(OutboxOperationEntity(opId = "op-1", entity = "note", action = "update", noteId = noteId, clientId = "client-1", baseVersion = 1, payloadJson = "{}", createdAt = "2026-05-31T09:00:00Z"))
         val api = FakeSyncApi(pushResults = listOf(PushResultDto("op-1", "conflict_copied", "conflict-1", 3)), pullNotes = emptyList())
         val sync = SyncCoordinator(db, api)
@@ -113,7 +115,59 @@ class SyncCoordinatorTest {
         sync.runOnce()
 
         assertNull(db.outboxDao().getByOpId("op-1"))
-        assertEquals("远端原始", db.noteDao().getById(noteId)!!.plainText)
+        assertEquals("SYNCED", db.noteDao().getById(noteId)!!.syncStatus)
+        assertEquals("SYNCED", db.noteDao().getById("conflict-1")!!.syncStatus)
+        assertEquals("本地冲突编辑", db.noteDao().getById("conflict-1")!!.plainText)
+    }
+
+    @Test fun alreadyTrashedIsSettledAsIdempotentSuccess() = runTest {
+        val db = database()
+        val noteId = "11111111-1111-1111-1111-111111111111"
+        db.noteDao().upsert(NoteEntity(id = noteId, clientId = "client-1", contentJson = "[]", plainText = "deleted", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 1, deletedAt = "2026-05-31T09:00:00Z", syncStatus = "PENDING"))
+        db.outboxDao().insert(OutboxOperationEntity(opId = "op-delete", entity = "note", action = "delete", noteId = noteId, clientId = "client-1", baseVersion = 1, payloadJson = "{}", createdAt = "2026-05-31T09:00:00Z"))
+
+        SyncCoordinator(db, FakeSyncApi(listOf(PushResultDto("op-delete", "already_trashed", noteId, 2)), emptyList())).runOnce()
+
+        assertNull(db.outboxDao().getByOpId("op-delete"))
+        assertEquals("SYNCED", db.noteDao().getById(noteId)!!.syncStatus)
+        assertEquals(2, db.noteDao().getById(noteId)!!.version)
+    }
+
+    @Test fun permanentTombstoneRemovesLocalNoteAndPendingMutation() = runTest {
+        val db = database()
+        val noteId = "11111111-1111-1111-1111-111111111111"
+        db.noteDao().upsert(NoteEntity(id = noteId, clientId = "client-1", contentJson = "[]", plainText = "stale", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 1))
+        db.outboxDao().insert(OutboxOperationEntity(opId = "op-update", entity = "note", action = "update", noteId = noteId, clientId = "client-1", baseVersion = 1, payloadJson = "{}", createdAt = "2026-05-31T09:00:00Z", status = "blocked"))
+        val tombstone = ApiNoteDto(id = noteId, clientId = "client-1", permanentlyDeletedAt = "2026-06-01T00:00:00Z", updatedAt = "2026-06-01T00:00:00Z", version = 2)
+
+        SyncCoordinator(db, FakeSyncApi(emptyList(), listOf(tombstone))).runOnce()
+
+        assertNull(db.noteDao().getById(noteId))
+        assertNull(db.outboxDao().getByOpId("op-update"))
+    }
+
+    @Test fun accountChangeDuringPullCannotWritePreviousAccountResponse() = runTest {
+        val db = database()
+        db.authSessionDao().save(AuthSessionEntity(accessToken = "token-a", refreshToken = "refresh-a", userJson = null, deviceCode = "device", userId = "user-a"))
+        val staleNoteId = "33333333-3333-3333-3333-333333333333"
+        val remote = object : SyncRemote {
+            override suspend fun push(body: SyncPushRequest): SyncPushResponse = SyncPushResponse()
+            override suspend fun uploadMedia(media: PendingMediaEntity): MediaAssetDto = error("unexpected upload")
+            override suspend fun pull(updatedAt: String?, id: String?, limit: Int): SyncPullResponse {
+                db.authSessionDao().save(AuthSessionEntity(accessToken = "token-b", refreshToken = "refresh-b", userJson = null, deviceCode = "device", userId = "user-b"))
+                return SyncPullResponse(notes = listOf(ApiNoteDto(id = staleNoteId, clientId = "old-account-note", plainText = "stale", createdAt = "2026-05-31T08:00:00Z", updatedAt = "2026-05-31T08:00:00Z", version = 1)))
+            }
+        }
+
+        var accountChanged = false
+        try {
+            SyncCoordinator(db, remote).runOnce()
+        } catch (_: SyncAccountChangedException) {
+            accountChanged = true
+        }
+
+        assertTrue(accountChanged)
+        assertNull(db.noteDao().getById(staleNoteId))
     }
 
     @Test fun pendingImageIsUploadedAndRewrittenBeforeNotePush() = runTest {

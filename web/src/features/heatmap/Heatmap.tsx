@@ -34,15 +34,15 @@ function monthOfDate(date: string): number | null {
 }
 
 export function Heatmap({ cells }: HeatmapProps) {
-  let lastMonth: number | null = null;
   const columnCount = Math.ceil(cells.length / CELLS_PER_WEEK);
   const monthLabels = Array.from({ length: columnCount }, (_, columnIndex) => {
     const cell = cells[columnIndex * CELLS_PER_WEEK];
     const month = cell ? monthOfDate(cell.date) : null;
-    if (month === null || month === lastMonth) {
+    const previousCell = columnIndex > 0 ? cells[(columnIndex - 1) * CELLS_PER_WEEK] : undefined;
+    const previousMonth = previousCell ? monthOfDate(previousCell.date) : null;
+    if (month === null || month === previousMonth) {
       return '';
     }
-    lastMonth = month;
     return `${month}月`;
   });
 

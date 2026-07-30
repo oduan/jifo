@@ -70,14 +70,29 @@ func TestLoadRejectsInvalidDuration(t *testing.T) {
 
 func TestLoadReturnsErrorWhenDatabaseURLMissing(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("PGHOST", "")
 	t.Setenv("JWT_SECRET", "test-secret")
 
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error when DATABASE_URL is missing")
 	}
-	if !strings.Contains(err.Error(), "DATABASE_URL is required") {
+	if !strings.Contains(err.Error(), "DATABASE_URL or PGHOST is required") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadAllowsStandardPostgresEnvironment(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("PGHOST", "db")
+	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.DatabaseURL != "" {
+		t.Fatalf("DatabaseURL = %q, want empty so pgx reads PG* variables", cfg.DatabaseURL)
 	}
 }
 

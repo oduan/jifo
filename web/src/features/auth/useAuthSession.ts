@@ -31,58 +31,71 @@ export function secondsUntilJwtExpiry(token: string | null, now = Date.now()): n
   }
 }
 
+function createAuthRuntime() {
+  const baseUrl = apiBaseUrl();
+  const refreshClient = createApiClient({
+    baseUrl,
+    getAccessToken: () => null
+  });
+  let refreshInFlight: Promise<string | null> | null = null;
+
+  const refreshSession = () => {
+    if (refreshInFlight) {
+      return refreshInFlight;
+    }
+
+    refreshInFlight = (async () => {
+      const current = authStore.getState();
+      if (!current.refreshToken) {
+        return null;
+      }
+      const requestedRefreshToken = current.refreshToken;
+
+      try {
+        const refreshed = await refreshAuth(refreshClient, requestedRefreshToken);
+        const latest = authStore.getState();
+        // A logout, login, or storage event may have changed the active
+        // account while this request was in flight. Never resurrect or
+        // overwrite that newer session with a stale refresh response.
+        if (latest.refreshToken !== requestedRefreshToken) {
+          return latest.accessToken;
+        }
+        authStore.setSession({
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken ?? null,
+          user: refreshed.user ?? current.user ?? null
+        });
+        return refreshed.accessToken;
+      } catch (refreshError) {
+        if (
+          refreshError instanceof ApiError &&
+          refreshError.status === 401 &&
+          authStore.getState().refreshToken === requestedRefreshToken
+        ) {
+          authStore.clear();
+        }
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+
+    return refreshInFlight;
+  };
+
+  return {
+    client: createApiClient({
+      baseUrl,
+      getAccessToken: authStore.getAccessToken,
+      refreshAccessToken: refreshSession
+    }),
+    refreshSession
+  };
+}
+
 export function useAuthSession() {
   const authState = useSyncExternalStore(authStore.subscribe, authStore.getSnapshot, authStore.getSnapshot);
-
-  const { client, refreshSession } = useMemo(() => {
-    const baseUrl = apiBaseUrl();
-    const refreshClient = createApiClient({
-      baseUrl,
-      getAccessToken: () => null
-    });
-    let refreshInFlight: Promise<string | null> | null = null;
-
-    const refresh = () => {
-      if (refreshInFlight) {
-        return refreshInFlight;
-      }
-
-      refreshInFlight = (async () => {
-        const current = authStore.getState();
-        if (!current.refreshToken) {
-          return null;
-        }
-
-        try {
-          const refreshed = await refreshAuth(refreshClient, current.refreshToken);
-          authStore.setSession({
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken ?? null,
-            user: refreshed.user ?? current.user ?? null
-          });
-          return refreshed.accessToken;
-        } catch (refreshError) {
-          if (refreshError instanceof ApiError && refreshError.status === 401) {
-            authStore.clear();
-          }
-          return null;
-        } finally {
-          refreshInFlight = null;
-        }
-      })();
-
-      return refreshInFlight;
-    };
-
-    return {
-      client: createApiClient({
-        baseUrl,
-        getAccessToken: authStore.getAccessToken,
-        refreshAccessToken: refresh
-      }),
-      refreshSession: refresh
-    };
-  }, []);
+  const { client, refreshSession } = useMemo(() => createAuthRuntime(), []);
 
   const backoffAttemptRef = useRef(0);
 

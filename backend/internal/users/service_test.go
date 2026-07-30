@@ -187,16 +187,9 @@ func TestGetByIDMissingUser(t *testing.T) {
 
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
+	testutil.ResetDatabase(t, ctx, db)
 
-	dropSQL := "DROP TABLE IF EXISTS sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
-	if _, err := db.Exec(ctx, dropSQL); err != nil {
-		t.Fatalf("drop existing tables: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(ctx, dropSQL)
-	})
-
-	for _, name := range []string{"001_init.sql", "006_session_hardening.sql"} {
+	for _, name := range []string{"001_init.sql", "006_session_hardening.sql", "009_refresh_token_families.sql"} {
 		if _, err := db.Exec(ctx, loadMigration(t, name)); err != nil {
 			t.Fatalf("execute migration %s: %v", name, err)
 		}

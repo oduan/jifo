@@ -2,6 +2,7 @@ package heatmap
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -58,8 +59,20 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid to date")
 		return
 	}
+	if to.Before(from) {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "to date must not be before from date")
+		return
+	}
+	if to.After(from.AddDate(0, 0, MaxRangeDays-1)) {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "heatmap range must not exceed 366 days")
+		return
+	}
 	items, err := h.svc.Aggregate(r.Context(), userID, from, to)
 	if err != nil {
+		if errors.Is(err, ErrRangeTooLarge) {
+			httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "heatmap range must not exceed 366 days")
+			return
+		}
 		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "load heatmap failed")
 		return
 	}

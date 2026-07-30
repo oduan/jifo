@@ -39,7 +39,7 @@ Compose 使用 bind mount：
 - `./data/postgres:/var/lib/postgresql/data`
 - `./data/media:/data/media`
 
-两个目录均被 Git 忽略。Compose 会覆盖镜像的非 root 用户，让 API 以 root 运行，从而直接管理 bind-mounted `data/media`，无需单独的权限初始化容器。不要使用 `docker compose down -v` 作为数据管理方式，也不要直接删除 `data/`。
+两个目录均被 Git 忽略。一次性的 `media-init` 容器会先把 `data/media` 的所有者调整为 UID/GID `10001`，随后 API 以同一 UID/GID 的非 root 用户运行。数据库密码通过标准 `PGHOST`、`PGUSER`、`PGPASSWORD` 等变量传入，不再拼进连接 URL，因此无需对密码中的 URI 特殊字符做额外转义。不要使用 `docker compose down -v` 作为数据管理方式，也不要直接删除 `data/`。
 
 ## 备份
 
@@ -61,7 +61,7 @@ docker compose up -d --build
 docker compose logs --tail=100 web api
 ```
 
-API 会在 advisory lock 保护下执行尚未应用的 migration。不要修改已执行的 migration。
+API 会在同一数据库连接持有 advisory lock 的期间执行尚未应用的 migration，并记录规范化换行后的 SHA-256 校验值（Windows 与 Linux 一致）。普通 migration 在事务中执行；标有 `jifo:no-transaction` 的并发索引 migration 在事务外执行。不要修改已执行的 migration，否则后续启动会因校验值不一致而停止。
 
 ## 反向代理与 TLS
 

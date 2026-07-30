@@ -25,12 +25,14 @@ class LoginFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val b = binding ?: return
+        b.inputServer.setText(ServiceLocator.apiBaseUrl(requireContext()))
         b.buttonSubmit.setOnClickListener { authenticate(register = false) }
         b.buttonRegister.setOnClickListener { authenticate(register = true) }
     }
 
     private fun authenticate(register: Boolean) {
         val b = binding ?: return
+        val server = b.inputServer.text.toString()
         val email = b.inputEmail.text.toString().trim()
         val password = b.inputPassword.text.toString()
         if (email.isBlank()) {
@@ -45,6 +47,7 @@ class LoginFragment : Fragment() {
         setLoading(true)
         viewLifecycleOwner.lifecycleScope.launch {
             try {
+                ServiceLocator.configureApiBaseUrl(requireContext(), server)
                 val repository = ServiceLocator.authRepository(requireContext())
                 if (register) repository.register(email, password) else repository.login(email, password)
                 ServiceLocator.syncScheduler(requireContext()).scheduleNow()
@@ -59,6 +62,7 @@ class LoginFragment : Fragment() {
     }
 
     private fun errorMessage(error: Throwable, register: Boolean): String = when {
+        error is IllegalArgumentException -> error.message ?: "服务器地址无效"
         error is HttpException && error.code() == 401 -> "邮箱或密码不正确"
         error is HttpException && error.code() == 409 -> "邮箱已被注册"
         error is HttpException && error.code() == 429 -> "尝试次数过多，请稍后再试"

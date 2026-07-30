@@ -15,4 +15,7 @@ interface PendingMediaDao {
 
     @Query("DELETE FROM pending_media WHERE localId = :localId")
     suspend fun delete(localId: String)
+
+    @Query("DELETE FROM pending_media")
+    suspend fun clear()
 }

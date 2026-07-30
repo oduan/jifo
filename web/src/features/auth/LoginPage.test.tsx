@@ -100,6 +100,14 @@ describe('authStore', () => {
     expect(authStore.getState().accessToken).toBe('token-1');
     authStore.clear();
   });
+
+  test('接收其他标签页写入的最新会话', () => {
+    const next = { accessToken: 'tab-access', refreshToken: 'tab-refresh', user: { id: 'u1', email: 'tab@example.com' } };
+    window.dispatchEvent(new StorageEvent('storage', { key: 'jifo.auth', newValue: JSON.stringify(next) }));
+
+    expect(authStore.getState()).toEqual(next);
+    authStore.clear();
+  });
 });
 
 describe('LoginPage', () => {

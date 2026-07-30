@@ -23,6 +23,8 @@ type Handler struct {
 	svc HandlerService
 }
 
+const maxAccessKeyExpiryDays = 3650
+
 type createAccessKeyRequest struct {
 	Label string `json:"label"`
 	// ExpiresInDays 可选：> 0 时 key 在 N 天后过期，缺省永久有效。
@@ -79,8 +81,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
-	if req.ExpiresInDays < 0 {
-		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "expiresInDays must be positive")
+	if req.ExpiresInDays < 0 || req.ExpiresInDays > maxAccessKeyExpiryDays {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "expiresInDays must be between 1 and 3650 when provided")
 		return
 	}
 	result, err := h.svc.Create(r.Context(), userID, req.Label, req.ExpiresInDays)

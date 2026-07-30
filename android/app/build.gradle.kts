@@ -10,6 +10,13 @@ val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
 val hasReleaseSigning = listOf(releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword)
     .all { !it.isNullOrBlank() }
+val configuredApiBaseUrl = providers.gradleProperty("jifoApiBaseUrl")
+    .orElse(providers.environmentVariable("JIFO_ANDROID_API_BASE_URL"))
+    .orNull
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+
+fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 android {
     namespace = "com.jifo.app"
@@ -37,10 +44,10 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"http://10.1.13.2:8080/api/\"")
+            buildConfigField("String", "DEFAULT_API_BASE_URL", buildConfigString(configuredApiBaseUrl ?: "http://10.0.2.2:8086/api/"))
         }
         release {
-            buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://jifo.apecho.com/api/\"")
+            buildConfigField("String", "DEFAULT_API_BASE_URL", buildConfigString(configuredApiBaseUrl ?: "https://jifo.apecho.com/api/"))
             signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = false
         }
@@ -98,7 +105,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.6.1")
-    debugImplementation("androidx.fragment:fragment-testing:1.8.5")
+    debugImplementation("androidx.fragment:fragment-testing-manifest:1.8.5")
     testImplementation("androidx.fragment:fragment-testing:1.8.5")
     testImplementation("androidx.arch.core:core-testing:2.2.0")
     testImplementation("org.robolectric:robolectric:4.13")

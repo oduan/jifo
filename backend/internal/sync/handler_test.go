@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -98,5 +99,26 @@ func TestPushPartialFailureReturnsPerOpErrors(t *testing.T) {
 	}
 	if got := byOp["missing-note"]; got.Status != "error" || got.Code != "note_not_found" {
 		t.Fatalf("missing-note = %+v, want status=error code=note_not_found", got)
+	}
+}
+
+func TestPushRejectsOversizedOperationBatch(t *testing.T) {
+	operations := make([]string, maxPushOperations+1)
+	for i := range operations {
+		operations[i] = `{"opId":"op-` + strconv.Itoa(i) + `","entity":"note","action":"create","clientId":"c-` + strconv.Itoa(i) + `","payload":{"blocks":[]}}`
+	}
+	body := "{\"operations\":[" + strings.Join(operations, ",") + "]}"
+	req := httptest.NewRequest(http.MethodPost, "/sync/push", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rr := httptest.NewRecorder()
+	userID := uuid.New()
+
+	handler := httpx.RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {
+		return userID, uuid.Nil, nil
+	})(http.HandlerFunc(NewHandler(&fakePushService{}).Push))
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
 }

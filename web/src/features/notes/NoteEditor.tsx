@@ -449,6 +449,7 @@ export function NoteEditor({ initialText = '', initialImages, tags = [], autoFoc
                   type="button"
                   className="note-editor__tag-suggestion"
                   role="option"
+                  aria-label={`${item.label}${item.type === 'create' ? ' 新建' : ''}`}
                   aria-selected={active}
                   onMouseEnter={() => setFocusedTagIndex(index)}
                   onMouseDown={(event) => event.preventDefault()}

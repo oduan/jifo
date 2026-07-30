@@ -15,7 +15,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const minAccessTokenSecretLength = 16
+const (
+	minAccessTokenSecretLength = 16
+	refreshTokenReuseGrace     = time.Minute
+)
 
 var (
 	ErrEmailAlreadyExists       = errors.New("email already exists")
@@ -195,6 +198,8 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 
 	tokenHash := hashRefreshToken(refreshToken)
 	var session sessionRow
+	var usedAt *time.Time
+	var withinReuseGrace bool
 	err = tx.QueryRow(ctx, `
 		SELECT
 			s.id,
@@ -206,13 +211,17 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 			u.username,
 			u.email_verified,
 			u.created_at,
-			u.updated_at
-		FROM user_sessions s
+			u.updated_at,
+			rt.used_at,
+			COALESCE(rt.reuse_until >= now(), false)
+		FROM session_refresh_tokens rt
+		JOIN user_sessions s ON s.id = rt.session_id
 		JOIN users u ON u.id = s.user_id
-		WHERE s.refresh_token_hash = $1
+		WHERE rt.token_hash = $1
+		  AND rt.expires_at > now()
 		  AND s.revoked_at IS NULL
 		  AND s.expires_at > now()
-		FOR UPDATE
+		FOR UPDATE OF rt, s
 	`, tokenHash).Scan(
 		&session.ID,
 		&session.UserID,
@@ -224,32 +233,56 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 		&session.User.EmailVerified,
 		&session.User.CreatedAt,
 		&session.User.UpdatedAt,
+		&usedAt,
+		&withinReuseGrace,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Replay detection: a previously rotated token means the token was
-			// stolen or the response was lost; revoke the whole session either way.
-			if revokeErr := s.revokeSessionOnReplayTx(ctx, tx, tokenHash); revokeErr != nil {
-				return nil, revokeErr
-			}
 			return nil, ErrInvalidRefreshToken
 		}
 		return nil, err
+	}
+
+	if usedAt != nil && !withinReuseGrace {
+		if _, err := tx.Exec(ctx, `UPDATE user_sessions SET revoked_at = now() WHERE id = $1`, session.ID); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, ErrInvalidRefreshToken
+	}
+	if usedAt == nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE session_refresh_tokens
+			SET used_at = now(), reuse_until = now() + make_interval(secs => $2)
+			WHERE token_hash = $1
+		`, tokenHash, int(refreshTokenReuseGrace.Seconds())); err != nil {
+			return nil, err
+		}
 	}
 
 	newRefreshToken, err := generateRefreshToken()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `
+	var refreshExpiresAt time.Time
+	if err := tx.QueryRow(ctx, `
 		UPDATE user_sessions
-		SET prev_refresh_token_hash = refresh_token_hash,
-		    refresh_token_hash = $1,
+		SET prev_refresh_token_hash = $1,
+		    refresh_token_hash = $2,
 		    expires_at = now() + interval '30 days',
 		    last_seen_at = now()
-		WHERE id = $2
+		WHERE id = $3
 		  AND revoked_at IS NULL
-	`, hashRefreshToken(newRefreshToken), session.ID); err != nil {
+		RETURNING expires_at
+	`, tokenHash, hashRefreshToken(newRefreshToken), session.ID).Scan(&refreshExpiresAt); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO session_refresh_tokens (token_hash, session_id, expires_at)
+		VALUES ($1, $2, $3)
+	`, hashRefreshToken(newRefreshToken), session.ID, refreshExpiresAt); err != nil {
 		return nil, err
 	}
 
@@ -266,34 +299,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 		RefreshToken: newRefreshToken,
 		User:         session.User,
 	}, nil
-}
-
-// revokeSessionOnReplayTx revokes the session whose previous (already rotated)
-// refresh token hash matches, then commits so the revocation survives the
-// ErrInvalidRefreshToken return.
-func (s *Service) revokeSessionOnReplayTx(ctx context.Context, tx pgx.Tx, tokenHash string) error {
-	var sessionID uuid.UUID
-	err := tx.QueryRow(ctx, `
-		SELECT id
-		FROM user_sessions
-		WHERE prev_refresh_token_hash = $1
-		  AND revoked_at IS NULL
-		FOR UPDATE
-	`, tokenHash).Scan(&sessionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE user_sessions
-		SET revoked_at = now()
-		WHERE id = $1
-	`, sessionID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 func (s *Service) ValidateAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
@@ -330,12 +335,19 @@ func (s *Service) createSessionResult(ctx context.Context, q dbtx, user User, de
 	}
 
 	session := sessionRow{UserID: user.ID, DeviceCode: strings.TrimSpace(deviceCode), User: user}
+	var refreshExpiresAt time.Time
 	err = q.QueryRow(ctx, `
 		INSERT INTO user_sessions (user_id, device_code, device_name, refresh_token_hash, last_seen_at, expires_at)
 		VALUES ($1, $2, $3, $4, now(), now() + interval '30 days')
-		RETURNING id, jwt_version
-	`, user.ID, session.DeviceCode, generateDeviceName(), hashRefreshToken(refreshToken)).Scan(&session.ID, &session.JWTVersion)
+		RETURNING id, jwt_version, expires_at
+	`, user.ID, session.DeviceCode, generateDeviceName(), hashRefreshToken(refreshToken)).Scan(&session.ID, &session.JWTVersion, &refreshExpiresAt)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := q.Exec(ctx, `
+		INSERT INTO session_refresh_tokens (token_hash, session_id, expires_at)
+		VALUES ($1, $2, $3)
+	`, hashRefreshToken(refreshToken), session.ID, refreshExpiresAt); err != nil {
 		return nil, err
 	}
 

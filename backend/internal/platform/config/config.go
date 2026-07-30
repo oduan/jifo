@@ -47,8 +47,8 @@ func Load() (Config, error) {
 		AuthRateWindow:    time.Minute,
 		AccessTokenTTL:    15 * time.Minute,
 	}
-	if cfg.DatabaseURL == "" {
-		return Config{}, errors.New("DATABASE_URL is required")
+	if cfg.DatabaseURL == "" && strings.TrimSpace(os.Getenv("PGHOST")) == "" {
+		return Config{}, errors.New("DATABASE_URL or PGHOST is required")
 	}
 	if cfg.JWTSecret == "" {
 		return Config{}, errors.New("JWT_SECRET is required")

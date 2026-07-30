@@ -91,6 +91,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	note, err := h.svc.Create(r.Context(), CreateInput{UserID: userID, ClientID: req.ClientID, Content: req.Content, PlainText: req.PlainText})
 	if err != nil {
+		if errors.Is(err, ErrMediaAssetUnavailable) {
+			httpx.WriteError(w, r, http.StatusBadRequest, "media_unavailable", "referenced media is unavailable")
+			return
+		}
 		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "create note failed")
 		return
 	}
@@ -257,6 +261,10 @@ func noteIDParam(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 func writeMutationError(w http.ResponseWriter, r *http.Request, err error, message string) {
 	if errors.Is(err, ErrNoteNotFound) {
 		httpx.WriteError(w, r, http.StatusNotFound, "note_not_found", "note not found")
+		return
+	}
+	if errors.Is(err, ErrMediaAssetUnavailable) {
+		httpx.WriteError(w, r, http.StatusBadRequest, "media_unavailable", "referenced media is unavailable")
 		return
 	}
 	httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", message)

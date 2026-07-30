@@ -91,14 +91,15 @@ type OutboxOperation = {
 
 1. 获取同步锁。
 2. 恢复上次中断遗留的 `pushing` 操作为 `failed + interrupted_sync`。
-3. 读取 `pending/failed` outbox，按 `localSeq` 排序。
-4. 标记本批为 `pushing`。
-5. 媒体优先上传。
-6. `pushOutbox()` 推送 note 操作。
-7. 根据 push result 清理或保留 outbox。
-8. `pullChanges(cursor)` 拉取远端变更。
-9. 写入 `notes_cache` 和 `sync_state.cursor`。
-10. 释放同步锁。
+3. 合并同一草稿的 `create + update`、取消 `create + delete`，并把同一远端笔记的连续 `update` 压缩为最后内容。
+4. 读取 `pending/failed` outbox，按 `localSeq` 排序。
+5. 标记本批为 `pushing`。
+6. 媒体优先上传。
+7. `pushOutbox()` 推送 note 操作。
+8. 根据 push result 清理或保留 outbox。
+9. `pullChanges(cursor)` 拉取远端变更；发生版本冲突或删除冲突时先清空增量游标，完整对账原始笔记与冲突副本。
+10. 写入 `notes_cache` 和 `sync_state.cursor`；永久 tombstone 会删除缓存及相关 outbox。
+11. 释放同步锁。
 
 ```mermaid
 graph LR
@@ -143,8 +144,6 @@ graph LR
       "entity": "note",
       "action": "create",
       "clientId": "client-note-001",
-      "noteId": "uuid-for-update-delete-restore",
-      "baseVersion": 1,
       "payload": {
         "blocks": [{ "type": "paragraph", "text": "离线创建 #思考" }],
         "plainText": "离线创建 #思考"
@@ -164,7 +163,9 @@ graph LR
 }
 ```
 
-单个操作失败不会让整批请求失败：Push 始终返回 `200`，逐条给出结果。某条操作解析失败或执行出错时返回 `{ "opId": "...", "status": "error", "code": "..." }`（`code` 如 `bad_request` / `note_not_found` / `internal_error`），其余操作照常处理。前端据此仅重试失败项，成功项照常清理 outbox。
+每批最多 500 个操作。`create` 不发送客户端的 `local-note-*` 临时 ID；`noteId` 仅用于 `update`、`delete`、`restore`，并且必须是服务端 UUID。
+
+单个操作失败不会让整批请求失败：Push 始终返回 `200`，逐条给出结果。某条操作解析失败或执行出错时返回 `{ "opId": "...", "status": "error", "code": "..." }`（`code` 如 `bad_request` / `note_not_found` / `media_unavailable` / `internal_error`），其余操作照常处理。前端据此仅重试失败项，成功项照常清理 outbox。
 
 ### Pull
 

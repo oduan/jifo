@@ -8,12 +8,13 @@ describe('sync api adapter', () => {
     const request = vi.fn(async () => ({ results: [{ opId: 'op1', status: 'created', noteId: 'n1', version: 1 }] }));
     const client = { request } as unknown as ApiClient;
     const results = await pushOutbox(client, [{
-      opId: 'op1', entity: 'note', action: 'create', clientId: 'c1', baseVersion: 0,
+      opId: 'op1', entity: 'note', action: 'create', clientId: 'c1', noteId: 'local-note-1', baseVersion: 0,
       payload: { blocks: [{ type: 'paragraph', content: 'hello #tag' }] }, createdAt: '2026-01-01T00:00:00Z', status: 'pending'
     }]);
 
     expect(results[0]).toMatchObject({ status: 'created', noteId: 'n1' });
     const body = JSON.parse(request.mock.calls[0][1]?.body as string);
+    expect(body.operations[0]).not.toHaveProperty('noteId');
     expect(body.operations[0].payload).toEqual({ blocks: [{ type: 'paragraph', text: 'hello #tag' }], plainText: 'hello #tag' });
   });
 

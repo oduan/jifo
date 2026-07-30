@@ -24,6 +24,8 @@ type Handler struct {
 	svc HandlerService
 }
 
+const maxPushOperations = 500
+
 func NewHandler(svc HandlerService) *Handler {
 	return &Handler{svc: svc}
 }
@@ -114,6 +116,10 @@ func (h *Handler) Push(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "operations are required")
 		return
 	}
+	if len(req.Operations) > maxPushOperations {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "too many operations; maximum is 500")
+		return
+	}
 
 	out := make([]pushResultDTO, 0, len(req.Operations))
 	for _, item := range req.Operations {
@@ -128,6 +134,8 @@ func (h *Handler) Push(w http.ResponseWriter, r *http.Request) {
 			code := "internal_error"
 			if errors.Is(err, notes.ErrNoteNotFound) {
 				code = "note_not_found"
+			} else if errors.Is(err, notes.ErrMediaAssetUnavailable) {
+				code = "media_unavailable"
 			}
 			out = append(out, pushResultDTO{OpID: item.OpID, Status: "error", Code: code})
 			continue

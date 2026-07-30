@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { authStore } from './authStore';
@@ -90,5 +90,54 @@ describe('useAuthSession 静默刷新退避', () => {
     // 退避窗口内不再发起刷新
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('在途刷新成功不会覆盖其他标签页写入的新会话', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () => new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+    authStore.setSession({ accessToken: makeToken(3600), refreshToken: 'old-refresh', user: { id: 'old-user', email: 'old@example.com' } });
+    const { result } = renderHook(() => useAuthSession());
+
+    const refreshPromise = result.current.refreshSession();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    act(() => {
+      authStore.setSession({ accessToken: 'new-access', refreshToken: 'new-refresh', user: { id: 'new-user', email: 'new@example.com' } });
+    });
+    resolveFetch?.(new Response(JSON.stringify({ accessToken: 'stale-access', refreshToken: 'stale-refresh', user: { id: 'old-user', email: 'old@example.com' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+    await refreshPromise;
+
+    expect(authStore.getState()).toEqual({ accessToken: 'new-access', refreshToken: 'new-refresh', user: { id: 'new-user', email: 'new@example.com' } });
+  });
+
+  test('旧刷新请求的 401 不会清空后来登录的会话', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    global.fetch = vi.fn(
+      () => new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      })
+    ) as unknown as typeof fetch;
+    authStore.setSession({ accessToken: makeToken(3600), refreshToken: 'old-refresh', user: { id: 'old-user', email: 'old@example.com' } });
+    const { result } = renderHook(() => useAuthSession());
+
+    const refreshPromise = result.current.refreshSession();
+    act(() => {
+      authStore.setSession({ accessToken: 'new-access', refreshToken: 'new-refresh', user: { id: 'new-user', email: 'new@example.com' } });
+    });
+    resolveFetch?.(new Response(JSON.stringify({ error: { code: 'invalid_refresh_token' } }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' }
+    }));
+    await refreshPromise;
+
+    expect(authStore.getState().refreshToken).toBe('new-refresh');
+    expect(authStore.getState().user?.id).toBe('new-user');
   });
 });

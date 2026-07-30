@@ -65,6 +65,26 @@ func TestLoadMigrationFilesSortsByVersion(t *testing.T) {
 	if files[0].Version != "001_first" || files[1].Version != "002_second" {
 		t.Fatalf("files not sorted by version: %#v", files)
 	}
+	if files[0].Checksum == "" || files[0].Checksum == files[1].Checksum {
+		t.Fatalf("migration checksums must be non-empty and content-specific: %#v", files)
+	}
+}
+
+func TestMigrationChecksumIsStableAcrossLineEndings(t *testing.T) {
+	lf := []byte("CREATE TABLE example (id bigint);\nSELECT 1;\n")
+	crlf := []byte("CREATE TABLE example (id bigint);\r\nSELECT 1;\r\n")
+	if migrationChecksum(lf) != migrationChecksum(crlf) {
+		t.Fatal("migration checksum must not depend on platform line endings")
+	}
+}
+
+func TestNoTransactionMigrationDirective(t *testing.T) {
+	if !isNoTransactionMigration("-- jifo:no-transaction\nCREATE INDEX CONCURRENTLY idx ON notes(id);") {
+		t.Fatal("expected no-transaction directive to be detected")
+	}
+	if isNoTransactionMigration("CREATE INDEX idx ON notes(id);") {
+		t.Fatal("ordinary migration must remain transactional")
+	}
 }
 
 func TestRepairActiveTagCountsMigrationExcludesDeletedNotes(t *testing.T) {
@@ -97,7 +117,7 @@ func TestInitMigrationExecutesAndCreatesConstraintsWhenDatabaseAvailable(t *test
 	}
 	t.Cleanup(pool.Close)
 
-	dropSQL := "DROP TABLE IF EXISTS schema_migrations, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
+	dropSQL := "DROP TABLE IF EXISTS schema_migrations, session_refresh_tokens, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
 	if _, err := pool.Exec(ctx, dropSQL); err != nil {
 		t.Fatalf("drop existing tables: %v", err)
 	}
@@ -132,7 +152,7 @@ func TestRunMigrationsExecutesAndSkipsWhenDatabaseAvailable(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	dropSQL := "DROP TABLE IF EXISTS schema_migrations, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
+	dropSQL := "DROP TABLE IF EXISTS schema_migrations, session_refresh_tokens, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
 	if _, err := pool.Exec(ctx, dropSQL); err != nil {
 		t.Fatalf("drop existing tables: %v", err)
 	}

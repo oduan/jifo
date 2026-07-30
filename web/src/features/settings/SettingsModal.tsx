@@ -18,11 +18,16 @@ type SettingsModalProps = {
   onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
 };
 
-export function SettingsModal({ open, accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey, onDeleteAccessKey, onChangePassword }: SettingsModalProps) {
+export function SettingsModal(props: SettingsModalProps) {
+  return props.open ? <SettingsModalContent {...props} /> : null;
+}
+
+function SettingsModalContent({ accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey, onDeleteAccessKey, onChangePassword }: SettingsModalProps) {
   const [activeSection, setActiveSection] = useState<'account' | 'keys'>('keys');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [label, setLabel] = useState('');
   const [expiresDays, setExpiresDays] = useState('');
+  const [keyFormError, setKeyFormError] = useState<string | null>(null);
   const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -32,28 +37,12 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
   const [accountError, setAccountError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) {
-      if (activeSection === 'keys') {
-        void onLoadAccessKeys?.();
-      }
-    } else {
-      setActiveSection('keys');
-      setShowCreateForm(false);
-      setLabel('');
-      setExpiresDays('');
-      setGeneratedSecret(null);
-      setCopied(false);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setAccountError(null);
+    if (activeSection === 'keys') {
+      void onLoadAccessKeys?.();
     }
-  }, [activeSection, open, onLoadAccessKeys]);
+  }, [activeSection, onLoadAccessKeys]);
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
@@ -61,17 +50,18 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [onClose, open]);
-
-  if (!open) {
-    return null;
-  }
+  }, [onClose]);
 
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedDays = expiresDays.trim();
     const parsedDays = trimmedDays ? Number(trimmedDays) : undefined;
-    const expiresInDays = typeof parsedDays === 'number' && Number.isFinite(parsedDays) && parsedDays > 0 ? Math.floor(parsedDays) : undefined;
+    if (parsedDays !== undefined && (!Number.isInteger(parsedDays) || parsedDays < 1 || parsedDays > 3650)) {
+      setKeyFormError('有效期必须是 1 到 3650 之间的整数天数。');
+      return;
+    }
+    setKeyFormError(null);
+    const expiresInDays = parsedDays;
     const result = await onCreateAccessKey?.(label, expiresInDays);
     if (result) {
       setGeneratedSecret(result.secret);
@@ -174,7 +164,7 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
             </div>
 
             {showCreateForm ? (
-              <form className="access-key-create" onSubmit={submitCreate}>
+              <form className="access-key-create" noValidate onSubmit={submitCreate}>
                 <label htmlFor="access-key-label">密钥备注</label>
                 <div className="access-key-create__row">
                   <TextInput id="access-key-label" name="access-key-label" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="例如：Mac CLI" />
@@ -186,7 +176,8 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
                   </Button>
                 </div>
                 <label htmlFor="access-key-expires">有效期（天，可选，留空表示永久）</label>
-                <TextInput id="access-key-expires" name="access-key-expires" type="number" min={1} step={1} value={expiresDays} onChange={(event) => setExpiresDays(event.target.value)} placeholder="例如：90" />
+                <TextInput id="access-key-expires" name="access-key-expires" type="number" min={1} max={3650} step={1} value={expiresDays} onChange={(event) => setExpiresDays(event.target.value)} placeholder="例如：90" />
+                {keyFormError ? <div className="settings-modal__error" role="alert">{keyFormError}</div> : null}
               </form>
             ) : null}
 

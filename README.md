@@ -17,6 +17,7 @@ Jifo 面向快速记录与长期整理：在简洁的时间流中记录文字和
 - 离线基础：Web 使用 IndexedDB 缓存和 outbox，同步接口支持幂等写入与增量拉取。
 - 自托管：Go API、React Web 和 PostgreSQL 均可通过 Docker Compose 部署。
 - CLI：通过访问密钥查询、搜索和创建笔记，适合脚本与 AI agent。
+- Android：原生离线优先客户端，支持运行时选择自托管服务器。
 - MCP：提供带 Bearer 鉴权的 Streamable HTTP 端点，让 Codex 等 agent 搜索和修改笔记、标签。
 
 ## 技术栈
@@ -68,7 +69,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-打开 [http://localhost:8086](http://localhost:8086)。只有 Web/Nginx 的 `8086` 端口绑定到宿主机回环地址；API 和 PostgreSQL 不发布宿主机端口，只能通过 Compose 内部网络和服务名访问。Compose 中 API 以 root 运行，以便直接管理 bind-mounted `data/media`；直接运行 API 镜像时仍使用 Dockerfile 定义的非 root 用户。
+打开 [http://localhost:8086](http://localhost:8086)。只有 Web/Nginx 的 `8086` 端口绑定到宿主机回环地址；API 和 PostgreSQL 不发布宿主机端口，只能通过 Compose 内部网络和服务名访问。一次性的 `media-init` 容器负责初始化 bind-mounted `data/media` 权限，API 始终以 UID/GID `10001` 的非 root 用户运行。
 
 查看日志：
 
@@ -216,7 +217,7 @@ codex mcp list
 
 环境要求：
 
-- Go 1.25.7+
+- Go 1.25.12+
 - Node.js 20+
 - Docker 与 Docker Compose
 
@@ -279,6 +280,8 @@ go run ./cmd/jifo notes list --search "关键词" --limit 20 --offset 0 --json
 go run ./cmd/jifo notes create --text "今天的想法 #思考" --json
 go run ./cmd/jifo tags tree --json
 ```
+
+CLI 的默认地址已经是 `http://localhost:8086/api`，使用默认 Compose 入口时可以省略 `--base-url`。
 
 也可以通过环境变量配置：
 

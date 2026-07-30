@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Go 1.25.7+
+- Go 1.25.12+
 - Node.js 20+ / npm
 - Docker 与 Docker Compose
 - PostgreSQL 16（仅在宿主机直接运行 Go API 时需要）
@@ -31,7 +31,15 @@ DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET
 
 示例中的用户名和密码仅供本机开发，请按实际 PostgreSQL 配置替换。
 
-后端启动后会自动按文件名顺序执行 `backend/migrations/*.sql` 中尚未记录的迁移，并记录到 `schema_migrations`。
+也可以使用 PostgreSQL 标准变量，避免把包含 `@`、`:` 等字符的密码拼入 URL：
+
+```bash
+cd backend
+PGHOST=localhost PGPORT=5432 PGUSER=jifo PGPASSWORD='your-password' PGDATABASE=jifo PGSSLMODE=disable \
+JWT_SECRET=dev-secret-change-me-32-bytes-minimum go run ./cmd/api
+```
+
+后端启动后会自动按文件名顺序执行 `backend/migrations/*.sql` 中尚未记录的迁移，并在 `schema_migrations` 中记录内容校验值。执行器在一条专用数据库连接上持有 advisory lock，且支持事务外的并发索引 migration。
 
 - 全新数据库：直接启动 backend，会自动执行 `001_init.sql`、`002_access_keys.sql` 等全部迁移。
 - 存量旧数据库：迁移执行器不做旧结构认领。如果旧环境已经手动执行过旧 migration，需要先人工补 `schema_migrations` 记录。
@@ -66,6 +74,10 @@ INSERT INTO schema_migrations (version) VALUES ('001_init') ON CONFLICT (version
 - `AUTH_RATE_LIMIT`、`AUTH_RATE_WINDOW`：认证端点单 IP 限流
 - `ACCESS_TOKEN_TTL`：JWT access token 有效期，默认 `15m`
 - `CLEANUP_INTERVAL`、`CLEANUP_TIMEOUT`：回收站和无引用媒体清理任务配置
+
+## Android 本地连接
+
+模拟器默认连接 `http://10.0.2.2:8086/api/`，也可以在登录页输入其他服务器地址。debug 构建允许本地 HTTP；release 构建只接受 HTTPS。构建时可通过 `-PjifoApiBaseUrl=...` 或 `JIFO_ANDROID_API_BASE_URL` 修改默认值。
 
 ## 启动 Web
 

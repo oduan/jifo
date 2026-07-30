@@ -60,21 +60,17 @@ export type WorkspaceBindings = {
   resolveMediaUrl: (mediaId: string) => Promise<string>;
 };
 
-type AppErrorState = {
-  message: string;
-  retryWorkspace: boolean;
-};
-
 const WorkspaceContext = createContext<WorkspaceBindings | null>(null);
 
 // WorkspaceProvider 汇聚工作区数据（笔记/标签/热力图）、视图状态、toast 与所有变更行为，
 // 供 NotesPage 及其子组件通过 useWorkspace / useOptionalWorkspace 取用，避免逐层透传大量 props。
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { authState, client, logout, updatePassword } = useAuth();
+  const userId = authState.user?.id;
   // 无 user.id 时不创建 Dexie 实例，避免多个未识别会话串写到共享的 'guest' 库。
   const localDb = useMemo(
-    () => (authState.user?.id ? createJifoDb(`jifo-${authState.user.id}`) : null),
-    [authState.user?.id]
+    () => (userId ? createJifoDb(`jifo-${userId}`) : null),
+    [userId]
   );
 
   const { view, setQuery, selectTag, selectTrash, reset: resetView } = useWorkspaceView();
@@ -84,9 +80,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isLoadingAccessKeys, setLoadingAccessKeys] = useState(false);
   const [isCreatingAccessKey, setCreatingAccessKey] = useState(false);
-  const [error, setError] = useState<AppErrorState | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastIdRef = useRef(0);
+  const loadWorkspaceRef = useRef<() => Promise<void>>(async () => undefined);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -102,13 +98,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const reportError = useCallback((message: string, retryWorkspace: boolean) => {
-    setError((current) => {
-      if (current?.message === message && current.retryWorkspace === retryWorkspace) {
-        return current;
-      }
-      return { message, retryWorkspace };
-    });
-  }, []);
+    pushToast(
+      message,
+      retryWorkspace ? { label: '重试', onClick: () => void loadWorkspaceRef.current() } : undefined
+    );
+  }, [pushToast]);
 
   const filters = useMemo(
     () => ({ debouncedQuery: debouncedNoteQuery, tagPath: view.tagPath, showTrash: view.showTrash }),
@@ -118,8 +112,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const workspace = useNotesWorkspace({ client, db: localDb, filters, reportError });
   const { loadWorkspace } = workspace;
   // toast 重试回调通过 ref 调用最新 loadWorkspace，避免陈旧闭包
-  const loadWorkspaceRef = useRef(loadWorkspace);
-  loadWorkspaceRef.current = loadWorkspace;
+  useEffect(() => {
+    loadWorkspaceRef.current = loadWorkspace;
+  }, [loadWorkspace]);
 
   useEffect(() => () => localDb?.close(), [localDb]);
 
@@ -127,17 +122,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => setDebouncedNoteQuery(view.query), 300);
     return () => window.clearTimeout(timer);
   }, [view.query]);
-
-  useEffect(() => {
-    if (!error) {
-      return;
-    }
-    pushToast(
-      error.message,
-      error.retryWorkspace ? { label: '重试', onClick: () => void loadWorkspaceRef.current() } : undefined
-    );
-    setError(null);
-  }, [error, pushToast]);
 
   const syncNow = useCallback(async () => {
     const db = localDb;
@@ -157,18 +141,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void loadWorkspace();
-    // Provider 仅在已认证时挂载；卸载（登出）时清空 URL 视图参数。
-    // 其余状态随 Provider 卸载一并释放，无需手动重置。
-    return () => resetView();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadWorkspace]);
+
+  // Provider 仅在已认证时挂载；卸载（登出）时清空 URL 视图参数。
+  useEffect(() => () => resetView(), [resetView]);
 
   useEffect(() => {
     let active = true;
     const synchronize = () => {
       if (!navigator.onLine) return;
       void syncNow().then(async () => {
-        if (active) await loadWorkspace();
+        if (active) await loadWorkspaceRef.current();
       }).catch(() => undefined);
     };
     synchronize();
@@ -179,7 +162,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', synchronize);
       window.clearInterval(timer);
     };
-  }, [loadWorkspace, syncNow]);
+  }, [syncNow]);
 
   const loadAccessKeys = useCallback(async () => {
     if (!authState.accessToken) {
@@ -273,7 +256,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const runTagMutation = useCallback(
     async (operation: () => Promise<void>) => {
-      setError(null);
       try {
         await operation();
         selectTag(null);

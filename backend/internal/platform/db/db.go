@@ -2,14 +2,12 @@ package db
 
 import (
 	"context"
-	"errors"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	if databaseURL == "" {
-		return nil, errors.New("database url is required")
-	}
+	// An empty connection string tells pgx to use standard PGHOST/PGPORT/
+	// PGUSER/PGPASSWORD/PGDATABASE variables. This avoids URL-escaping secrets.
 	return pgxpool.New(ctx, databaseURL)
 }

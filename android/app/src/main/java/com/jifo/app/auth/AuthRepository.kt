@@ -15,7 +15,14 @@ class JifoAuthRemote(private val api: JifoApi) : AuthRemote {
     override suspend fun register(body: AuthRequest): AuthResponse = api.register(body)
 }
 
-data class StoredSession(val accessToken: String, val refreshToken: String?, val userEmail: String?, val username: String?, val deviceCode: String)
+data class StoredSession(
+    val accessToken: String,
+    val refreshToken: String?,
+    val userEmail: String?,
+    val username: String?,
+    val deviceCode: String,
+    val userId: String? = null
+)
 
 interface SessionStore {
     suspend fun current(): StoredSession?

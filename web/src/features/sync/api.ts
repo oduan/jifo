@@ -32,7 +32,10 @@ export async function pushOutbox(client: ApiClient, operations: OutboxOperation[
           entity: operation.entity,
           action: operation.action,
           clientId: operation.clientId,
-          noteId: operation.noteId,
+          // A Web offline draft uses a local-note-* cache key. Creates are
+          // identified by clientId; sending that local key as noteId would be
+          // rejected by the backend UUID parser.
+          noteId: operation.action === 'create' ? undefined : operation.noteId,
           baseVersion: operation.baseVersion,
           payload: { blocks: blocks.map(toApiBlock), plainText: plainText(blocks) }
         };

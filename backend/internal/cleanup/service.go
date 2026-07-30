@@ -82,6 +82,8 @@ func (s *Service) RunOnce(ctx context.Context, now time.Time) (int64, bool, erro
 		UPDATE notes n
 		SET permanently_deleted_at = $1,
 		    updated_at = $1,
+		    content = '{"blocks":[]}'::jsonb,
+		    plain_text = '',
 		    version = version + 1
 		FROM due
 		WHERE n.id = due.id
@@ -102,7 +104,7 @@ func (s *Service) RunOnce(ctx context.Context, now time.Time) (int64, bool, erro
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_assets ma
 		SET deleted_at = COALESCE(ma.deleted_at, $1::timestamptz),
-		    purge_after = COALESCE(ma.purge_after, $1::timestamptz)
+		    purge_after = COALESCE(ma.purge_after, $1::timestamptz + interval '7 days')
 		WHERE ma.deleted_at IS NULL
 		  AND ma.created_at <= ($1::timestamptz - interval '24 hours')
 		  AND NOT EXISTS (SELECT 1 FROM note_media_refs nmr WHERE nmr.media_id = ma.id)
@@ -112,9 +114,28 @@ func (s *Service) RunOnce(ctx context.Context, now time.Time) (int64, bool, erro
 	}
 
 	if _, err := tx.Exec(ctx, `
+		DELETE FROM session_refresh_tokens
+		WHERE expires_at < now() - interval '1 day'
+	`); err != nil {
+		return 0, false, err
+	}
+
+	if _, err := tx.Exec(ctx, `
 		DELETE FROM user_sessions
 		WHERE (revoked_at IS NOT NULL AND revoked_at < now() - interval '30 days')
 		   OR expires_at < now() - interval '30 days'
+	`); err != nil {
+		return 0, false, err
+	}
+
+	// Idempotency records and dead access-key metadata have bounded utility.
+	// Permanent note tombstones are intentionally retained: removing them
+	// without a sync watermark could resurrect notes on very stale clients.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM sync_operations WHERE created_at < now() - interval '365 days';
+		DELETE FROM access_keys
+		WHERE (revoked_at IS NOT NULL AND revoked_at < now() - interval '90 days')
+		   OR (expires_at IS NOT NULL AND expires_at < now() - interval '90 days')
 	`); err != nil {
 		return 0, false, err
 	}

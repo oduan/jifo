@@ -69,11 +69,17 @@ button {
 }
 
 button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
 summary:focus-visible {
   outline: 3px solid rgba(61, 124, 74, 0.32);
   outline-offset: 3px;
+}
+
+input:not([type='checkbox']):not([type='radio']):focus,
+input:not([type='checkbox']):not([type='radio']):focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 h1,
@@ -467,10 +473,12 @@ h3 {
   background: rgba(255, 255, 255, 0.68);
 }
 
+.workspace-search__input:focus,
 .workspace-search__input:focus-visible {
   outline: none;
-  border-color: var(--jifo-focus);
-  box-shadow: 0 0 0 2px var(--jifo-focus-ring);
+  border-color: var(--jifo-line);
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: none;
 }
 
 .composer-card {
@@ -1216,8 +1224,9 @@ h3 {
 }
 
 .tag-edit-modal__controls input:focus {
-  border-color: var(--jifo-focus);
-  background: #fff;
+  border-color: transparent;
+  background: rgba(32, 27, 22, 0.055);
+  box-shadow: none;
 }
 
 .tag-edit-modal__controls button {
@@ -1746,8 +1755,9 @@ h3 {
 }
 
 .note-editor__input-wrap:focus-within {
-  border-color: var(--jifo-focus);
-  box-shadow: 0 0 0 2px var(--jifo-focus-ring);
+  border-color: var(--jifo-line);
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: none;
 }
 
 .note-editor__textarea {

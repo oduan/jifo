@@ -6,9 +6,14 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          markdown: ['react-markdown', 'remark-gfm', 'remark-breaks'],
-          storage: ['dexie']
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, '/');
+          if (['react-markdown', 'remark-gfm', 'remark-breaks'].some((name) => normalizedId.includes(`/node_modules/${name}/`))) {
+            return 'markdown';
+          }
+          if (normalizedId.includes('/node_modules/dexie/')) {
+            return 'storage';
+          }
         }
       }
     }

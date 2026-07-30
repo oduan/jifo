@@ -167,7 +167,7 @@ Authorization: Bearer <accessKey>
 }
 ```
 
-`expiresInDays` 可选：为正整数时密钥在 N 天后过期；缺省或为 0 时密钥永久有效（向后兼容）。
+`expiresInDays` 可选：取值为 `1`–`3650` 的整数时密钥在 N 天后过期；缺省或为 0 时密钥永久有效（向后兼容）。
 
 响应 `201`：
 
@@ -188,7 +188,7 @@ Authorization: Bearer <accessKey>
 
 常见错误：
 
-- `400 bad_request`：缺少备注、`expiresInDays` 为负数或 JSON 无效
+- `400 bad_request`：缺少备注、`expiresInDays` 不在 `0`–`3650` 范围内或 JSON 无效
 
 ### 删除访问密钥
 
@@ -419,7 +419,7 @@ Authorization: Bearer <accessKey>
 }
 ```
 
-说明：按用户隔离，按日期聚合；永久删除笔记不计入。
+说明：按用户隔离，按日期聚合；永久删除笔记不计入。`from` 和 `to` 均为包含端点，范围最多 366 天，且 `to` 不能早于 `from`。
 
 ## Media
 
@@ -502,8 +502,6 @@ Authorization: Bearer <accessKey>
       "entity": "note",
       "action": "create",
       "clientId": "client-note-001",
-      "noteId": "uuid-for-update-delete-restore",
-      "baseVersion": 1,
       "payload": {
         "blocks": [{ "type": "paragraph", "text": "离线创建 #思考" }],
         "plainText": "离线创建 #思考"
@@ -529,6 +527,8 @@ Authorization: Bearer <accessKey>
 ```
 
 `status` 由 `internal/sync.Service` 返回，包括 `created`、`updated`、`deleted`、`restored`、`duplicate`、`conflict_copied`、`delete_conflict_ignored` 等。
+
+单次请求最多包含 500 个操作。`create` 只依赖 `clientId`，客户端本地生成的临时笔记 ID 不应作为 `noteId` 发送；`update`、`delete`、`restore` 的 `noteId` 必须是服务端 UUID。
 
 ### Pull
 

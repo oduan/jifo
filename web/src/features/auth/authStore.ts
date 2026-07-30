@@ -74,6 +74,18 @@ function readStoredState(): AuthState {
 
 let state: AuthState = readStoredState();
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== storageKey) return;
+    try {
+      state = event.newValue ? parseStoredState(event.newValue) ?? { ...emptyState } : { ...emptyState };
+    } catch {
+      state = { ...emptyState };
+    }
+    notify();
+  });
+}
+
 function persist() {
   if (typeof localStorage === 'undefined') {
     return;

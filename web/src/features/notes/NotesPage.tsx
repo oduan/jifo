@@ -91,7 +91,7 @@ export function NotesPage(props: NotesPageProps) {
     () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 920px)').matches
   );
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
+  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
   const allNotesCount = totalNoteCount ?? notes.length;

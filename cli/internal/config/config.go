@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const DefaultBaseURL = "http://localhost:8080/api"
+const DefaultBaseURL = "http://localhost:8086/api"
 
 const (
 	TokenSourceNone   = "none"

@@ -2,6 +2,7 @@ package heatmap
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -52,6 +53,14 @@ func TestStartOfDayUsesLocalDSTBoundary(t *testing.T) {
 	nextDay := day.AddDate(0, 0, 1)
 	if got := nextDay.Sub(day); got != 23*time.Hour {
 		t.Fatalf("DST transition day length = %s, want 23h", got)
+	}
+}
+
+func TestAggregateRejectsRangesOverOneYearBeforeQuerying(t *testing.T) {
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := NewService(nil).Aggregate(context.Background(), uuid.New(), from, from.AddDate(0, 0, MaxRangeDays))
+	if !errors.Is(err, ErrRangeTooLarge) {
+		t.Fatalf("Aggregate() error = %v, want %v", err, ErrRangeTooLarge)
 	}
 }
 
@@ -115,14 +124,7 @@ func insertHeatmapNote(t *testing.T, ctx context.Context, db *pgxpool.Pool, user
 
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
-
-	dropSQL := "DROP TABLE IF EXISTS sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
-	if _, err := db.Exec(ctx, dropSQL); err != nil {
-		t.Fatalf("drop existing tables: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(ctx, dropSQL)
-	})
+	testutil.ResetDatabase(t, ctx, db)
 
 	if _, err := db.Exec(ctx, loadInitMigration(t)); err != nil {
 		t.Fatalf("execute migration: %v", err)

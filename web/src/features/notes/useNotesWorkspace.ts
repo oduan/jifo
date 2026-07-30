@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { HeatmapCell } from '../heatmap/Heatmap';
 import { loadHeatmap } from '../heatmap/api';
@@ -11,7 +11,7 @@ import { TagNode } from '../tags/TagTree';
 import { fromApiNote, listNoteStats, listNotes } from './api';
 import { Note } from './NoteCard';
 import { NoteBlock } from './NoteEditor';
-import { cachedPlainText, createNotesRepository, fromCachedNote } from './notesRepository';
+import { cachedHasTag, cachedPlainText, createNotesRepository, fromCachedNote } from './notesRepository';
 
 const NOTES_PAGE_SIZE = 20;
 
@@ -41,14 +41,17 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
   const repository = useMemo(() => createNotesRepository({ client, db }), [client, db]);
 
   const notesRef = useRef(notes);
-  notesRef.current = notes;
   const tagsRef = useRef(tags);
-  tagsRef.current = tags;
   const showTrashRef = useRef(filters.showTrash);
-  showTrashRef.current = filters.showTrash;
+  useEffect(() => {
+    notesRef.current = notes;
+    tagsRef.current = tags;
+    showTrashRef.current = filters.showTrash;
+  }, [filters.showTrash, notes, tags]);
   // Monotonic sequence: stale responses (superseded by a newer loadWorkspace
   // call) are discarded instead of clobbering fresher state.
   const requestSeqRef = useRef(0);
+  const loadMoreSeqRef = useRef(0);
   // Key of the in-flight loadWorkspace, used to skip duplicate timer-triggered
   // calls with identical filters while one is already running.
   const inFlightKeyRef = useRef<string | null>(null);
@@ -77,9 +80,13 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
       return;
     }
     const seq = ++requestSeqRef.current;
+    ++loadMoreSeqRef.current;
     inFlightKeyRef.current = requestKey;
 
     setLoading(true);
+    setLoadingMoreNotes(false);
+    setHasMoreNotes(false);
+    nextCursorRef.current = undefined;
     try {
       const nextTags = await listTagTree(client);
       const [nextNotes, nextStats, nextHeatmap] = await Promise.all([listNotes(client, baseListOptions()), listNoteStats(client), loadHeatmap(client)]);
@@ -118,11 +125,14 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
         return;
       }
       const cached = await db.notes_cache.toArray();
+      if (seq !== requestSeqRef.current) {
+        return;
+      }
       const query = debouncedQuery.trim().toLocaleLowerCase();
       setNotes(cached
         .filter((note) => showTrash ? Boolean(note.deletedAt) && !note.permanentlyDeletedAt : !note.deletedAt && !note.permanentlyDeletedAt)
         .filter((note) => !query || cachedPlainText(note).toLocaleLowerCase().includes(query))
-        .filter((note) => !tagPath || cachedPlainText(note).includes(`#${tagPath}`))
+        .filter((note) => !tagPath || cachedHasTag(note, tagPath))
         .map(fromCachedNote));
       if (loadError instanceof ApiError && loadError.status === 401 && !authStore.getState().refreshToken) {
         authStore.clear();
@@ -143,9 +153,13 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
       return;
     }
 
+    const workspaceSeq = requestSeqRef.current;
+    const loadMoreSeq = ++loadMoreSeqRef.current;
+    const cursor = nextCursorRef.current;
     setLoadingMoreNotes(true);
     try {
-      const next = await listNotes(client, { ...baseListOptions(), cursor: nextCursorRef.current });
+      const next = await listNotes(client, { ...baseListOptions(), cursor });
+      if (workspaceSeq !== requestSeqRef.current || loadMoreSeq !== loadMoreSeqRef.current) return;
       const currentTags = tagsRef.current;
       if (db) {
         await db.notes_cache.bulkPut(next.items.map((note) => ({
@@ -158,6 +172,7 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
           version: note.version
         })));
       }
+      if (workspaceSeq !== requestSeqRef.current || loadMoreSeq !== loadMoreSeqRef.current) return;
       setNotes((current) => {
         const existingIds = new Set(current.map((note) => note.id));
         const appended = next.items
@@ -168,9 +183,11 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
       setHasMoreNotes(next.page.hasMore);
       nextCursorRef.current = next.page.nextCursor;
     } catch (loadError) {
-      reportError(errorMessage(loadError), true);
+      if (workspaceSeq === requestSeqRef.current && loadMoreSeq === loadMoreSeqRef.current) {
+        reportError(errorMessage(loadError), true);
+      }
     } finally {
-      setLoadingMoreNotes(false);
+      if (loadMoreSeq === loadMoreSeqRef.current) setLoadingMoreNotes(false);
     }
   }, [client, db, hasMoreNotes, isLoading, isLoadingMoreNotes, baseListOptions, reportError]);
 
@@ -260,6 +277,8 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
     setHasWorkspaceLoaded(false);
     setHasMoreNotes(false);
     setLoadingMoreNotes(false);
+    ++requestSeqRef.current;
+    ++loadMoreSeqRef.current;
     nextCursorRef.current = undefined;
   }, []);
 
@@ -281,4 +300,3 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
     reset
   };
 }
-

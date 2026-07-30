@@ -36,4 +36,10 @@ interface OutboxDao {
 
     @Query("DELETE FROM outbox_operations WHERE clientId = :clientId AND action = 'create' AND status IN ('pending', 'failed')")
     suspend fun deletePendingCreateForClient(clientId: String)
+
+    @Query("DELETE FROM outbox_operations WHERE noteId = :noteId OR clientId = :clientId")
+    suspend fun deleteForNote(noteId: String, clientId: String)
+
+    @Query("DELETE FROM outbox_operations")
+    suspend fun clear()
 }

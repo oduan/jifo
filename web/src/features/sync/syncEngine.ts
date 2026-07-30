@@ -163,6 +163,68 @@ async function markOperations(db: JifoDb, operations: OutboxOperation[], status:
   });
 }
 
+async function compactPendingOperations(db: JifoDb) {
+  const operations = await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
+  const groups = new Map<string, OutboxOperation[]>();
+  for (const operation of operations) {
+    const key = `${operation.entity}:${operation.clientId}`;
+    groups.set(key, [...(groups.get(key) ?? []), operation]);
+  }
+
+  await db.transaction('rw', db.outbox, db.notes_cache, async () => {
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+
+      const first = group[0];
+      const firstSeq = first.localSeq;
+      if (firstSeq === undefined) continue;
+      const pendingCreate = first.action === 'create';
+      if (!pendingCreate && group.some((operation) => operation.action !== 'update')) {
+        continue;
+      }
+
+      let draftDeleted = false;
+      let payload = first.payload;
+
+      for (const operation of group.slice(1)) {
+        if (pendingCreate) {
+          if (operation.action === 'delete') {
+            draftDeleted = true;
+          } else if (operation.action === 'restore') {
+            draftDeleted = false;
+            payload = operation.payload;
+          } else if (operation.action === 'update') {
+            payload = operation.payload;
+          }
+          continue;
+        }
+
+        if (operation.payload.blocks) {
+          payload = operation.payload;
+        }
+      }
+
+      if (pendingCreate && draftDeleted) {
+        for (const operation of group) {
+          if (operation.localSeq !== undefined) await db.outbox.delete(operation.localSeq);
+        }
+        if (first.noteId) await db.notes_cache.delete(first.noteId);
+        continue;
+      }
+
+      await db.outbox.update(firstSeq, {
+        action: pendingCreate ? 'create' : 'update',
+        payload,
+        status: 'pending',
+        lastError: undefined
+      });
+      for (const operation of group.slice(1)) {
+        if (operation.localSeq !== undefined) await db.outbox.delete(operation.localSeq);
+      }
+    }
+  });
+}
+
 async function persistOperationPayload(db: JifoDb, operation: OutboxOperation) {
   if (operation.localSeq !== undefined) {
     await db.outbox.update(operation.localSeq, { payload: operation.payload });
@@ -261,7 +323,15 @@ async function settlePushedOperations(db: JifoDb, selectedOps: OutboxOperation[]
 
 async function applyPullChanges(db: JifoDb, changes: PullChangesResult) {
   for (const note of changes.notes) {
-    await db.notes_cache.put(note);
+    if (note.permanentlyDeletedAt) {
+      await db.notes_cache.delete(note.id);
+      const related = await db.outbox.filter((operation) => operation.noteId === note.id || operation.clientId === note.clientId).toArray();
+      for (const operation of related) {
+        if (operation.localSeq !== undefined) await db.outbox.delete(operation.localSeq);
+      }
+    } else {
+      await db.notes_cache.put(note);
+    }
   }
   if (changes.cursor) {
     await db.sync_state.put({ key: 'cursor', value: changes.cursor });
@@ -305,6 +375,9 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
     }
     await ensureSyncLock(db, lockOwner);
     const recoveredCount = await recoverInterruptedPushing(db);
+    if (recoveredCount === 0) {
+      await compactPendingOperations(db);
+    }
     const selectedOps = recoveredCount > 0 ? [] : await db.outbox.where('status').anyOf('pending', 'failed').sortBy('localSeq');
     await markOperations(db, selectedOps, 'pushing');
 
@@ -321,6 +394,12 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
           await applyPushResult(db, result);
         }
         await settlePushedOperations(db, selectedOps, pushResults);
+        if (pushResults.some((result) => result.status === 'conflict_copied' || result.status === 'delete_conflict_ignored')) {
+          // A pending local mutation may have skipped the newer server row
+          // while still advancing the cursor. Reconcile from the beginning so
+          // the original note cannot remain as stale optimistic content.
+          await db.sync_state.delete('cursor');
+        }
       }
     } catch (error) {
       await markOperations(db, selectedOps, 'failed', errorMessage(error));

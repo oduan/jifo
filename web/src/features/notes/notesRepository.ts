@@ -33,6 +33,16 @@ export function cachedPlainText(note: CachedNote) {
   return note.blocks.filter((block): block is Extract<CachedNoteBlock, { type: 'paragraph' }> => block.type === 'paragraph').map((block) => block.content).join('\n\n');
 }
 
+export function cachedHasTag(note: CachedNote, tagPath: string) {
+  const wanted = tagPath.trim();
+  if (!wanted) return true;
+  const tags = cachedPlainText(note).match(/#[^\s#]+/g) ?? [];
+  return tags.some((tag) => {
+    const path = tag.slice(1);
+    return path === wanted || path.startsWith(`${wanted}/`);
+  });
+}
+
 function newLocalId(prefix: string) {
   const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${prefix}-${id}`;
@@ -109,7 +119,13 @@ export function createNotesRepository({ client, db }: { client: ApiClient; db: J
     async restore(id, current, tags) {
       const pendingDeletes = db
         ? await db.outbox
-            .filter((operation) => operation.entity === 'note' && operation.noteId === id && operation.action === 'delete' && operation.status === 'pending')
+            .filter(
+              (operation) =>
+                operation.entity === 'note' &&
+                operation.noteId === id &&
+                operation.action === 'delete' &&
+                (operation.status === 'pending' || operation.status === 'failed')
+            )
             .toArray()
         : [];
       if (db && pendingDeletes.length > 0) {

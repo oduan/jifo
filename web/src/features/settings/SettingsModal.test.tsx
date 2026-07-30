@@ -62,6 +62,20 @@ describe('SettingsModal', () => {
     expect(onCreateAccessKey).toHaveBeenCalledWith('CLI', 90);
   });
 
+  test('无效有效期会显示错误且不会静默创建永久密钥', async () => {
+    const user = userEvent.setup();
+    const onCreateAccessKey = vi.fn();
+    render(<SettingsModal open accessKeys={[]} onClose={vi.fn()} onCreateAccessKey={onCreateAccessKey} />);
+
+    await user.click(screen.getByRole('button', { name: '新建密钥' }));
+    await user.type(screen.getByLabelText('密钥备注'), 'CLI');
+    await user.type(screen.getByLabelText('有效期（天，可选，留空表示永久）'), '1.5');
+    await user.click(screen.getByRole('button', { name: '生成密钥' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('有效期必须是 1 到 3650 之间的整数天数');
+    expect(onCreateAccessKey).not.toHaveBeenCalled();
+  });
+
   test('展示密钥过期时间', () => {
     render(
       <SettingsModal

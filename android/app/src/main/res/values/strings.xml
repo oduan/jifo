@@ -3,4 +3,5 @@
     <string name="login">登录</string>
     <string name="register">注册</string>
     <string name="note_placeholder">记录此刻想法…</string>
+    <string name="server_url_hint">服务器地址，例如 https://jifo.example.com/api/</string>
 </resources>

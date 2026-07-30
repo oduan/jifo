@@ -203,70 +203,100 @@ func (s *Service) MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.
 
 func (s *Service) PurgeDueAssets(ctx context.Context, now time.Time) error {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, user_id, storage_key
+		SELECT id
 		FROM media_assets
 		WHERE deleted_at IS NOT NULL
 		  AND purged_at IS NULL
 		  AND purge_after <= $1
+		ORDER BY purge_after, id
+		LIMIT 500
 	`, now.UTC())
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
-	type dueAsset struct {
-		id         uuid.UUID
-		userID     uuid.UUID
-		storageKey string
-	}
-	due := make([]dueAsset, 0)
+	due := make([]uuid.UUID, 0)
 	for rows.Next() {
-		var a dueAsset
-		if err := rows.Scan(&a.id, &a.userID, &a.storageKey); err != nil {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
 			return err
 		}
-		due = append(due, a)
+		due = append(due, id)
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
 
-	for _, asset := range due {
-		// 物理删除前复查引用：宽限期内被重新引用的资产恢复为正常状态。
-		var referenced bool
-		if err := s.db.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM note_media_refs
-				WHERE user_id = $1 AND media_id = $2
-			)
-		`, asset.userID, asset.id).Scan(&referenced); err != nil {
-			return err
-		}
-		if referenced {
-			if _, err := s.db.Exec(ctx, `
-				UPDATE media_assets
-				SET deleted_at = NULL, purge_after = NULL
-				WHERE user_id = $1 AND id = $2 AND purged_at IS NULL
-			`, asset.userID, asset.id); err != nil {
-				return err
-			}
-			continue
-		}
-		path := filepath.Join(s.mediaRoot, filepath.FromSlash(asset.storageKey))
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			// 单个文件删除失败不阻断整批清理，留待下一轮重试。
-			slog.Warn("purge media file failed", "media_id", asset.id, "path", path, "error", err)
-			continue
-		}
-		if _, err := s.db.Exec(ctx, `
-			UPDATE media_assets
-			SET purged_at = $3
-			WHERE user_id = $1 AND id = $2 AND purged_at IS NULL
-		`, asset.userID, asset.id, now.UTC()); err != nil {
+	for _, id := range due {
+		if err := s.purgeDueAsset(ctx, id, now.UTC()); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *Service) purgeDueAsset(ctx context.Context, assetID uuid.UUID, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var userID uuid.UUID
+	var storageKey string
+	err = tx.QueryRow(ctx, `
+		SELECT user_id, storage_key
+		FROM media_assets
+		WHERE id = $1
+		  AND deleted_at IS NOT NULL
+		  AND purged_at IS NULL
+		  AND purge_after <= $2
+		FOR UPDATE
+	`, assetID, now).Scan(&userID, &storageKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	var referenced bool
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			EXISTS (SELECT 1 FROM note_media_refs WHERE user_id = $1 AND media_id = $2)
+			OR EXISTS (SELECT 1 FROM users WHERE id = $1 AND avatar_media_id = $2)
+	`, userID, assetID).Scan(&referenced); err != nil {
+		return err
+	}
+	if referenced {
+		if _, err := tx.Exec(ctx, `
+			UPDATE media_assets
+			SET deleted_at = NULL, purge_after = NULL
+			WHERE user_id = $1 AND id = $2 AND purged_at IS NULL
+		`, userID, assetID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	// The media row remains locked while the file is removed. Note updates
+	// acquire the same lock before inserting a reference, so a reference can
+	// never commit between this final check and physical deletion.
+	path := filepath.Join(s.mediaRoot, filepath.FromSlash(storageKey))
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("purge media file failed", "media_id", assetID, "path", path, "error", err)
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_assets
+		SET purged_at = $3
+		WHERE user_id = $1 AND id = $2 AND purged_at IS NULL
+	`, userID, assetID, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 type assetScanner interface {

@@ -30,7 +30,16 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 ./gradlew assembleDebug
 ```
 
-Debug builds use `http://10.1.13.2:8080/api/` and allow HTTP cleartext traffic. Release builds use `https://jifo.apecho.com/api/` and do not enable debug cleartext configuration.
+Debug builds default to `http://10.0.2.2:8086/api/` (the Android emulator's host-loopback address). Release builds default to `https://jifo.apecho.com/api/`. The login screen can select another self-hosted server; release builds require HTTPS, while debug builds also allow HTTP for local development.
+
+The compile-time default can be overridden without editing source:
+
+```bash
+./gradlew assembleDebug -PjifoApiBaseUrl=https://notes.example.com/api/
+# Or set JIFO_ANDROID_API_BASE_URL in the build environment.
+```
+
+Changing server or account clears credentials, cached notes, pending media and outbox operations before the new account is used. Android backup is disabled so Room data and tokens are not copied through the platform backup service.
 
 Text and image notes are stored locally first. Pending images are kept in Room together with the note outbox and uploaded automatically by WorkManager when a network connection is available.
 

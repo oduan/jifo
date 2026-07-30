@@ -170,10 +170,11 @@ func (s *Service) Tree(ctx context.Context, userID uuid.UUID) ([]TreeNode, error
 }
 
 func buildTree(tags []Tag) []TreeNode {
-	nodes := make(map[uuid.UUID]*TreeNode, len(tags))
-	roots := make([]*TreeNode, 0)
+	nodes := make(map[uuid.UUID]TreeNode, len(tags))
+	children := make(map[uuid.UUID][]uuid.UUID, len(tags))
+	rootIDs := make([]uuid.UUID, 0)
 	for _, tag := range tags {
-		n := &TreeNode{
+		nodes[tag.ID] = TreeNode{
 			ID:        tag.ID,
 			Name:      tag.Name,
 			Path:      tag.Path,
@@ -182,26 +183,43 @@ func buildTree(tags []Tag) []TreeNode {
 			NoteCount: tag.NoteCount,
 			Children:  make([]TreeNode, 0),
 		}
-		nodes[tag.ID] = n
 	}
 
 	for _, tag := range tags {
-		node := nodes[tag.ID]
 		if tag.ParentID == nil {
-			roots = append(roots, node)
+			rootIDs = append(rootIDs, tag.ID)
 			continue
 		}
-		parent, ok := nodes[*tag.ParentID]
+		_, ok := nodes[*tag.ParentID]
 		if !ok {
-			roots = append(roots, node)
+			rootIDs = append(rootIDs, tag.ID)
 			continue
 		}
-		parent.Children = append(parent.Children, *node)
+		children[*tag.ParentID] = append(children[*tag.ParentID], tag.ID)
 	}
 
-	out := make([]TreeNode, 0, len(roots))
-	for _, root := range roots {
-		out = append(out, *root)
+	var materialize func(uuid.UUID, map[uuid.UUID]bool) TreeNode
+	materialize = func(id uuid.UUID, ancestors map[uuid.UUID]bool) TreeNode {
+		node := nodes[id]
+		if ancestors[id] {
+			return node
+		}
+		nextAncestors := make(map[uuid.UUID]bool, len(ancestors)+1)
+		for ancestor := range ancestors {
+			nextAncestors[ancestor] = true
+		}
+		nextAncestors[id] = true
+		for _, childID := range children[id] {
+			if !nextAncestors[childID] {
+				node.Children = append(node.Children, materialize(childID, nextAncestors))
+			}
+		}
+		return node
+	}
+
+	out := make([]TreeNode, 0, len(rootIDs))
+	for _, rootID := range rootIDs {
+		out = append(out, materialize(rootID, nil))
 	}
 	return out
 }

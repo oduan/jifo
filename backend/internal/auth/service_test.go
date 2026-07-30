@@ -179,7 +179,7 @@ func TestLoginCreatesIndependentSessionsPerDevice(t *testing.T) {
 	}
 }
 
-func TestRefreshRotatesTokenAndRejectsPreviousRefreshToken(t *testing.T) {
+func TestRefreshRotatesTokenAndAllowsPreviousTokenDuringGrace(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
 	resetSchemaAndMigrate(t, ctx, db)
@@ -208,9 +208,15 @@ func TestRefreshRotatesTokenAndRejectsPreviousRefreshToken(t *testing.T) {
 		t.Fatal("refresh should rotate refresh token")
 	}
 
-	_, err = svc.Refresh(ctx, registered.RefreshToken)
-	if !errors.Is(err, ErrInvalidRefreshToken) {
-		t.Fatalf("refresh with old token error = %v, want %v", err, ErrInvalidRefreshToken)
+	retried, err := svc.Refresh(ctx, registered.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh with previous token during grace: %v", err)
+	}
+	if retried.RefreshToken == registered.RefreshToken || retried.RefreshToken == refreshed.RefreshToken {
+		t.Fatal("grace retry must issue a fresh replacement token")
+	}
+	if _, err := svc.Refresh(ctx, refreshed.RefreshToken); err != nil {
+		t.Fatalf("concurrently issued sibling token must remain valid: %v", err)
 	}
 }
 
@@ -301,7 +307,15 @@ func TestRefreshReplayRevokesSession(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 
-	// Replaying the already-rotated token must revoke the session entirely.
+	if _, err := db.Exec(ctx, `
+		UPDATE session_refresh_tokens
+		SET reuse_until = now() - interval '1 second'
+		WHERE token_hash = $1
+	`, hashRefreshToken(registered.RefreshToken)); err != nil {
+		t.Fatalf("expire reuse grace: %v", err)
+	}
+
+	// Replaying outside the bounded grace window revokes the session.
 	if _, err := svc.Refresh(ctx, registered.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Fatalf("replayed refresh error = %v, want %v", err, ErrInvalidRefreshToken)
 	}
@@ -374,16 +388,9 @@ func TestValidateAccessTokenRejectsRevokedOrVersionMismatchedSession(t *testing.
 
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
+	testutil.ResetDatabase(t, ctx, db)
 
-	dropSQL := "DROP TABLE IF EXISTS sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
-	if _, err := db.Exec(ctx, dropSQL); err != nil {
-		t.Fatalf("drop existing tables: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(ctx, dropSQL)
-	})
-
-	for _, name := range []string{"001_init.sql", "006_session_hardening.sql"} {
+	for _, name := range []string{"001_init.sql", "006_session_hardening.sql", "009_refresh_token_families.sql"} {
 		if _, err := db.Exec(ctx, loadMigration(t, name)); err != nil {
 			t.Fatalf("execute migration %s: %v", name, err)
 		}

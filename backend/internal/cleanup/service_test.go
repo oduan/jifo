@@ -12,9 +12,10 @@ import (
 	"jifo/backend/internal/platform/testutil"
 )
 
-func TestRunOncePermanentlyDeletesDueTrashAndPurgesOldOrphanMedia(t *testing.T) {
+func TestRunOnceScrubsDueTrashAndGivesOrphanMediaGracePeriod(t *testing.T) {
 	pool := testutil.OpenTestDB(t)
 	ctx := context.Background()
+	testutil.ResetDatabase(t, ctx, pool)
 	if err := platformdb.RunMigrations(ctx, pool); err != nil {
 		t.Fatalf("RunMigrations() error = %v", err)
 	}
@@ -29,7 +30,7 @@ func TestRunOncePermanentlyDeletesDueTrashAndPurgesOldOrphanMedia(t *testing.T) 
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO notes (id, user_id, client_id, content, plain_text, deleted_at, purge_after)
-		VALUES ($1, $2, 'cleanup-note', '{"blocks":[]}', '', $3, $3)
+		VALUES ($1, $2, 'cleanup-note', '{"blocks":[{"type":"paragraph","text":"secret"}]}', 'secret', $3, $3)
 	`, noteID, userID, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -49,14 +50,23 @@ func TestRunOncePermanentlyDeletesDueTrashAndPurgesOldOrphanMedia(t *testing.T) 
 		t.Fatalf("RunOnce() = count %d, ran %v; want 1, true", count, ran)
 	}
 
-	var permanentlyDeletedAt, purgedAt *time.Time
-	if err := pool.QueryRow(ctx, `SELECT permanently_deleted_at FROM notes WHERE id = $1`, noteID).Scan(&permanentlyDeletedAt); err != nil {
+	var permanentlyDeletedAt *time.Time
+	var plainText string
+	var blockCount int
+	if err := pool.QueryRow(ctx, `SELECT permanently_deleted_at, plain_text, jsonb_array_length(content->'blocks') FROM notes WHERE id = $1`, noteID).Scan(&permanentlyDeletedAt, &plainText, &blockCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT purged_at FROM media_assets WHERE id = $1`, mediaID).Scan(&purgedAt); err != nil {
+	var deletedAt, purgeAfter, purgedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT deleted_at, purge_after, purged_at FROM media_assets WHERE id = $1`, mediaID).Scan(&deletedAt, &purgeAfter, &purgedAt); err != nil {
 		t.Fatal(err)
 	}
-	if permanentlyDeletedAt == nil || purgedAt == nil {
-		t.Fatalf("permanentlyDeletedAt=%v purgedAt=%v", permanentlyDeletedAt, purgedAt)
+	if permanentlyDeletedAt == nil || plainText != "" || blockCount != 0 {
+		t.Fatalf("permanentlyDeletedAt=%v plainText=%q blockCount=%d", permanentlyDeletedAt, plainText, blockCount)
+	}
+	if deletedAt == nil || purgeAfter == nil || purgedAt != nil {
+		t.Fatalf("deletedAt=%v purgeAfter=%v purgedAt=%v", deletedAt, purgeAfter, purgedAt)
+	}
+	if want := now.Add(7 * 24 * time.Hour); purgeAfter.Before(want.Add(-time.Second)) || purgeAfter.After(want.Add(time.Second)) {
+		t.Fatalf("purgeAfter=%v, want around %v", purgeAfter, want)
 	}
 }
