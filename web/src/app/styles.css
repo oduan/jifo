@@ -525,7 +525,8 @@ h3 {
   gap: 10px;
   overflow-y: auto;
   background: transparent;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(61, 124, 74, 0.28) transparent;
   transition: opacity 180ms ease;
 }
 
@@ -534,49 +535,24 @@ h3 {
 }
 
 .notes-stream::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  width: 8px;
 }
 
-.notes-scrollbar {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: -10px;
-  bottom: 0;
-  width: 6px;
+.notes-stream::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notes-stream::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  opacity: 0;
-  pointer-events: none;
-  touch-action: none;
-  transition: opacity 140ms ease;
-}
-
-.notes-stream-shell:hover .notes-scrollbar,
-.notes-stream-shell:focus-within .notes-scrollbar {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.notes-scrollbar--hidden {
-  display: none;
-}
-
-.notes-scrollbar__thumb {
-  width: 100%;
-  min-height: 36px;
-  border-radius: inherit;
   background: rgba(61, 124, 74, 0.24);
-  cursor: grab;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
-.notes-scrollbar__thumb:hover {
-  background: rgba(61, 124, 74, 0.38);
-}
-
-.notes-scrollbar__thumb:active {
-  cursor: grabbing;
+.notes-stream:hover::-webkit-scrollbar-thumb,
+.notes-stream:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(61, 124, 74, 0.4);
+  background-clip: padding-box;
 }
 
 .note-card {
@@ -2043,10 +2019,6 @@ h3 {
     overflow: visible;
   }
 
-  .notes-scrollbar {
-    display: none;
-  }
-
   .auth-feature-grid {
     grid-template-columns: 1fr;
   }
@@ -2060,7 +2032,24 @@ h3 {
   }
 
   .sidebar-section--heatmap {
+    padding-right: 2px;
+  }
+
+  .sidebar-section--heatmap .heatmap {
+    --heatmap-cell-size: 9px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .sidebar-section--heatmap .heatmap::-webkit-scrollbar {
     display: none;
+  }
+
+  .sidebar-section--heatmap .heatmap-months,
+  .sidebar-section--heatmap .heatmap-grid {
+    justify-content: start;
+    min-width: max-content;
   }
 
   .workspace-header {

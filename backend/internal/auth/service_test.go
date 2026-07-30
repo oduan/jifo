@@ -214,6 +214,112 @@ func TestRefreshRotatesTokenAndRejectsPreviousRefreshToken(t *testing.T) {
 	}
 }
 
+func TestRefreshRejectsExpiredSession(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	registered, err := svc.Register(ctx, RegisterInput{
+		Email:      "expired@example.com",
+		Password:   "expired-password",
+		DeviceCode: "device-expired",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if _, err := db.Exec(ctx, `UPDATE user_sessions SET expires_at = now() - interval '1 minute' WHERE user_id = $1`, registered.User.ID); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
+
+	_, err = svc.Refresh(ctx, registered.RefreshToken)
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("refresh with expired session error = %v, want %v", err, ErrInvalidRefreshToken)
+	}
+}
+
+func TestRefreshSlidesExpiry(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	registered, err := svc.Register(ctx, RegisterInput{
+		Email:      "sliding@example.com",
+		Password:   "sliding-password",
+		DeviceCode: "device-sliding",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Session near expiry but still valid; a refresh must renew the window.
+	if _, err := db.Exec(ctx, `UPDATE user_sessions SET expires_at = now() + interval '1 hour' WHERE user_id = $1`, registered.User.ID); err != nil {
+		t.Fatalf("shorten expires_at: %v", err)
+	}
+
+	if _, err := svc.Refresh(ctx, registered.RefreshToken); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	var renewed bool
+	if err := db.QueryRow(ctx, `SELECT expires_at > now() + interval '29 days' FROM user_sessions WHERE user_id = $1`, registered.User.ID).Scan(&renewed); err != nil {
+		t.Fatalf("query expires_at: %v", err)
+	}
+	if !renewed {
+		t.Fatal("refresh should slide expires_at forward by ~30 days")
+	}
+}
+
+func TestRefreshReplayRevokesSession(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	registered, err := svc.Register(ctx, RegisterInput{
+		Email:      "replay@example.com",
+		Password:   "replay-password",
+		DeviceCode: "device-replay",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	refreshed, err := svc.Refresh(ctx, registered.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Replaying the already-rotated token must revoke the session entirely.
+	if _, err := svc.Refresh(ctx, registered.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("replayed refresh error = %v, want %v", err, ErrInvalidRefreshToken)
+	}
+
+	var revokedAt *time.Time
+	if err := db.QueryRow(ctx, `SELECT revoked_at FROM user_sessions WHERE user_id = $1`, registered.User.ID).Scan(&revokedAt); err != nil {
+		t.Fatalf("query revoked_at: %v", err)
+	}
+	if revokedAt == nil {
+		t.Fatal("replay must revoke the session")
+	}
+
+	// Even the latest token is now unusable.
+	if _, err := svc.Refresh(ctx, refreshed.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("refresh after replay revocation error = %v, want %v", err, ErrInvalidRefreshToken)
+	}
+}
+
 func TestValidateAccessTokenRejectsRevokedOrVersionMismatchedSession(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
@@ -277,12 +383,14 @@ func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) 
 		_, _ = db.Exec(ctx, dropSQL)
 	})
 
-	if _, err := db.Exec(ctx, loadInitMigration(t)); err != nil {
-		t.Fatalf("execute migration: %v", err)
+	for _, name := range []string{"001_init.sql", "006_session_hardening.sql"} {
+		if _, err := db.Exec(ctx, loadMigration(t, name)); err != nil {
+			t.Fatalf("execute migration %s: %v", name, err)
+		}
 	}
 }
 
-func loadInitMigration(t *testing.T) string {
+func loadMigration(t *testing.T, name string) string {
 	t.Helper()
 
 	_, file, _, ok := runtime.Caller(0)
@@ -290,7 +398,7 @@ func loadInitMigration(t *testing.T) string {
 		t.Fatal("resolve caller: failed")
 	}
 
-	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", "001_init.sql")
+	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", name)
 	content, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)

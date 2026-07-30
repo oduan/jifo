@@ -53,8 +53,8 @@ func Load() (Config, error) {
 	if cfg.JWTSecret == "" {
 		return Config{}, errors.New("JWT_SECRET is required")
 	}
-	if cfg.Environment == "production" && len(cfg.JWTSecret) < 32 {
-		return Config{}, errors.New("JWT_SECRET must be at least 32 bytes in production")
+	if len(cfg.JWTSecret) < 32 {
+		return Config{}, errors.New("JWT_SECRET must be at least 32 bytes")
 	}
 
 	durations := []struct {

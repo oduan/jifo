@@ -43,7 +43,7 @@ type CachedMedia = {
   id: string;
   localId?: string;
   serverId?: string;
-  status: 'local_pending' | 'uploaded' | 'failed' | string;
+  status: 'local_pending' | 'uploaded' | 'failed' | 'unknown';
   blob?: Blob;
   createdAt: string;
 };
@@ -164,6 +164,8 @@ graph LR
 }
 ```
 
+单个操作失败不会让整批请求失败：Push 始终返回 `200`，逐条给出结果。某条操作解析失败或执行出错时返回 `{ "opId": "...", "status": "error", "code": "..." }`（`code` 如 `bad_request` / `note_not_found` / `internal_error`），其余操作照常处理。前端据此仅重试失败项，成功项照常清理 outbox。
+
 ### Pull
 
 `GET /api/sync/pull?updatedAt=&id=&limit=100` 或 `POST /api/sync/pull`。
@@ -186,6 +188,8 @@ graph LR
 }
 ```
 
+已永久删除（`permanentlyDeletedAt` 非空）的条目作为 tombstone 下发：仅保留 `id`/`clientId`/`version`/`updatedAt`/`permanentlyDeletedAt` 等元数据以便客户端删除本地副本，`content` 为空（`{"blocks":[]}`）、`plainText` 为空字符串；后端已在永久删除时清除正文，不会向任何客户端下发已删除笔记的正文内容（隐私）。
+
 ## Push result 状态
 
 前端视为成功并清理 outbox 的状态：
@@ -197,6 +201,7 @@ graph LR
 - `duplicate`
 - `conflict_copied`
 - `delete_conflict_ignored`
+- `already_trashed`：delete 操作命中的 note 已在回收站（视为幂等成功）
 
 未知或失败状态会保留 outbox 为：
 
@@ -204,7 +209,7 @@ graph LR
 { status: 'failed', lastError: 'push_status:<status>' }
 ```
 
-抛异常时也会保留 outbox 为 `failed + lastError`。
+其中 `error`（后端逐条报错，见上文部分失败语义）与 `unknown`（服务端返回前端未识别的状态值，边界处归一为 `'unknown'`）均不在成功集合内，会保留 outbox 以便下次重试。抛异常时也会保留 outbox 为 `failed + lastError`。
 
 ## duplicate
 

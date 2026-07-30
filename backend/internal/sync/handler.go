@@ -61,6 +61,7 @@ type operationPayload struct {
 type pushResultDTO struct {
 	OpID    string `json:"opId"`
 	Status  string `json:"status"`
+	Code    string `json:"code,omitempty"`
 	NoteID  string `json:"noteId,omitempty"`
 	Version int64  `json:"version,omitempty"`
 }
@@ -118,17 +119,18 @@ func (h *Handler) Push(w http.ResponseWriter, r *http.Request) {
 	for _, item := range req.Operations {
 		op, err := toOperation(item)
 		if err != nil {
-			httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", err.Error())
-			return
+			// 单条操作解析失败不再让整批 400，该操作返回 error 状态。
+			out = append(out, pushResultDTO{OpID: item.OpID, Status: "error", Code: "bad_request"})
+			continue
 		}
 		result, err := h.svc.Push(r.Context(), userID, sessionIDPtr, op)
 		if err != nil {
+			code := "internal_error"
 			if errors.Is(err, notes.ErrNoteNotFound) {
-				httpx.WriteError(w, r, http.StatusNotFound, "note_not_found", "note not found")
-				return
+				code = "note_not_found"
 			}
-			httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "push sync operations failed")
-			return
+			out = append(out, pushResultDTO{OpID: item.OpID, Status: "error", Code: code})
+			continue
 		}
 		out = append(out, toPushResultDTO(item.OpID, result))
 	}
@@ -224,7 +226,7 @@ func decodePullInput(w http.ResponseWriter, r *http.Request) (Cursor, int, bool)
 			httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid cursor")
 			return Cursor{}, 0, false
 		}
-		return cursor, req.Limit, true
+		return cursor, clampPullLimit(req.Limit), true
 	}
 
 	query := r.URL.Query()
@@ -238,7 +240,7 @@ func decodePullInput(w http.ResponseWriter, r *http.Request) (Cursor, int, bool)
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid cursor")
 		return Cursor{}, 0, false
 	}
-	return cursor, limit, true
+	return cursor, clampPullLimit(limit), true
 }
 
 func parseCursor(raw *cursorDTO) (Cursor, bool) {
@@ -266,6 +268,15 @@ func parseLimit(raw string) (int, error) {
 		return 0, nil
 	}
 	return strconv.Atoi(raw)
+}
+
+const maxPullLimit = 500
+
+func clampPullLimit(limit int) int {
+	if limit > maxPullLimit {
+		return maxPullLimit
+	}
+	return limit
 }
 
 func toPushResultDTO(opID string, result PushResult) pushResultDTO {

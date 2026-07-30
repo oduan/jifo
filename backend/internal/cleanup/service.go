@@ -111,6 +111,14 @@ func (s *Service) RunOnce(ctx context.Context, now time.Time) (int64, bool, erro
 		return 0, false, err
 	}
 
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_sessions
+		WHERE (revoked_at IS NOT NULL AND revoked_at < now() - interval '30 days')
+		   OR expires_at < now() - interval '30 days'
+	`); err != nil {
+		return 0, false, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return 0, false, err
 	}

@@ -141,3 +141,28 @@ func TestHandlerListRejectsNegativePagination(t *testing.T) {
 		}
 	}
 }
+
+func TestHandlerListClampsAndDefaultsLimit(t *testing.T) {
+	tests := []struct {
+		target    string
+		wantLimit int
+	}{
+		{target: "/notes", wantLimit: defaultListLimit},
+		{target: "/notes?limit=0", wantLimit: defaultListLimit},
+		{target: "/notes?limit=1000", wantLimit: maxListLimit},
+		{target: "/notes?limit=200", wantLimit: maxListLimit},
+		{target: "/notes?limit=25", wantLimit: 25},
+	}
+	for _, tt := range tests {
+		svc := &fakeHandlerService{}
+		h := NewHandler(svc)
+		rr, req := authenticatedRequest(tt.target, uuid.New())
+		serveAuthenticatedList(h, rr, req, uuid.New())
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", tt.target, rr.Code, rr.Body.String())
+		}
+		if svc.filter.Limit != tt.wantLimit {
+			t.Fatalf("%s filter.Limit = %d, want %d", tt.target, svc.filter.Limit, tt.wantLimit)
+		}
+	}
+}

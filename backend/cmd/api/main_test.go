@@ -19,6 +19,7 @@ import (
 	"jifo/backend/internal/notes"
 	syncsvc "jifo/backend/internal/sync"
 	"jifo/backend/internal/tags"
+	"jifo/backend/internal/users"
 )
 
 type fakeAuthService struct {
@@ -69,6 +70,10 @@ func (f *fakeUsersService) ChangePassword(ctx context.Context, userID uuid.UUID,
 	return nil
 }
 
+func (f *fakeUsersService) GetByID(ctx context.Context, userID uuid.UUID) (users.Profile, error) {
+	return users.Profile{ID: userID, Email: "a@example.com", Username: "a"}, nil
+}
+
 type fakeAccessKeyService struct {
 	userID uuid.UUID
 }
@@ -77,7 +82,7 @@ func (f *fakeAccessKeyService) List(ctx context.Context, userID uuid.UUID) ([]ac
 	return []accesskeys.AccessKey{{ID: uuid.MustParse("66666666-6666-6666-6666-666666666666"), UserID: userID, Label: "CLI", MaskedKey: "jifo_abcd••••••••••vwxyz", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}}, nil
 }
 
-func (f *fakeAccessKeyService) Create(ctx context.Context, userID uuid.UUID, label string) (accesskeys.CreateResult, error) {
+func (f *fakeAccessKeyService) Create(ctx context.Context, userID uuid.UUID, label string, expiresInDays int) (accesskeys.CreateResult, error) {
 	item := accesskeys.AccessKey{ID: uuid.MustParse("66666666-6666-6666-6666-666666666666"), UserID: userID, Label: label, MaskedKey: "jifo_abcd••••••••••vwxyz", CreatedAt: time.Date(2026, 5, 30, 1, 0, 0, 0, time.UTC)}
 	return accesskeys.CreateResult{AccessKey: item, Secret: "jifo_abcdefghijklmnopqrstuvwxyz"}, nil
 }

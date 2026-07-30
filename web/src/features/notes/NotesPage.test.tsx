@@ -264,7 +264,7 @@ describe('NotesPage', () => {
     await user.click(screen.getByRole('button', { name: 'oisin 设置菜单' }));
     await user.click(screen.getByRole('button', { name: '设置' }));
 
-    expect(screen.getByRole('dialog', { name: '设置' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '设置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '密钥' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('jifo_abcd••••vwxyz')).toBeInTheDocument();
     expect(onLoadAccessKeys).toHaveBeenCalled();

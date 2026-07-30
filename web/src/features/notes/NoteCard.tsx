@@ -1,4 +1,4 @@
-import { FocusEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FocusEvent, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Button } from '../../shared/ui/Button';
 import { formatLocalDateTime } from '../../shared/time';
 import { TagNode } from '../tags/TagTree';
-import { NoteBlock, NoteEditor } from './NoteEditor';
+import { NoteBlock, NoteEditor, EditorImage } from './NoteEditor';
 
 export type Note = {
   id: string;
@@ -22,7 +22,7 @@ export type Note = {
 type NoteCardProps = {
   note: Note;
   onDelete: (id: string) => void;
-  onUpdate: (id: string, blocks: NoteBlock[]) => void;
+  onUpdate: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
   onTagSelect?: (tagPath: string) => void;
   tags?: TagNode[];
   trash?: boolean;
@@ -52,15 +52,23 @@ function imageBlocks(blocks: NoteBlock[]): Extract<NoteBlock, { type: 'image' }>
   return blocks.filter((block): block is Extract<NoteBlock, { type: 'image' }> => block.type === 'image');
 }
 
+// 保留图片块在原块序列中的下标，供编辑器提交时插回。
+function editableImages(blocks: NoteBlock[]): EditorImage[] {
+  return blocks.flatMap((block, index) =>
+    block.type === 'image' ? [{ block, originalIndex: index }] : []
+  );
+}
+
 function noteText(blocks: NoteBlock[]): string {
   return blocks.filter((block) => block.type === 'paragraph').map(blockText).join('\n');
 }
 
-function NoteImage({ block, resolveMediaUrl, onPreview, onResolved }: {
+function NoteImage({ block, resolveMediaUrl, onPreview, onResolved, onObjectUrl }: {
   block: Extract<NoteBlock, { type: 'image' }>;
   resolveMediaUrl?: (mediaId: string) => Promise<string>;
   onPreview: () => void;
   onResolved: (image: { source: string; alt: string }) => void;
+  onObjectUrl: (url: string) => void;
 }) {
   const [source, setSource] = useState(block.mediaId ? undefined : block.url);
   const [failed, setFailed] = useState(false);
@@ -69,19 +77,18 @@ function NoteImage({ block, resolveMediaUrl, onPreview, onResolved }: {
   useEffect(() => {
     if (!block.mediaId || !resolveMediaUrl) return;
     let active = true;
-    let objectUrl: string | undefined;
     void resolveMediaUrl(block.mediaId)
       .then((url) => {
-        objectUrl = url;
+        // 交由 NoteCard 统一持有并在卸载时集中 revoke，避免 NoteImage 卸载（如进入编辑
+        // 态）时 revoke 掉已上报给父组件（预览层仍在引用）的 URL。
+        onObjectUrl(url);
         if (active) setSource(url);
-        else URL.revokeObjectURL(url);
       })
       .catch(() => active && setFailed(true));
     return () => {
       active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [block.mediaId, resolveMediaUrl]);
+  }, [block.mediaId, resolveMediaUrl, onObjectUrl]);
 
   useEffect(() => {
     if (source) onResolved({ source, alt });
@@ -171,7 +178,7 @@ function stepPreview(index: number | null, delta: number, count: number): number
   return (index + delta + count) % count;
 }
 
-export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl }: NoteCardProps) {
+function NoteCardComponent({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -180,6 +187,20 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
   const [resolvedImages, setResolvedImages] = useState<Record<number, { source: string; alt: string }>>({});
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPanelRef = useRef<HTMLDivElement>(null);
+  // NoteCard 统一持有通过 resolveMediaUrl 创建的 object URL，卡片卸载时集中 revoke。
+  const objectUrlsRef = useRef<Set<string>>(new Set());
+  const registerObjectUrl = useCallback((url: string) => {
+    objectUrlsRef.current.add(url);
+  }, []);
+  useEffect(
+    () => () => {
+      for (const url of objectUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
+      objectUrlsRef.current.clear();
+    },
+    []
+  );
   const noteImages = imageBlocks(note.blocks);
   const content = noteText(note.blocks);
   const lines = content.split('\n');
@@ -189,7 +210,8 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
   const visibleContent = !expanded && shouldCollapse ? lines.slice(0, collapsibleLineEndIndex + 1).join('\n') : content;
   const toggleTask = (taskIndex: number) => {
     if (trash) return;
-    onUpdate(note.id, toggleTaskInBlocks(note.blocks, taskIndex));
+    // 错误提示由上层 toast 展示，这里只需吞掉 rejection
+    void Promise.resolve(onUpdate(note.id, toggleTaskInBlocks(note.blocks, taskIndex))).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -300,12 +322,15 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
       {editing ? (
         <NoteEditor
           initialText={paragraphText(note.blocks)}
+          initialImages={editableImages(note.blocks)}
           tags={tags}
           onUploadImage={onUploadImage}
+          resolveMediaUrl={resolveMediaUrl}
           autoFocus
           onCancel={() => setEditing(false)}
-          onSubmit={(blocks) => {
-            onUpdate(note.id, [...blocks, ...imageBlocks(note.blocks)]);
+          onSubmit={async (blocks) => {
+            // 成功后才退出编辑模式；失败时 NoteEditor 保留内容
+            await onUpdate(note.id, blocks);
             setEditing(false);
           }}
         />
@@ -364,6 +389,7 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
               resolveMediaUrl={resolveMediaUrl}
               onPreview={() => setPreviewIndex(index)}
               onResolved={(image) => handleImageResolved(index, image)}
+              onObjectUrl={registerObjectUrl}
             />
           ))}
         </div>
@@ -399,3 +425,6 @@ export function NoteCard({ note, onDelete, onUpdate, onTagSelect, tags = [], tra
     </article>
   );
 }
+
+// 包在 React.memo 中：父级（NotesPage）传入稳定回调与 tags 后，未变动的卡片不再重渲染。
+export const NoteCard = memo(NoteCardComponent);

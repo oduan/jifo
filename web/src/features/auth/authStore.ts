@@ -15,19 +15,60 @@ type Listener = () => void;
 const storageKey = 'jifo.auth';
 const listeners = new Set<Listener>();
 
+const emptyState: AuthState = { accessToken: null, refreshToken: null, user: null };
+
+function isValidUser(value: unknown): value is AuthUser {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.email === 'string' &&
+    (candidate.username === undefined || typeof candidate.username === 'string')
+  );
+}
+
+function parseStoredState(raw: string): AuthState | null {
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
+  }
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.accessToken !== 'string' || candidate.accessToken === '') {
+    return null;
+  }
+  if (candidate.refreshToken !== undefined && candidate.refreshToken !== null && typeof candidate.refreshToken !== 'string') {
+    return null;
+  }
+  if (candidate.user !== undefined && candidate.user !== null && !isValidUser(candidate.user)) {
+    return null;
+  }
+  return {
+    accessToken: candidate.accessToken,
+    refreshToken: (candidate.refreshToken as string | null | undefined) ?? null,
+    user: (candidate.user as AuthUser | null | undefined) ?? null
+  };
+}
+
 function readStoredState(): AuthState {
   if (typeof localStorage === 'undefined') {
-    return { accessToken: null, refreshToken: null, user: null };
+    return { ...emptyState };
   }
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) {
-      return { accessToken: null, refreshToken: null, user: null };
+      return { ...emptyState };
     }
-    const parsed = JSON.parse(raw) as AuthState;
-    return { accessToken: parsed.accessToken ?? null, refreshToken: parsed.refreshToken ?? null, user: parsed.user ?? null };
+    const parsed = parseStoredState(raw);
+    if (!parsed) {
+      // Malformed or tampered payload: drop it instead of trusting it.
+      localStorage.removeItem(storageKey);
+      return { ...emptyState };
+    }
+    return parsed;
   } catch {
-    return { accessToken: null, refreshToken: null, user: null };
+    return { ...emptyState };
   }
 }
 
@@ -82,7 +123,7 @@ export const authStore = {
   },
 
   clear() {
-    state = { accessToken: null, refreshToken: null, user: null };
+    state = { ...emptyState };
     persist();
     notify();
   },

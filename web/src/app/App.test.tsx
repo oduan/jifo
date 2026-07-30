@@ -72,7 +72,7 @@ function mockWorkspaceFetch(requestedUrls: string[], notesByRequest?: (url: stri
     }
     if (path.includes('/notes')) {
       const page = notesByRequest?.(path) ?? { items: [note('note-1', '#工作 第一条真实笔记')], hasMore: false };
-      return new Response(JSON.stringify({ items: page.items, page: { limit: 20, offset: path.includes('offset=20') ? 20 : 0, hasMore: page.hasMore } }), {
+      return new Response(JSON.stringify({ items: page.items, page: { limit: 20, offset: 0, hasMore: page.hasMore, ...(page.hasMore ? { nextCursor: 'cursor-page-2' } : {}) } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -109,7 +109,7 @@ describe('App', () => {
     expect(screen.getByText(/第一条真实笔记/)).toBeInTheDocument();
     expect(screen.getByLabelText('账户统计')).toHaveTextContent('42');
     expect(requestedUrls).toContain('/api/notes/stats');
-    expect(requestedUrls).toContain('/api/notes?limit=20&offset=0');
+    expect(requestedUrls).toContain('/api/notes?limit=20');
   });
 
   test('access token 过期时自动刷新并继续加载工作区', async () => {
@@ -241,7 +241,7 @@ describe('App', () => {
 
     await user.type(screen.getByRole('searchbox', { name: '搜索笔记' }), '会议');
 
-    await waitFor(() => expect(requestedUrls.some((url) => url.includes('/api/notes?search=%E4%BC%9A%E8%AE%AE&limit=20&offset=0'))).toBe(true));
+    await waitFor(() => expect(requestedUrls.some((url) => url.includes('/api/notes?search=%E4%BC%9A%E8%AE%AE&limit=20'))).toBe(true));
     await waitFor(() => expect(screen.getByText('会议记录')).toBeInTheDocument());
   });
 
@@ -255,7 +255,7 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: '工作 (1)' }));
 
-    await waitFor(() => expect(requestedUrls.some((url) => url.includes('/api/notes?tagPath=%E5%B7%A5%E4%BD%9C&limit=20&offset=0'))).toBe(true));
+    await waitFor(() => expect(requestedUrls.some((url) => url.includes('/api/notes?tagPath=%E5%B7%A5%E4%BD%9C&limit=20'))).toBe(true));
     await waitFor(() => expect(screen.getByText(/标签结果/)).toBeInTheDocument());
   });
 
@@ -315,7 +315,7 @@ describe('App', () => {
 
     try {
       mockWorkspaceFetch(requestedUrls, (url) => {
-        if (url.includes('offset=20')) {
+        if (url.includes('cursor=')) {
           return { items: [note('next-note', '下一页笔记')], hasMore: false };
         }
         return { items: Array.from({ length: 20 }, (_, index) => note(`note-${index}`, `第一页笔记 ${index}`)), hasMore: true };
@@ -328,7 +328,7 @@ describe('App', () => {
         observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
       });
 
-      await waitFor(() => expect(requestedUrls).toContain('/api/notes?limit=20&offset=20'));
+      await waitFor(() => expect(requestedUrls.some((url) => url.includes('/api/notes?') && url.includes('cursor=cursor-page-2'))).toBe(true));
       await waitFor(() => expect(screen.getByText('下一页笔记')).toBeInTheDocument());
     } finally {
       globalThis.IntersectionObserver = originalIntersectionObserver;

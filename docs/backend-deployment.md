@@ -13,7 +13,7 @@ Browser → Web (Nginx) → API (Go) → PostgreSQL
 cp .env.example .env
 ```
 
-`.env` 只需要配置 `POSTGRES_PASSWORD` 和 `JWT_SECRET`。生产环境的 `JWT_SECRET` 至少 32 字节；其他设置都有默认值，需要时再添加到 `.env`。
+`.env` 只需要配置 `POSTGRES_PASSWORD` 和 `JWT_SECRET`。`JWT_SECRET` 至少 32 字节（所有环境强制）；其他设置都有默认值，需要时再添加到 `.env`。
 
 ## 启动与检查
 

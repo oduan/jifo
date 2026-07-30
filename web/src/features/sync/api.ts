@@ -1,7 +1,7 @@
 import { ApiClient } from '../../shared/api/client';
 import { ApiNoteBlock } from '../notes/api';
 import { CachedNote, CachedNoteBlock, OutboxOperation } from '../../storage/db';
-import { PullChangesResult, PullCursor, PushResult } from './syncEngine';
+import { PullChangesResult, PullCursor, PushResult, normalizePushStatus } from './syncEngine';
 
 const PULL_PAGE_SIZE = 100;
 
@@ -21,7 +21,7 @@ function plainText(blocks: CachedNoteBlock[]) {
 }
 
 export async function pushOutbox(client: ApiClient, operations: OutboxOperation[]): Promise<PushResult[]> {
-  const response = await client.request<{ results: PushResult[] }>('/sync/push', {
+  const response = await client.request<{ results: Array<Omit<PushResult, 'status'> & { status: string }> }>('/sync/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -39,7 +39,7 @@ export async function pushOutbox(client: ApiClient, operations: OutboxOperation[
       })
     })
   });
-  return response.results;
+  return response.results.map((result) => ({ ...result, status: normalizePushStatus(result.status) }));
 }
 
 type PullNote = {

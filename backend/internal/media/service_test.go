@@ -95,8 +95,6 @@ func TestMarkUnreferencedDoesNotMarkAvatarMedia(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 	root := t.TempDir()
 	svc := NewService(db, root)
-	fixedNow := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
-	svc.SetNowForTest(func() time.Time { return fixedNow })
 
 	body := []byte("avatar image")
 	asset, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)})
@@ -135,8 +133,6 @@ func TestMarkUnreferencedAndPurgeDueAssets(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 	root := t.TempDir()
 	svc := NewService(db, root)
-	fixedNow := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
-	svc.SetNowForTest(func() time.Time { return fixedNow })
 
 	body := []byte("orphan image")
 	asset, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)})
@@ -160,14 +156,28 @@ func TestMarkUnreferencedAndPurgeDueAssets(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT deleted_at, purge_after FROM media_assets WHERE user_id = $1 AND id = $2`, userID, asset.ID).Scan(&deletedAt, &purgeAfter); err != nil {
 		t.Fatalf("query marked media: %v", err)
 	}
-	if deletedAt == nil || !deletedAt.Equal(fixedNow) {
-		t.Fatalf("deleted_at = %v, want %v", deletedAt, fixedNow)
+	if deletedAt == nil {
+		t.Fatal("deleted_at should be set")
 	}
-	if purgeAfter == nil || !purgeAfter.Equal(fixedNow) {
-		t.Fatalf("purge_after = %v, want %v", purgeAfter, fixedNow)
+	// 宽限期：purge_after 应在 deleted_at 之后约 7 天。
+	if purgeAfter == nil || purgeAfter.Sub(*deletedAt) < 6*24*time.Hour {
+		t.Fatalf("purge_after = %v, want ~7 days after deleted_at %v", purgeAfter, deletedAt)
 	}
 
-	if err := svc.PurgeDueAssets(ctx, fixedNow); err != nil {
+	// 宽限期未到：不应被清理。
+	if err := svc.PurgeDueAssets(ctx, time.Now()); err != nil {
+		t.Fatalf("PurgeDueAssets() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(asset.StorageKey))); err != nil {
+		t.Fatalf("stored file should survive grace period, stat err = %v", err)
+	}
+
+	// 模拟宽限期到期后清理。
+	if _, err := db.Exec(ctx, `UPDATE media_assets SET purge_after = now() - interval '1 hour' WHERE user_id = $1 AND id = $2`, userID, asset.ID); err != nil {
+		t.Fatalf("backdate purge_after: %v", err)
+	}
+	purgeNow := time.Now()
+	if err := svc.PurgeDueAssets(ctx, purgeNow); err != nil {
 		t.Fatalf("PurgeDueAssets() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(asset.StorageKey))); !os.IsNotExist(err) {
@@ -177,8 +187,50 @@ func TestMarkUnreferencedAndPurgeDueAssets(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT purged_at FROM media_assets WHERE user_id = $1 AND id = $2`, userID, asset.ID).Scan(&purgedAt); err != nil {
 		t.Fatalf("query purged media: %v", err)
 	}
-	if purgedAt == nil || !purgedAt.Equal(fixedNow) {
-		t.Fatalf("purged_at = %v, want %v", purgedAt, fixedNow)
+	if purgedAt == nil {
+		t.Fatal("purged_at should be set")
+	}
+}
+
+func TestPurgeDueAssetsRestoresReReferencedAsset(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	root := t.TempDir()
+	svc := NewService(db, root)
+
+	body := []byte("re-referenced image")
+	asset, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)})
+	if err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE media_assets SET deleted_at = now(), purge_after = now() - interval '1 hour' WHERE user_id = $1 AND id = $2`, userID, asset.ID); err != nil {
+		t.Fatalf("mark for deletion: %v", err)
+	}
+
+	// 宽限期内被笔记重新引用。
+	noteID := uuid.New()
+	if _, err := db.Exec(ctx, `INSERT INTO notes (id, user_id, client_id, content, plain_text) VALUES ($1, $2, $3, '{"blocks":[]}', '')`, noteID, userID, "c-reref"); err != nil {
+		t.Fatalf("insert note: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO note_media_refs (user_id, note_id, media_id) VALUES ($1, $2, $3)`, userID, noteID, asset.ID); err != nil {
+		t.Fatalf("insert media ref: %v", err)
+	}
+
+	if err := svc.PurgeDueAssets(ctx, time.Now()); err != nil {
+		t.Fatalf("PurgeDueAssets() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(asset.StorageKey))); err != nil {
+		t.Fatalf("referenced file must not be removed, stat err = %v", err)
+	}
+	var deletedAt, purgeAfter, purgedAt *time.Time
+	if err := db.QueryRow(ctx, `SELECT deleted_at, purge_after, purged_at FROM media_assets WHERE user_id = $1 AND id = $2`, userID, asset.ID).Scan(&deletedAt, &purgeAfter, &purgedAt); err != nil {
+		t.Fatalf("query asset: %v", err)
+	}
+	if deletedAt != nil || purgeAfter != nil || purgedAt != nil {
+		t.Fatalf("asset should be restored, got deleted_at=%v purge_after=%v purged_at=%v", deletedAt, purgeAfter, purgedAt)
 	}
 }
 

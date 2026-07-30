@@ -40,11 +40,12 @@ type AuthService interface {
 
 type UsersService interface {
 	ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error
+	GetByID(ctx context.Context, userID uuid.UUID) (users.Profile, error)
 }
 
 type AccessKeyService interface {
 	List(ctx context.Context, userID uuid.UUID) ([]accesskeys.AccessKey, error)
-	Create(ctx context.Context, userID uuid.UUID, label string) (accesskeys.CreateResult, error)
+	Create(ctx context.Context, userID uuid.UUID, label string, expiresInDays int) (accesskeys.CreateResult, error)
 	Revoke(ctx context.Context, userID uuid.UUID, keyID uuid.UUID) error
 	Validate(ctx context.Context, rawKey string) (accesskeys.Principal, error)
 }
@@ -197,6 +198,7 @@ func NewRouterWithOptions(deps Dependencies, options RouterOptions) http.Handler
 
 			protected.With(httpx.RequireUserSession).Post("/auth/logout", authHandler.Logout)
 			usersHandler := users.NewHandler(deps.Users)
+			protected.With(httpx.RequireUserSession).Get("/me", usersHandler.Me)
 			protected.With(httpx.RequireUserSession).Post("/me/password", usersHandler.ChangePassword)
 		})
 	})

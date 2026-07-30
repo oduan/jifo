@@ -26,6 +26,16 @@ func VerifyPassword(hash string, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
+// dummyPasswordHash 用于 email 未命中时执行一次等价的 bcrypt 比对，
+// 抹平“用户存在/不存在”的响应时间差异（时序侧信道）。
+var dummyPasswordHash = func() string {
+	hash, err := bcrypt.GenerateFromPassword([]byte("jifo-dummy-password-for-timing"), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(hash)
+}()
+
 type AccessTokenClaims struct {
 	UserID     uuid.UUID `json:"user_id"`
 	SessionID  uuid.UUID `json:"session_id"`

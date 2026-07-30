@@ -15,7 +15,7 @@ import (
 
 type HandlerService interface {
 	List(ctx context.Context, userID uuid.UUID) ([]AccessKey, error)
-	Create(ctx context.Context, userID uuid.UUID, label string) (CreateResult, error)
+	Create(ctx context.Context, userID uuid.UUID, label string, expiresInDays int) (CreateResult, error)
 	Revoke(ctx context.Context, userID uuid.UUID, keyID uuid.UUID) error
 }
 
@@ -25,6 +25,8 @@ type Handler struct {
 
 type createAccessKeyRequest struct {
 	Label string `json:"label"`
+	// ExpiresInDays 可选：> 0 时 key 在 N 天后过期，缺省永久有效。
+	ExpiresInDays int `json:"expiresInDays,omitempty"`
 }
 
 type accessKeyDTO struct {
@@ -33,6 +35,7 @@ type accessKeyDTO struct {
 	MaskedKey  string     `json:"maskedKey"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
 }
 
 func NewHandler(svc HandlerService) *Handler {
@@ -76,7 +79,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
-	result, err := h.svc.Create(r.Context(), userID, req.Label)
+	if req.ExpiresInDays < 0 {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "expiresInDays must be positive")
+		return
+	}
+	result, err := h.svc.Create(r.Context(), userID, req.Label, req.ExpiresInDays)
 	if err != nil {
 		if errors.Is(err, ErrInvalidLabel) {
 			httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "label is required")
@@ -121,5 +128,6 @@ func toDTO(item AccessKey) accessKeyDTO {
 		MaskedKey:  item.MaskedKey,
 		CreatedAt:  item.CreatedAt,
 		LastUsedAt: item.LastUsedAt,
+		ExpiresAt:  item.ExpiresAt,
 	}
 }

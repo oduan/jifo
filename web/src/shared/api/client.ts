@@ -9,6 +9,32 @@ export class ApiError extends Error {
   }
 }
 
+/** Thrown only when the request never reached the server (offline, DNS, CORS). */
+export class NetworkError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'NetworkError';
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+function joinUrl(baseUrl: string, path: string): string {
+  const base = baseUrl.replace(/\/+$/, '');
+  return path.startsWith('/') ? `${base}${path}` : `${base}/${path}`;
+}
+
+function withDefaultTimeout(external: AbortSignal | null | undefined): AbortSignal | undefined {
+  if (typeof AbortSignal === 'undefined' || typeof AbortSignal.timeout !== 'function') {
+    return external ?? undefined;
+  }
+  const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+  if (!external) {
+    return timeout;
+  }
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([external, timeout]) : external;
+}
+
 export type ApiClientOptions = {
   baseUrl: string;
   getAccessToken: () => string | null;
@@ -37,10 +63,19 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
-    const response = await fetcher(`${options.baseUrl}${path}`, {
-      ...init,
-      headers
-    });
+    let response: Response;
+    try {
+      response = await fetcher(joinUrl(options.baseUrl, path), {
+        ...init,
+        headers,
+        signal: withDefaultTimeout(init.signal)
+      });
+    } catch (fetchError) {
+      if (fetchError instanceof TypeError) {
+        throw new NetworkError('network request failed', { cause: fetchError });
+      }
+      throw fetchError;
+    }
 
     if (response.status === 401 && allowRefresh && options.refreshAccessToken) {
       const refreshedToken = await options.refreshAccessToken();
@@ -85,7 +120,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
-    const response = await fetcher(`${options.baseUrl}${path}`, { ...init, headers });
+    let response: Response;
+    try {
+      response = await fetcher(joinUrl(options.baseUrl, path), { ...init, headers, signal: withDefaultTimeout(init.signal) });
+    } catch (fetchError) {
+      if (fetchError instanceof TypeError) {
+        throw new NetworkError('network request failed', { cause: fetchError });
+      }
+      throw fetchError;
+    }
     if (response.status === 401 && allowRefresh && options.refreshAccessToken) {
       const refreshedToken = await options.refreshAccessToken();
       if (refreshedToken) {

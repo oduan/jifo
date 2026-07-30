@@ -13,7 +13,7 @@ type SettingsModalProps = {
   error?: string | null;
   onClose: () => void;
   onLoadAccessKeys?: () => void | Promise<void>;
-  onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
+  onCreateAccessKey?: (label: string, expiresInDays?: number) => Promise<CreateAccessKeyResult>;
   onDeleteAccessKey?: (id: string) => Promise<void>;
   onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
 };
@@ -22,6 +22,7 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
   const [activeSection, setActiveSection] = useState<'account' | 'keys'>('keys');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [label, setLabel] = useState('');
+  const [expiresDays, setExpiresDays] = useState('');
   const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -39,6 +40,7 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
       setActiveSection('keys');
       setShowCreateForm(false);
       setLabel('');
+      setExpiresDays('');
       setGeneratedSecret(null);
       setCopied(false);
       setCurrentPassword('');
@@ -67,11 +69,15 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
 
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
-    const result = await onCreateAccessKey?.(label);
+    const trimmedDays = expiresDays.trim();
+    const parsedDays = trimmedDays ? Number(trimmedDays) : undefined;
+    const expiresInDays = typeof parsedDays === 'number' && Number.isFinite(parsedDays) && parsedDays > 0 ? Math.floor(parsedDays) : undefined;
+    const result = await onCreateAccessKey?.(label, expiresInDays);
     if (result) {
       setGeneratedSecret(result.secret);
       setShowCreateForm(false);
       setLabel('');
+      setExpiresDays('');
       setCopied(false);
       await onLoadAccessKeys?.();
     }
@@ -179,6 +185,8 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
                     取消
                   </Button>
                 </div>
+                <label htmlFor="access-key-expires">有效期（天，可选，留空表示永久）</label>
+                <TextInput id="access-key-expires" name="access-key-expires" type="number" min={1} step={1} value={expiresDays} onChange={(event) => setExpiresDays(event.target.value)} placeholder="例如：90" />
               </form>
             ) : null}
 
@@ -208,6 +216,7 @@ export function SettingsModal({ open, accessKeys, isLoading = false, isCreating 
                     <div className="access-key-list__meta">
                       <strong>{key.label}</strong>
                       <span>{key.maskedKey}</span>
+                      <span className="access-key-list__expiry">{key.expiresAt ? `到期 ${formatLocalDateTime(key.expiresAt)}` : '永久有效'}</span>
                     </div>
                     <div className="access-key-list__actions">
                       <time dateTime={key.createdAt}>{formatLocalDateTime(key.createdAt)}</time>

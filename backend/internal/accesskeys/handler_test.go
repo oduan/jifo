@@ -23,7 +23,7 @@ func (f *fakeHandlerService) List(ctx context.Context, userID uuid.UUID) ([]Acce
 	return []AccessKey{{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), UserID: userID, Label: "CLI", MaskedKey: "jifo_abcd••••••••••vwxyz", CreatedAt: time.Date(2026, 5, 31, 1, 0, 0, 0, time.UTC)}}, nil
 }
 
-func (f *fakeHandlerService) Create(ctx context.Context, userID uuid.UUID, label string) (CreateResult, error) {
+func (f *fakeHandlerService) Create(ctx context.Context, userID uuid.UUID, label string, expiresInDays int) (CreateResult, error) {
 	return CreateResult{}, nil
 }
 

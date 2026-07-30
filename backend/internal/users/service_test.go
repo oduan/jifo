@@ -142,6 +142,49 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 	}
 }
 
+func TestGetByIDReturnsProfile(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	passwordHash, err := auth.HashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID := uuid.New()
+	_, err = db.Exec(ctx, `
+		INSERT INTO users (id, email, password_hash, username)
+		VALUES ($1, $2, $3, $4)
+	`, userID, "me@example.com", passwordHash, "me-user")
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	svc := NewService(db)
+	profile, err := svc.GetByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if profile.ID != userID {
+		t.Fatalf("profile.ID = %v, want %v", profile.ID, userID)
+	}
+	if profile.Email != "me@example.com" || profile.Username != "me-user" {
+		t.Fatalf("profile = %+v, want email/username to match", profile)
+	}
+}
+
+func TestGetByIDMissingUser(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	svc := NewService(db)
+	_, err := svc.GetByID(ctx, uuid.New())
+	if !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("GetByID error = %v, want %v", err, auth.ErrInvalidCredentials)
+	}
+}
+
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 
@@ -153,12 +196,14 @@ func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) 
 		_, _ = db.Exec(ctx, dropSQL)
 	})
 
-	if _, err := db.Exec(ctx, loadInitMigration(t)); err != nil {
-		t.Fatalf("execute migration: %v", err)
+	for _, name := range []string{"001_init.sql", "006_session_hardening.sql"} {
+		if _, err := db.Exec(ctx, loadMigration(t, name)); err != nil {
+			t.Fatalf("execute migration %s: %v", name, err)
+		}
 	}
 }
 
-func loadInitMigration(t *testing.T) string {
+func loadMigration(t *testing.T, name string) string {
 	t.Helper()
 
 	_, file, _, ok := runtime.Caller(0)
@@ -166,7 +211,7 @@ func loadInitMigration(t *testing.T) string {
 		t.Fatal("resolve caller: failed")
 	}
 
-	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", "001_init.sql")
+	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", name)
 	content, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)

@@ -96,6 +96,37 @@ func TestRateLimiterRejectsRequestsOverLimit(t *testing.T) {
 	}
 }
 
+func TestRateLimiterEvictsOldestEntryWhenFull(t *testing.T) {
+	limiter := NewRateLimiter(5, time.Minute)
+	limiter.maxEntries = 2
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	limiter.now = func() time.Time { return now }
+
+	// 先后写入两个未过期 entry，key-a 的 reset 更早。
+	if !limiter.allow("key-a") {
+		t.Fatal("key-a should be allowed")
+	}
+	now = now.Add(time.Second)
+	if !limiter.allow("key-b") {
+		t.Fatal("key-b should be allowed")
+	}
+
+	// 满载且无过期项：新 key 应淘汰 reset 最早的 key-a 后被接纳。
+	now = now.Add(time.Second)
+	if !limiter.allow("key-c") {
+		t.Fatal("key-c should be allowed after evicting the oldest entry")
+	}
+	if _, ok := limiter.entries["key-a"]; ok {
+		t.Fatal("key-a should have been evicted")
+	}
+	if _, ok := limiter.entries["key-b"]; !ok {
+		t.Fatal("key-b should be retained")
+	}
+	if _, ok := limiter.entries["key-c"]; !ok {
+		t.Fatal("key-c should be present")
+	}
+}
+
 func TestRequireAuthDistinguishesUnauthorizedAndInternalErrors(t *testing.T) {
 	t.Run("unauthorized", func(t *testing.T) {
 		mw := RequireAuth(func(ctx context.Context, token string) (uuid.UUID, uuid.UUID, error) {

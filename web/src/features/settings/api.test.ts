@@ -29,6 +29,18 @@ describe('settings api', () => {
     });
   });
 
+  test('createAccessKey includes expiresInDays when provided', async () => {
+    const response = { item: { id: 'k1', label: 'CLI', maskedKey: 'jifo_abcd••••vwxyz', createdAt: '2026-05-31T00:00:00Z', expiresAt: '2026-08-29T00:00:00Z' }, secret: 'jifo_secret' };
+    const client = mockClient(response);
+
+    await expect(createAccessKey(client, 'CLI', 90)).resolves.toEqual(response);
+    expect(client.request).toHaveBeenCalledWith('/settings/access-keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'CLI', expiresInDays: 90 })
+    });
+  });
+
   test('deleteAccessKey sends DELETE request', async () => {
     const client = mockClient(undefined);
 

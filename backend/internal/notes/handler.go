@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +14,11 @@ import (
 	"github.com/google/uuid"
 
 	"jifo/backend/internal/platform/httpx"
+)
+
+const (
+	defaultListLimit = 50
+	maxListLimit     = 200
 )
 
 type HandlerService interface {
@@ -55,9 +61,10 @@ type noteDTO struct {
 }
 
 type pageDTO struct {
-	Limit   int  `json:"limit"`
-	Offset  int  `json:"offset"`
-	HasMore bool `json:"hasMore"`
+	Limit      int    `json:"limit"`
+	Offset     int    `json:"offset"`
+	HasMore    bool   `json:"hasMore"`
+	NextCursor string `json:"nextCursor,omitempty"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -107,19 +114,31 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid limit")
 		return
 	}
+	if limit == 0 {
+		limit = defaultListLimit
+	} else if limit > maxListLimit {
+		limit = maxListLimit
+	}
 	offset, err := parseInt(query.Get("offset"))
 	if err != nil || offset < 0 {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid offset")
 		return
 	}
+	cursorCreatedAt, cursorID, err := parseCursor(query.Get("cursor"))
+	if err != nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid cursor")
+		return
+	}
 
 	result, err := h.svc.List(r.Context(), ListFilter{
-		UserID:  userID,
-		Trash:   trash,
-		Search:  query.Get("search"),
-		TagPath: query.Get("tagPath"),
-		Limit:   limit,
-		Offset:  offset,
+		UserID:          userID,
+		Trash:           trash,
+		Search:          query.Get("search"),
+		TagPath:         query.Get("tagPath"),
+		Limit:           limit,
+		Offset:          offset,
+		CursorCreatedAt: cursorCreatedAt,
+		CursorID:        cursorID,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "list notes failed")
@@ -129,7 +148,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	for _, item := range result.Items {
 		out = append(out, toNoteDTO(item))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "page": pageDTO{Limit: limit, Offset: offset, HasMore: result.HasMore}})
+	nextCursor := ""
+	if result.HasMore && len(result.Items) > 0 {
+		last := result.Items[len(result.Items)-1]
+		nextCursor = encodeCursor(last.CreatedAt, last.ID)
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "page": pageDTO{Limit: limit, Offset: offset, HasMore: result.HasMore, NextCursor: nextCursor}})
 }
 
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -257,6 +281,37 @@ func parseInt(raw string) (int, error) {
 		return 0, nil
 	}
 	return strconv.Atoi(raw)
+}
+
+// encodeCursor 将 (createdAt, id) 编码为 base64 的 "RFC3339Nano,uuid" 游标。
+func encodeCursor(createdAt time.Time, id uuid.UUID) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + "," + id.String()
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// parseCursor 解析 base64 游标，空字符串表示无游标（返回 nil,nil,nil）。
+func parseCursor(raw string) (*time.Time, *uuid.UUID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	parts := strings.SplitN(string(decoded), ",", 2)
+	if len(parts) != 2 {
+		return nil, nil, errors.New("invalid cursor format")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return nil, nil, err
+	}
+	return &createdAt, &id, nil
 }
 
 func parseBool(raw string) bool {

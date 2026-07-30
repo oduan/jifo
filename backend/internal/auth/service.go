@@ -153,6 +153,8 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*AuthResult, err
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// 对 dummy hash 做一次等价比对，避免通过响应时间探测 email 是否已注册。
+			_ = VerifyPassword(dummyPasswordHash, input.Password)
 			return nil, ErrInvalidCredentials
 		}
 		return nil, err
@@ -191,6 +193,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 		_ = tx.Rollback(ctx)
 	}()
 
+	tokenHash := hashRefreshToken(refreshToken)
 	var session sessionRow
 	err = tx.QueryRow(ctx, `
 		SELECT
@@ -208,8 +211,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 		JOIN users u ON u.id = s.user_id
 		WHERE s.refresh_token_hash = $1
 		  AND s.revoked_at IS NULL
+		  AND s.expires_at > now()
 		FOR UPDATE
-	`, hashRefreshToken(refreshToken)).Scan(
+	`, tokenHash).Scan(
 		&session.ID,
 		&session.UserID,
 		&session.DeviceCode,
@@ -223,6 +227,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Replay detection: a previously rotated token means the token was
+			// stolen or the response was lost; revoke the whole session either way.
+			if revokeErr := s.revokeSessionOnReplayTx(ctx, tx, tokenHash); revokeErr != nil {
+				return nil, revokeErr
+			}
 			return nil, ErrInvalidRefreshToken
 		}
 		return nil, err
@@ -234,7 +243,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE user_sessions
-		SET refresh_token_hash = $1,
+		SET prev_refresh_token_hash = refresh_token_hash,
+		    refresh_token_hash = $1,
+		    expires_at = now() + interval '30 days',
 		    last_seen_at = now()
 		WHERE id = $2
 		  AND revoked_at IS NULL
@@ -255,6 +266,34 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*AuthResult
 		RefreshToken: newRefreshToken,
 		User:         session.User,
 	}, nil
+}
+
+// revokeSessionOnReplayTx revokes the session whose previous (already rotated)
+// refresh token hash matches, then commits so the revocation survives the
+// ErrInvalidRefreshToken return.
+func (s *Service) revokeSessionOnReplayTx(ctx context.Context, tx pgx.Tx, tokenHash string) error {
+	var sessionID uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM user_sessions
+		WHERE prev_refresh_token_hash = $1
+		  AND revoked_at IS NULL
+		FOR UPDATE
+	`, tokenHash).Scan(&sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_sessions
+		SET revoked_at = now()
+		WHERE id = $1
+	`, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Service) ValidateAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
@@ -292,8 +331,8 @@ func (s *Service) createSessionResult(ctx context.Context, q dbtx, user User, de
 
 	session := sessionRow{UserID: user.ID, DeviceCode: strings.TrimSpace(deviceCode), User: user}
 	err = q.QueryRow(ctx, `
-		INSERT INTO user_sessions (user_id, device_code, device_name, refresh_token_hash, last_seen_at)
-		VALUES ($1, $2, $3, $4, now())
+		INSERT INTO user_sessions (user_id, device_code, device_name, refresh_token_hash, last_seen_at, expires_at)
+		VALUES ($1, $2, $3, $4, now(), now() + interval '30 days')
 		RETURNING id, jwt_version
 	`, user.ID, session.DeviceCode, generateDeviceName(), hashRefreshToken(refreshToken)).Scan(&session.ID, &session.JWTVersion)
 	if err != nil {

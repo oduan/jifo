@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/google/uuid"
@@ -188,9 +187,9 @@ func recountAllTags(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
 			JOIN notes n ON n.id = nt.note_id AND n.user_id = nt.user_id
 			WHERE nt.user_id = $1 AND nt.tag_id = t.id
 			  AND n.deleted_at IS NULL AND n.permanently_deleted_at IS NULL
-		), updated_at = $2
+		), updated_at = now()
 		WHERE t.user_id = $1
-	`, userID, time.Now().UTC())
+	`, userID)
 	return err
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,7 +29,6 @@ var (
 type Service struct {
 	db           *pgxpool.Pool
 	mediaRoot    string
-	now          func() time.Time
 	maxSizeBytes int64
 }
 
@@ -56,11 +56,7 @@ type UploadInput struct {
 }
 
 func NewService(db *pgxpool.Pool, mediaRoot string) *Service {
-	return &Service{db: db, mediaRoot: mediaRoot, now: time.Now, maxSizeBytes: DefaultMaxSizeBytes}
-}
-
-func (s *Service) SetNowForTest(now func() time.Time) {
-	s.now = now
+	return &Service{db: db, mediaRoot: mediaRoot, maxSizeBytes: DefaultMaxSizeBytes}
 }
 
 func (s *Service) ValidateUpload(mimeType string, size int64) error {
@@ -186,12 +182,11 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (Asset, error) 
 }
 
 func (s *Service) MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
-	now := s.now().UTC()
-	purgeAfter := now
+	// 7 天宽限期：给不同步客户端重新引用的机会，避免误删仍被使用的文件。
 	_, err := tx.Exec(ctx, `
 		UPDATE media_assets ma
-		SET deleted_at = COALESCE(ma.deleted_at, $2),
-		    purge_after = COALESCE(ma.purge_after, $3)
+		SET deleted_at = COALESCE(ma.deleted_at, now()),
+		    purge_after = COALESCE(ma.purge_after, now() + interval '7 days')
 		WHERE ma.user_id = $1
 		  AND ma.deleted_at IS NULL
 		  AND NOT EXISTS (
@@ -202,7 +197,7 @@ func (s *Service) MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.
 			SELECT 1 FROM users u
 			WHERE u.id = ma.user_id AND u.avatar_media_id = ma.id
 		  )
-	`, userID, now, purgeAfter)
+	`, userID)
 	return err
 }
 
@@ -237,9 +232,31 @@ func (s *Service) PurgeDueAssets(ctx context.Context, now time.Time) error {
 	}
 
 	for _, asset := range due {
+		// 物理删除前复查引用：宽限期内被重新引用的资产恢复为正常状态。
+		var referenced bool
+		if err := s.db.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM note_media_refs
+				WHERE user_id = $1 AND media_id = $2
+			)
+		`, asset.userID, asset.id).Scan(&referenced); err != nil {
+			return err
+		}
+		if referenced {
+			if _, err := s.db.Exec(ctx, `
+				UPDATE media_assets
+				SET deleted_at = NULL, purge_after = NULL
+				WHERE user_id = $1 AND id = $2 AND purged_at IS NULL
+			`, asset.userID, asset.id); err != nil {
+				return err
+			}
+			continue
+		}
 		path := filepath.Join(s.mediaRoot, filepath.FromSlash(asset.storageKey))
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			// 单个文件删除失败不阻断整批清理，留待下一轮重试。
+			slog.Warn("purge media file failed", "media_id", asset.id, "path", path, "error", err)
+			continue
 		}
 		if _, err := s.db.Exec(ctx, `
 			UPDATE media_assets

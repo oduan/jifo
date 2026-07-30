@@ -14,6 +14,7 @@ import (
 
 type HandlerService interface {
 	ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error
+	GetByID(ctx context.Context, userID uuid.UUID) (Profile, error)
 }
 
 type Handler struct {
@@ -22,6 +23,38 @@ type Handler struct {
 
 func NewHandler(service HandlerService) *Handler {
 	return &Handler{service: service}
+}
+
+type userDTO struct {
+	ID       string `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+}
+
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	if h.service == nil {
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "users service not configured")
+		return
+	}
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "missing user context")
+		return
+	}
+	profile, err := h.service.GetByID(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			httpx.WriteError(w, r, http.StatusNotFound, "not_found", "user not found")
+			return
+		}
+		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "load user failed")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, userDTO{
+		ID:       profile.ID.String(),
+		Email:    profile.Email,
+		Username: profile.Username,
+	})
 }
 
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {

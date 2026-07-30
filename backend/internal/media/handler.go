@@ -107,10 +107,14 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix = prefix[:n]
-	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
-	if mimeType == "" || mimeType == "application/octet-stream" {
-		mimeType = http.DetectContentType(prefix)
+	// 始终以服务端嗅探结果为准，客户端声明只用于一致性校验，防止伪造 Content-Type。
+	sniffedType := http.DetectContentType(prefix)
+	declaredType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if declaredType != "" && declaredType != "application/octet-stream" && mainMIMEType(declaredType) != mainMIMEType(sniffedType) {
+		httpx.WriteError(w, r, http.StatusUnsupportedMediaType, "invalid_media_type", "declared content type does not match file content")
+		return
 	}
+	mimeType := sniffedType
 
 	asset, err := h.svc.Upload(r.Context(), UploadInput{
 		UserID:    userID,
@@ -163,6 +167,14 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	w.Header().Set("Content-Disposition", `inline; filename="`+asset.ID.String()+`"`)
 	http.ServeContent(w, r, asset.ID.String(), asset.CreatedAt, file)
+}
+
+func mainMIMEType(mimeType string) string {
+	base := strings.TrimSpace(strings.Split(mimeType, ";")[0])
+	if slash := strings.IndexByte(base, '/'); slash >= 0 {
+		base = base[:slash]
+	}
+	return strings.ToLower(base)
 }
 
 func writeUploadError(w http.ResponseWriter, r *http.Request, err error) {

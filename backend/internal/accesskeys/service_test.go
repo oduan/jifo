@@ -69,7 +69,7 @@ func TestRevokeRemovesKeyFromListAndInvalidatesSecret(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db)
-	created, err := svc.Create(ctx, userID, "CLI")
+	created, err := svc.Create(ctx, userID, "CLI", 0)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestRevokeRejectsMissingOrCrossUserKey(t *testing.T) {
 	otherID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db)
-	created, err := svc.Create(ctx, ownerID, "CLI")
+	created, err := svc.Create(ctx, ownerID, "CLI", 0)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -115,6 +115,49 @@ func TestRevokeRejectsMissingOrCrossUserKey(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsExpiredKey(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db)
+	created, err := svc.Create(ctx, userID, "CLI", 30)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.AccessKey.ExpiresAt == nil {
+		t.Fatal("ExpiresAt should be set when expiresInDays > 0")
+	}
+	if _, err := svc.Validate(ctx, created.Secret); err != nil {
+		t.Fatalf("Validate() before expiry error = %v", err)
+	}
+
+	// 把过期时间回拨到过去，模拟已过期。
+	if _, err := db.Exec(ctx, `UPDATE access_keys SET expires_at = now() - interval '1 hour' WHERE id = $1`, created.AccessKey.ID); err != nil {
+		t.Fatalf("backdate expiry: %v", err)
+	}
+	if _, err := svc.Validate(ctx, created.Secret); !errors.Is(err, ErrInvalidAccessKey) {
+		t.Fatalf("Validate() after expiry error = %v, want ErrInvalidAccessKey", err)
+	}
+}
+
+func TestCreateWithoutExpiryStaysPermanent(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db)
+	created, err := svc.Create(ctx, userID, "CLI", 0)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.AccessKey.ExpiresAt != nil {
+		t.Fatalf("ExpiresAt = %v, want nil for permanent key", created.AccessKey.ExpiresAt)
+	}
+}
+
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 	dropSQL := "DROP TABLE IF EXISTS schema_migrations, access_keys, sync_operations, note_tags, tags, note_media_refs, media_assets, notes, user_sessions, users CASCADE;"
@@ -123,7 +166,7 @@ func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) 
 	}
 	t.Cleanup(func() { _, _ = db.Exec(ctx, dropSQL) })
 
-	for _, migration := range []string{"001_init.sql", "002_access_keys.sql"} {
+	for _, migration := range []string{"001_init.sql", "002_access_keys.sql", "007_access_key_expiry.sql"} {
 		if _, err := db.Exec(ctx, loadMigration(t, migration)); err != nil {
 			t.Fatalf("execute %s: %v", migration, err)
 		}

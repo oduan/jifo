@@ -6,6 +6,7 @@ export type AccessKeySummary = {
   maskedKey: string;
   createdAt: string;
   lastUsedAt?: string;
+  expiresAt?: string;
 };
 
 export type CreateAccessKeyResult = {
@@ -21,11 +22,15 @@ export function listAccessKeys(client: ApiClient): Promise<AccessKeySummary[]> {
   return client.request<AccessKeysResponse>('/settings/access-keys').then((response) => response.items);
 }
 
-export function createAccessKey(client: ApiClient, label: string): Promise<CreateAccessKeyResult> {
+export function createAccessKey(client: ApiClient, label: string, expiresInDays?: number): Promise<CreateAccessKeyResult> {
+  const payload: { label: string; expiresInDays?: number } = { label };
+  if (typeof expiresInDays === 'number' && expiresInDays > 0) {
+    payload.expiresInDays = expiresInDays;
+  }
   return client.request<CreateAccessKeyResult>('/settings/access-keys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label })
+    body: JSON.stringify(payload)
   });
 }
 

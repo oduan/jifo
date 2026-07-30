@@ -17,12 +17,20 @@ import (
 
 const conflictCopyPrefix = "此条笔记冲突"
 
-type Service struct {
-	db    *pgxpool.Pool
-	notes *notes.Service
+// noteStore 是 sync 包对 notes 写入能力的窄接口，仅包含用到的事务方法，解除对 *notes.Service 的类型耦合。
+type noteStore interface {
+	CreateTx(ctx context.Context, tx pgx.Tx, input notes.CreateInput) (notes.Note, error)
+	UpdateTx(ctx context.Context, tx pgx.Tx, input notes.UpdateInput) (notes.Note, error)
+	MoveToTrashTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
+	RestoreTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (notes.Note, error)
 }
 
-func NewService(db *pgxpool.Pool, noteSvc *notes.Service) *Service {
+type Service struct {
+	db    *pgxpool.Pool
+	notes noteStore
+}
+
+func NewService(db *pgxpool.Pool, noteSvc noteStore) *Service {
 	return &Service{db: db, notes: noteSvc}
 }
 
@@ -175,9 +183,13 @@ func (s *Service) applyNewOperationTx(ctx context.Context, tx pgx.Tx, userID uui
 		if op.EntityID == nil {
 			return PushResult{}, errors.New("entity_id is required for delete")
 		}
-		currentVersion, err := s.currentNoteAnyVersionTx(ctx, tx, userID, *op.EntityID)
+		currentVersion, deletedAt, err := s.currentNoteTrashStateTx(ctx, tx, userID, *op.EntityID)
 		if err != nil {
 			return PushResult{}, err
+		}
+		if deletedAt != nil {
+			// 笔记已在回收站：删除视为幂等成功，不再重复移入。
+			return PushResult{Status: "already_trashed", NoteID: op.EntityID, Version: currentVersion}, nil
 		}
 		if op.BaseVersion != nil && *op.BaseVersion != currentVersion {
 			return PushResult{Status: "delete_conflict_ignored", NoteID: op.EntityID, Version: currentVersion}, nil
@@ -280,13 +292,37 @@ func (s *Service) currentNoteAnyVersionTx(ctx context.Context, tx pgx.Tx, userID
 	return currentVersion, nil
 }
 
+// currentNoteTrashStateTx 返回笔记版本与回收站状态（deleted_at），供 delete 幂等处理。
+func (s *Service) currentNoteTrashStateTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, *time.Time, error) {
+	var currentVersion int64
+	var deletedAt *time.Time
+	err := tx.QueryRow(ctx, `
+		SELECT version, deleted_at
+		FROM notes
+		WHERE user_id = $1
+		  AND id = $2
+		  AND permanently_deleted_at IS NULL
+		FOR UPDATE
+	`, userID, noteID).Scan(&currentVersion, &deletedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil, notes.ErrNoteNotFound
+		}
+		return 0, nil, err
+	}
+	return currentVersion, deletedAt, nil
+}
+
 func (s *Service) Pull(ctx context.Context, userID uuid.UUID, cursor Cursor, limit int) (PullResult, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 
 	baseSQL := `
-		SELECT id, client_id, content, plain_text, updated_at, version, deleted_at, permanently_deleted_at
+		SELECT id, client_id,
+			CASE WHEN permanently_deleted_at IS NOT NULL THEN NULL ELSE content END,
+			CASE WHEN permanently_deleted_at IS NOT NULL THEN '' ELSE plain_text END,
+			updated_at, version, deleted_at, permanently_deleted_at
 		FROM notes
 		WHERE user_id = $1
 	`

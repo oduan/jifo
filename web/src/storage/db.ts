@@ -17,11 +17,13 @@ export type CachedNote = {
   conflictReason?: string;
 };
 
+export type MediaStatus = 'local_pending' | 'uploaded' | 'failed' | 'unknown';
+
 export type CachedMedia = {
   id: string;
   localId?: string;
   serverId?: string;
-  status: 'local_pending' | 'uploaded' | 'failed' | string;
+  status: MediaStatus;
   blob?: Blob;
   createdAt: string;
 };

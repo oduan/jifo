@@ -1,65 +1,30 @@
-import { PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Heatmap, HeatmapCell } from '../heatmap/Heatmap';
-import { AccessKeySummary, CreateAccessKeyResult } from '../settings/api';
-import { SettingsModal } from '../settings/SettingsModal';
+import { Heatmap } from '../heatmap/Heatmap';
 import { SettingsPopover } from '../settings/SettingsPopover';
-import { TagNode, TagTree } from '../tags/TagTree';
+import { TagTree } from '../tags/TagTree';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { TextInput } from '../../shared/ui/Input';
-import { ToastHost, ToastItem } from '../../shared/ui/Toast';
+import { ToastHost } from '../../shared/ui/Toast';
 import { Note, NoteCard } from './NoteCard';
 import { NoteBlock, NoteEditor } from './NoteEditor';
+import { WorkspaceBindings, useOptionalWorkspace } from '../../app/WorkspaceProvider';
 
-type SelectedTag = {
-  id: string | null;
-  path?: string;
-};
+const SettingsModal = lazy(() => import('../settings/SettingsModal').then((module) => ({ default: module.SettingsModal })));
 
-type ScrollbarMetrics = {
-  thumbHeight: number;
-  thumbTop: number;
-  scrollable: boolean;
-  valueNow: number;
-};
+// NotesPage 从 WorkspaceProvider 上下文取数；显式传入的 props 优先，便于独立测试与复用。
+type NotesPageProps = Partial<WorkspaceBindings>;
 
-type NotesPageProps = {
-  userName: string;
-  notes: Note[];
-  tags: TagNode[];
-  heatmapCells: HeatmapCell[];
-  totalNoteCount?: number;
-  searchQuery?: string;
-  selectedTagId?: string | null;
-  hasMoreNotes?: boolean;
-  isLoadingMoreNotes?: boolean;
-  isLoading?: boolean;
-  isInitialLoading?: boolean;
-  onSearchChange?: (query: string) => void;
-  onSelectTag?: (tag: SelectedTag) => void;
-  onRenameTag?: (tagId: string, path: string) => void | Promise<void>;
-  onDeleteTag?: (tagId: string, deleteNotes: boolean) => void | Promise<void>;
-  onLoadMoreNotes?: () => void;
-  onCreateNote?: (blocks: NoteBlock[]) => void | Promise<void>;
-  onUpdateNote?: (id: string, blocks: NoteBlock[]) => void | Promise<void>;
-  onDeleteNote?: (id: string) => void | Promise<void>;
-  onRestoreNote?: (id: string) => void | Promise<void>;
-  trash?: boolean;
-  onSelectTrash?: () => void;
-  onLogout?: () => void;
-  accessKeys?: AccessKeySummary[];
-  isLoadingAccessKeys?: boolean;
-  isCreatingAccessKey?: boolean;
-  settingsError?: string | null;
-  toasts?: ToastItem[];
-  onDismissToast?: (id: number) => void;
-  onLoadAccessKeys?: () => void | Promise<void>;
-  onCreateAccessKey?: (label: string) => Promise<CreateAccessKeyResult>;
-  onDeleteAccessKey?: (id: string) => Promise<void>;
-  onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
-  onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
-  resolveMediaUrl?: (mediaId: string) => Promise<string>;
-};
+// 过滤掉值为 undefined 的字段，避免覆盖上下文里已有的绑定。
+function definedOnly<T extends object>(value: T): Partial<T> {
+  const result: Partial<T> = {};
+  (Object.keys(value) as (keyof T)[]).forEach((key) => {
+    if (value[key] !== undefined) {
+      result[key] = value[key];
+    }
+  });
+  return result;
+}
 
 function createdAtTime(note: Note): number {
   const value = Date.parse(note.createdAt);
@@ -81,51 +46,51 @@ function TagTreeSkeleton() {
   );
 }
 
-export function NotesPage({
-  userName,
-  notes,
-  tags,
-  heatmapCells,
-  totalNoteCount,
-  searchQuery = '',
-  selectedTagId = null,
-  hasMoreNotes = false,
-  isLoadingMoreNotes = false,
-  isLoading = false,
-  isInitialLoading = false,
-  onSearchChange,
-  onSelectTag,
-  onRenameTag,
-  onDeleteTag,
-  onLoadMoreNotes,
-  onCreateNote,
-  onUpdateNote,
-  onDeleteNote,
-  onRestoreNote,
-  trash = false,
-  onSelectTrash,
-  onLogout,
-  accessKeys = [],
-  isLoadingAccessKeys = false,
-  isCreatingAccessKey = false,
-  settingsError,
-  toasts = [],
-  onDismissToast,
-  onLoadAccessKeys,
-  onCreateAccessKey,
-  onDeleteAccessKey,
-  onChangePassword,
-  onUploadImage,
-  resolveMediaUrl
-}: NotesPageProps) {
+export function NotesPage(props: NotesPageProps) {
+  const workspace = useOptionalWorkspace();
+  const {
+    userName = 'Jifo 用户',
+    notes = [],
+    tags = [],
+    heatmapCells = [],
+    totalNoteCount,
+    searchQuery = '',
+    selectedTagId = null,
+    hasMoreNotes = false,
+    isLoadingMoreNotes = false,
+    isLoading = false,
+    isInitialLoading = false,
+    onSearchChange,
+    onSelectTag,
+    onRenameTag,
+    onDeleteTag,
+    onLoadMoreNotes,
+    onCreateNote,
+    onUpdateNote,
+    onDeleteNote,
+    onRestoreNote,
+    trash = false,
+    onSelectTrash,
+    onLogout,
+    accessKeys = [],
+    isLoadingAccessKeys = false,
+    isCreatingAccessKey = false,
+    settingsError,
+    toasts = [],
+    onDismissToast,
+    onLoadAccessKeys,
+    onCreateAccessKey,
+    onDeleteAccessKey,
+    onChangePassword,
+    onUploadImage,
+    resolveMediaUrl
+  }: NotesPageProps = { ...(workspace ?? {}), ...definedOnly(props) };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tagsDrawerOpen, setTagsDrawerOpen] = useState(false);
   const [isNarrowLayout, setIsNarrowLayout] = useState(
     () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 920px)').matches
   );
-  const [scrollbarMetrics, setScrollbarMetrics] = useState<ScrollbarMetrics>({ thumbHeight: 36, thumbTop: 0, scrollable: false, valueNow: 0 });
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const notesStreamRef = useRef<HTMLElement>(null);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleTagCount = tags.filter((tag) => tag.noteCount > 0).length;
   const activeDays = heatmapCells.filter((cell) => cell.noteCount > 0).length;
@@ -152,69 +117,6 @@ export function NotesPage({
 
     return () => observer.disconnect();
   }, [hasMoreNotes, isLoadingMoreNotes, onLoadMoreNotes]);
-
-  useEffect(() => {
-    const stream = notesStreamRef.current;
-    if (!stream) return;
-
-    const updateScrollbar = () => {
-      const { clientHeight, scrollHeight, scrollTop } = stream;
-      const scrollRange = Math.max(0, scrollHeight - clientHeight);
-      const thumbHeight = scrollRange > 0 ? Math.max(36, (clientHeight / scrollHeight) * clientHeight) : clientHeight;
-      const thumbTravel = Math.max(0, clientHeight - thumbHeight);
-      const progress = scrollRange > 0 ? scrollTop / scrollRange : 0;
-      setScrollbarMetrics({
-        thumbHeight,
-        thumbTop: thumbTravel * progress,
-        scrollable: scrollRange > 0,
-        valueNow: Math.round(progress * 100)
-      });
-    };
-
-    updateScrollbar();
-    stream.addEventListener('scroll', updateScrollbar, { passive: true });
-    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollbar);
-    resizeObserver?.observe(stream);
-    Array.from(stream.children).forEach((child) => resizeObserver?.observe(child));
-    window.addEventListener('resize', updateScrollbar);
-
-    return () => {
-      stream.removeEventListener('scroll', updateScrollbar);
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updateScrollbar);
-    };
-  }, [displayNotes, hasMoreNotes]);
-
-  const scrollFromTrackPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const stream = notesStreamRef.current;
-    if (!stream || !scrollbarMetrics.scrollable) return;
-    const trackRect = event.currentTarget.getBoundingClientRect();
-    const thumbTravel = Math.max(1, trackRect.height - scrollbarMetrics.thumbHeight);
-    const targetThumbTop = Math.min(thumbTravel, Math.max(0, event.clientY - trackRect.top - scrollbarMetrics.thumbHeight / 2));
-    stream.scrollTop = (targetThumbTop / thumbTravel) * (stream.scrollHeight - stream.clientHeight);
-  };
-
-  const dragScrollbarThumb = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const stream = notesStreamRef.current;
-    if (!stream || !scrollbarMetrics.scrollable) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const startY = event.clientY;
-    const startScrollTop = stream.scrollTop;
-    const thumbTravel = Math.max(1, stream.clientHeight - scrollbarMetrics.thumbHeight);
-    const scrollRange = stream.scrollHeight - stream.clientHeight;
-
-    const moveThumb = (moveEvent: PointerEvent) => {
-      stream.scrollTop = startScrollTop + ((moveEvent.clientY - startY) / thumbTravel) * scrollRange;
-    };
-    const stopDragging = () => {
-      window.removeEventListener('pointermove', moveThumb);
-      window.removeEventListener('pointerup', stopDragging);
-    };
-
-    window.addEventListener('pointermove', moveThumb);
-    window.addEventListener('pointerup', stopDragging, { once: true });
-  };
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
@@ -249,17 +151,25 @@ export function NotesPage({
     onSelectTag?.({ id: tagId, path: tag?.path ?? tag?.name ?? tagId });
   };
 
-  const selectTagFromNote = (tagPath: string) => {
-    const normalized = tagPath.trim();
-    const matchedTag =
-      tags.find((tag) => tag.path === normalized) ??
-      tags.find((tag) => tag.id === normalized) ??
-      tags.find((tag) => tag.name === normalized);
+  // NoteCard 包在 React.memo 中，回调需稳定引用才能避免无谓重渲染。
+  const selectTagFromNote = useCallback(
+    (tagPath: string) => {
+      const normalized = tagPath.trim();
+      const matchedTag =
+        tags.find((tag) => tag.path === normalized) ??
+        tags.find((tag) => tag.id === normalized) ??
+        tags.find((tag) => tag.name === normalized);
 
-    if (matchedTag) {
-      onSelectTag?.({ id: matchedTag.id, path: matchedTag.path ?? matchedTag.name ?? matchedTag.id });
-    }
-  };
+      if (matchedTag) {
+        onSelectTag?.({ id: matchedTag.id, path: matchedTag.path ?? matchedTag.name ?? matchedTag.id });
+      }
+    },
+    [tags, onSelectTag]
+  );
+
+  const handleNoteDelete = useCallback((id: string) => onDeleteNote?.(id), [onDeleteNote]);
+  const handleNoteUpdate = useCallback((id: string, blocks: NoteBlock[]) => onUpdateNote?.(id, blocks), [onUpdateNote]);
+  const handleNoteRestore = useCallback((id: string) => onRestoreNote?.(id), [onRestoreNote]);
 
   return (
     <main className="jifo-shell">
@@ -373,17 +283,17 @@ export function NotesPage({
         </div>
 
         <div className="notes-stream-shell">
-          <section ref={notesStreamRef} id="notes-stream" className={`notes-stream${isLoading && displayNotes.length > 0 ? ' notes-stream--refreshing' : ''}`} aria-label="笔记流">
+          <section id="notes-stream" className={`notes-stream${isLoading && displayNotes.length > 0 ? ' notes-stream--refreshing' : ''}`} aria-label="笔记流">
             {displayNotes.map((note) => (
               <NoteCard
                 key={note.id}
                 note={note}
-                onDelete={(id) => onDeleteNote?.(id)}
-                onUpdate={(id, blocks) => onUpdateNote?.(id, blocks)}
+                onDelete={handleNoteDelete}
+                onUpdate={handleNoteUpdate}
                 onTagSelect={selectTagFromNote}
                 tags={tags}
                 trash={trash}
-                onRestore={(id) => onRestoreNote?.(id)}
+                onRestore={handleNoteRestore}
                 onUploadImage={onUploadImage}
                 resolveMediaUrl={resolveMediaUrl}
               />
@@ -404,37 +314,25 @@ export function NotesPage({
               <EmptyState title={trash ? '回收站是空的' : '还没有笔记'} description={trash ? '删除的笔记会在这里保留 30 天。' : '写下第一条想法，Jifo 会帮你把标签、热力图和同步状态整理好。'} />
             ) : null}
           </section>
-          <div
-            className={`notes-scrollbar${scrollbarMetrics.scrollable ? '' : ' notes-scrollbar--hidden'}`}
-            role="scrollbar"
-            aria-controls="notes-stream"
-            aria-orientation="vertical"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={scrollbarMetrics.valueNow}
-            onPointerDown={scrollFromTrackPointer}
-          >
-            <div
-              className="notes-scrollbar__thumb"
-              style={{ height: scrollbarMetrics.thumbHeight, transform: `translateY(${scrollbarMetrics.thumbTop}px)` }}
-              onPointerDown={dragScrollbarThumb}
-            />
-          </div>
         </div>
       </section>
 
-      <SettingsModal
-        open={settingsOpen}
-        accessKeys={accessKeys}
-        isLoading={isLoadingAccessKeys}
-        isCreating={isCreatingAccessKey}
-        error={settingsError}
-        onClose={() => setSettingsOpen(false)}
-        onLoadAccessKeys={onLoadAccessKeys}
-        onCreateAccessKey={onCreateAccessKey}
-        onDeleteAccessKey={onDeleteAccessKey}
-        onChangePassword={onChangePassword}
-      />
+      {settingsOpen ? (
+        <Suspense fallback={null}>
+          <SettingsModal
+            open={settingsOpen}
+            accessKeys={accessKeys}
+            isLoading={isLoadingAccessKeys}
+            isCreating={isCreatingAccessKey}
+            error={settingsError}
+            onClose={() => setSettingsOpen(false)}
+            onLoadAccessKeys={onLoadAccessKeys}
+            onCreateAccessKey={onCreateAccessKey}
+            onDeleteAccessKey={onDeleteAccessKey}
+            onChangePassword={onChangePassword}
+          />
+        </Suspense>
+      ) : null}
       <ToastHost toasts={toasts} onDismiss={onDismissToast ?? dismissToastNoop} />
     </main>
   );

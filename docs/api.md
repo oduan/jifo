@@ -145,13 +145,14 @@ Authorization: Bearer <accessKey>
       "label": "Mac CLI",
       "maskedKey": "jifo_abcd••••••••••vwxyz",
       "createdAt": "2026-05-31T00:00:00Z",
-      "lastUsedAt": "2026-05-31T01:00:00Z"
+      "lastUsedAt": "2026-05-31T01:00:00Z",
+      "expiresAt": "2026-06-30T00:00:00Z"
     }
   ]
 }
 ```
 
-说明：列表永远只返回打码后的 `maskedKey`，不会返回完整密钥。
+说明：列表永远只返回打码后的 `maskedKey`，不会返回完整密钥。`expiresAt` 为可选字段：仅在密钥设置了过期时间时出现，永久有效的密钥不含该字段。
 
 ### 创建访问密钥
 
@@ -161,9 +162,12 @@ Authorization: Bearer <accessKey>
 
 ```json
 {
-  "label": "Mac CLI"
+  "label": "Mac CLI",
+  "expiresInDays": 30
 }
 ```
+
+`expiresInDays` 可选：为正整数时密钥在 N 天后过期；缺省或为 0 时密钥永久有效（向后兼容）。
 
 响应 `201`：
 
@@ -173,17 +177,18 @@ Authorization: Bearer <accessKey>
     "id": "uuid",
     "label": "Mac CLI",
     "maskedKey": "jifo_abcd••••••••••vwxyz",
-    "createdAt": "2026-05-31T00:00:00Z"
+    "createdAt": "2026-05-31T00:00:00Z",
+    "expiresAt": "2026-06-30T00:00:00Z"
   },
   "secret": "jifo_abcd..."
 }
 ```
 
-说明：`secret` 只会在创建响应中返回一次。后端只保存密钥 hash，不保存原始密钥；关闭创建结果后无法再次查看完整密钥。
+说明：`secret` 只会在创建响应中返回一次。后端只保存密钥 hash，不保存原始密钥；关闭创建结果后无法再次查看完整密钥。`item.expiresAt` 仅在设置了 `expiresInDays` 时返回。过期后密钥验证失败（等同已撤销）。
 
 常见错误：
 
-- `400 bad_request`：缺少备注或 JSON 无效
+- `400 bad_request`：缺少备注、`expiresInDays` 为负数或 JSON 无效
 
 ### 删除访问密钥
 
@@ -240,14 +245,16 @@ Authorization: Bearer <accessKey>
 
 ### 笔记列表
 
-`GET /notes?search=&tagPath=&trash=&limit=&offset=`
+`GET /notes?search=&tagPath=&trash=&limit=&cursor=&offset=`
 
 查询参数：
 
 - `search`：按 `plain_text ILIKE` 搜索
 - `tagPath`：按标签路径筛选，包含子标签；已对 PostgreSQL `LIKE` 通配符做转义
 - `trash`：`true/1/yes` 时查询回收站；默认查询未删除笔记
-- `limit` / `offset`：分页
+- `limit`：单页数量；缺省或为 0 时默认 50，上限 200（超过会被 clamp 到 200）
+- `cursor`：keyset 分页游标（推荐），取自上一页响应的 `page.nextCursor`；按 `(created_at, id)` 降序翻页，优先于 `offset`
+- `offset`：传统偏移分页，仅在未传 `cursor` 时生效（向后兼容，大数据量下建议改用 `cursor`）
 
 响应 `200`：
 
@@ -268,12 +275,13 @@ Authorization: Bearer <accessKey>
   "page": {
     "limit": 20,
     "offset": 0,
-    "hasMore": false
+    "hasMore": false,
+    "nextCursor": "MjAyNi0wNS0yN1QwMDowMDowMFos..."
   }
 }
 ```
 
-`hasMore` 表示使用当前筛选条件继续请求 `offset + limit` 是否可能返回下一页。后端通过多取一条记录计算该字段，不执行额外总数统计。
+`hasMore` 表示使用当前筛选条件继续请求下一页是否可能返回更多笔记。后端通过多取一条记录计算该字段，不执行额外总数统计。`nextCursor` 仅在 `hasMore` 为 `true` 且本页有结果时返回；将其作为下一次请求的 `cursor` 即可拉取下一页，无需自行拼接 `offset`。
 
 ### 笔记统计
 

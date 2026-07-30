@@ -13,13 +13,22 @@ export type NoteEditorTag = {
   noteCount?: number;
 };
 
+// 编辑器中的图片附件：保留其在原笔记块序列中的下标，提交时按此下标插回。
+// 新上传的图片使用一个较大的递增下标，从而始终追加在文本块之后。
+export type EditorImage = {
+  block: Extract<NoteBlock, { type: 'image' }>;
+  originalIndex: number;
+};
+
 type NoteEditorProps = {
   initialText?: string;
+  initialImages?: EditorImage[];
   tags?: NoteEditorTag[];
   autoFocus?: boolean;
-  onSubmit: (blocks: NoteBlock[]) => void;
+  onSubmit: (blocks: NoteBlock[]) => void | Promise<void>;
   onCancel?: () => void;
   onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
+  resolveMediaUrl?: (mediaId: string) => Promise<string>;
 };
 
 type TagTrigger = {
@@ -80,6 +89,48 @@ function toParagraphBlocks(text: string): NoteBlock[] {
     .map((part) => part.trim())
     .filter(Boolean)
     .map((content) => ({ type: 'paragraph', content }));
+}
+
+// 将文本段落与存留图片按原始下标重新组装成块序列。
+function assembleBlocks(text: string, images: EditorImage[]): NoteBlock[] {
+  const result: NoteBlock[] = toParagraphBlocks(text);
+  const ordered = [...images].sort((a, b) => a.originalIndex - b.originalIndex);
+  for (const { block, originalIndex } of ordered) {
+    const position = Math.min(Math.max(originalIndex, 0), result.length);
+    result.splice(position, 0, block);
+  }
+  return result;
+}
+
+// 编辑态图片缩略图：blob:/data: 直接展示，mediaId 引用则经 resolveMediaUrl 解析并在卸载时回收。
+function EditorImageThumbnail({
+  block,
+  resolveMediaUrl
+}: {
+  block: Extract<NoteBlock, { type: 'image' }>;
+  resolveMediaUrl?: (mediaId: string) => Promise<string>;
+}) {
+  const isDirectUrl = Boolean(block.url && (block.url.startsWith('blob:') || block.url.startsWith('data:')));
+  const [source, setSource] = useState<string | undefined>(isDirectUrl ? block.url : undefined);
+
+  useEffect(() => {
+    if (isDirectUrl || !block.mediaId || !resolveMediaUrl) return;
+    let active = true;
+    let created: string | undefined;
+    void resolveMediaUrl(block.mediaId)
+      .then((url) => {
+        created = url;
+        if (active) setSource(url);
+        else URL.revokeObjectURL(url);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [block.mediaId, isDirectUrl, resolveMediaUrl]);
+
+  return <img src={source} alt={block.alt ?? '待发送图片'} />;
 }
 
 function tagInsertText(tag: NoteEditorTag): string {
@@ -191,7 +242,7 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
   };
 }
 
-export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onSubmit, onCancel, onUploadImage }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', initialImages, tags = [], autoFocus = false, onSubmit, onCancel, onUploadImage, resolveMediaUrl }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState(initialText);
@@ -199,9 +250,11 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
   const [tagTrigger, setTagTrigger] = useState<TagTrigger | null>(null);
   const [suggestionPosition, setSuggestionPosition] = useState<SuggestionPosition>({ left: 10, top: 0 });
   const [focusedTagIndex, setFocusedTagIndex] = useState(0);
-  const [images, setImages] = useState<Extract<NoteBlock, { type: 'image' }>[]>([]);
+  const [images, setImages] = useState<EditorImage[]>(() => initialImages ?? []);
+  const uploadSeqRef = useRef(1_000_000);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const blocks = [...toParagraphBlocks(text), ...images];
+  const [isSubmitting, setSubmitting] = useState(false);
+  const blocks = assembleBlocks(text, images);
   const hasContent = blocks.length > 0;
   const suggestions = useMemo(() => (tagTrigger ? suggestionItems(tags, tagTrigger.query) : []), [tagTrigger, tags]);
   const showTagSuggestions = Boolean(isFocused && tagTrigger && suggestions.length > 0);
@@ -237,7 +290,10 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
     setUploadError(null);
     try {
       const uploadedImages = await Promise.all(files.map((file) => onUploadImage(file)));
-      setImages((current) => [...current, ...uploadedImages]);
+      setImages((current) => [
+        ...current,
+        ...uploadedImages.map((block) => ({ block, originalIndex: uploadSeqRef.current++ }))
+      ]);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : '图片上传失败。');
     }
@@ -258,7 +314,7 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
 
   const removeImage = (index: number) => {
     setImages((current) => {
-      const image = current[index];
+      const image = current[index]?.block;
       if (image?.url?.startsWith('blob:')) {
         URL.revokeObjectURL(image.url);
       }
@@ -268,17 +324,26 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!hasContent) {
+    if (!hasContent || isSubmitting) {
       return;
     }
-    onSubmit(blocks);
-    images.forEach((image) => {
-      if (image.url?.startsWith('blob:')) URL.revokeObjectURL(image.url);
-    });
-    setText('');
-    setTagTrigger(null);
-    setFocusedTagIndex(0);
-    setImages([]);
+    setSubmitting(true);
+    void (async () => {
+      try {
+        await onSubmit(blocks);
+        images.forEach(({ block }) => {
+          if (block.url?.startsWith('blob:')) URL.revokeObjectURL(block.url);
+        });
+        setText('');
+        setTagTrigger(null);
+        setFocusedTagIndex(0);
+        setImages([]);
+      } catch {
+        // 提交失败：保留编辑器内容，错误提示由上层 toast 负责
+      } finally {
+        setSubmitting(false);
+      }
+    })();
   };
 
   const chooseSuggestion = (item: SuggestionItem | undefined) => {
@@ -403,13 +468,13 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
         ) : null}
         {images.length > 0 ? (
           <div className="note-editor__image-tray" aria-label="待发送图片">
-            {images.map((image, index) => (
-              <div className="note-editor__image-thumbnail" key={`${image.mediaId ?? image.url}-${index}`}>
-                <img src={image.url} alt={image.alt ?? '待发送图片'} />
+            {images.map(({ block }, index) => (
+              <div className="note-editor__image-thumbnail" key={`${block.mediaId ?? block.url}-${index}`}>
+                <EditorImageThumbnail block={block} resolveMediaUrl={resolveMediaUrl} />
                 <button
                   type="button"
                   className="note-editor__image-remove"
-                  aria-label={`移除图片 ${image.alt ?? index + 1}`}
+                  aria-label={`移除图片 ${block.alt ?? index + 1}`}
                   onClick={() => removeImage(index)}
                 >
                   <span aria-hidden="true">×</span>
@@ -432,7 +497,7 @@ export function NoteEditor({ initialText = '', tags = [], autoFocus = false, onS
             className="send-icon-button"
             aria-label="发送笔记"
             title="发送笔记（Ctrl+Enter）"
-            disabled={!hasContent}
+            disabled={!hasContent || isSubmitting}
           >
             <svg className="send-icon-button__icon" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M2 8.6 14.5 1.5l-4.2 12.4-2.9-5.3L2 8.6z" />

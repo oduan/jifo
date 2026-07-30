@@ -1,4 +1,5 @@
 import { ApiClient } from '../../shared/api/client';
+import { AuthUser } from './authStore';
 import { LoginPayload, LoginResult } from './LoginPage';
 
 const deviceCodeKey = 'jifo.deviceCode';
@@ -51,4 +52,9 @@ export async function refreshAuth(client: ApiClient, refreshToken: string): Prom
 
 export function logoutAuth(client: ApiClient): Promise<void> {
   return client.request<void>('/auth/logout', { method: 'POST' });
+}
+
+// 当登录/刷新响应缺少 user 时，用有效 access token 补齐当前用户身份
+export function fetchCurrentUser(client: ApiClient): Promise<AuthUser> {
+  return client.request<AuthUser>('/me', { method: 'GET' });
 }

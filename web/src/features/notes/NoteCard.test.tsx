@@ -430,4 +430,118 @@ describe('NoteCard', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: '图片预览' })).not.toBeInTheDocument();
   });
+
+  test('resolveMediaUrl 生成的 object URL 由 NoteCard 在卸载时集中 revoke', async () => {
+    const revoke = vi.fn();
+    const originalRevoke = URL.revokeObjectURL;
+    URL.revokeObjectURL = revoke;
+    const resolveMediaUrl = vi.fn().mockResolvedValue('blob:resolved-1');
+
+    const { unmount, rerender } = render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [
+            { type: 'paragraph', content: '带图片的笔记' },
+            { type: 'image', mediaId: 'media-1', alt: 'photo.png' }
+          ],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        resolveMediaUrl={resolveMediaUrl}
+      />
+    );
+
+    await screen.findByRole('button', { name: '放大预览 photo.png' });
+    expect(resolveMediaUrl).toHaveBeenCalledWith('media-1');
+    // 移除图片块会卸载 NoteImage，但父组件仍持有该 URL，不应被 revoke。
+    rerender(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [{ type: 'paragraph', content: '带图片的笔记' }],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        resolveMediaUrl={resolveMediaUrl}
+      />
+    );
+    expect(revoke).not.toHaveBeenCalledWith('blob:resolved-1');
+
+    unmount();
+    expect(revoke).toHaveBeenCalledWith('blob:resolved-1');
+    URL.revokeObjectURL = originalRevoke;
+  });
+
+  test('编辑提交时按原下标保留图片块', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [
+            { type: 'paragraph', content: '第一段' },
+            { type: 'image', mediaId: 'media-1', url: '/api/media/media-1', alt: 'photo.png' },
+            { type: 'paragraph', content: '第二段' }
+          ],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={onUpdate}
+        resolveMediaUrl={vi.fn().mockResolvedValue('blob:resolved-1')}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+
+    // 文本合并进 textarea，图片作为附件缩略图渲染
+    const textarea = screen.getByLabelText('笔记内容') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('第一段\n\n第二段');
+    expect(screen.getByRole('button', { name: '移除图片 photo.png' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '发送笔记' }));
+
+    expect(onUpdate).toHaveBeenCalledWith('n1', [
+      { type: 'paragraph', content: '第一段' },
+      { type: 'image', mediaId: 'media-1', url: '/api/media/media-1', alt: 'photo.png' },
+      { type: 'paragraph', content: '第二段' }
+    ]);
+  });
+
+  test('编辑时删除图片附件后提交不再包含该图片', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [
+            { type: 'paragraph', content: '仅剩文本' },
+            { type: 'image', mediaId: 'media-1', url: '/api/media/media-1', alt: 'photo.png' }
+          ],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={onUpdate}
+        resolveMediaUrl={vi.fn().mockResolvedValue('blob:resolved-1')}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    await user.click(screen.getByRole('button', { name: '移除图片 photo.png' }));
+    await user.click(screen.getByRole('button', { name: '发送笔记' }));
+
+    expect(onUpdate).toHaveBeenCalledWith('n1', [{ type: 'paragraph', content: '仅剩文本' }]);
+  });
 });

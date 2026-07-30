@@ -5,7 +5,6 @@ import {
   createNoteOutboxOperation,
   createOfflineNote,
   deleteNoteOutboxOperation,
-  enqueueOutboxOperation,
   restoreNoteOutboxOperation,
   updateNoteOutboxOperation
 } from './outbox';
@@ -431,7 +430,7 @@ describe('runSync', () => {
       pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-after-recover' }, notes: [] })
     });
 
-    let [op] = await db.outbox.toArray();
+    const [op] = await db.outbox.toArray();
     expect(op.status).toBe('failed');
     expect(op.lastError).toBe('interrupted_sync');
 
@@ -580,5 +579,53 @@ describe('runSync', () => {
     expect((await db.notes_cache.get('n1'))?.blocks).toEqual([{ type: 'paragraph', content: 'server original' }]);
     expect((await db.notes_cache.get('conflict-from-pull'))?.conflictReason).toBe('version_conflict');
     expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('后端返回 already_trashed 时视为成功并清理 outbox', async () => {
+    await db.outbox.add({
+      opId: 'op-already-trashed-1',
+      entity: 'note',
+      action: 'delete',
+      clientId: 'client-1',
+      noteId: 'n1',
+      baseVersion: 1,
+      payload: { blocks: [] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [{ opId: 'op-already-trashed-1', status: 'already_trashed', noteId: 'n1', version: 2 }],
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-already-trashed' }, notes: [] })
+    });
+
+    expect(await db.outbox.toArray()).toHaveLength(0);
+  });
+
+  test('后端返回 error 状态时保留 outbox 并在 lastError 记录 code', async () => {
+    await db.outbox.add({
+      opId: 'op-error-1',
+      entity: 'note',
+      action: 'delete',
+      clientId: 'client-1',
+      noteId: 'n1',
+      baseVersion: 1,
+      payload: { blocks: [] },
+      createdAt: '2026-05-27T00:00:00Z',
+      status: 'pending'
+    });
+
+    await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [{ opId: 'op-error-1', status: 'error', code: 'note_not_found' }],
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T00:00:00Z', id: 'cursor-error' }, notes: [] })
+    });
+
+    const [op] = await db.outbox.toArray();
+    expect(op.status).toBe('failed');
+    expect(op.lastError).toBe('push_status:error:note_not_found');
   });
 });

@@ -26,7 +26,7 @@ docker compose up -d --build
 
 ```bash
 cd backend
-DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret-at-least-16 go run ./cmd/api
+DATABASE_URL=postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable JWT_SECRET=dev-secret-change-me-32-bytes-minimum go run ./cmd/api
 ```
 
 示例中的用户名和密码仅供本机开发，请按实际 PostgreSQL 配置替换。

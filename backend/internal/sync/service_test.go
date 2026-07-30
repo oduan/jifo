@@ -457,6 +457,56 @@ func TestPushDeleteVersionConflictIsIgnored(t *testing.T) {
 	}
 }
 
+func TestPushDeleteAlreadyTrashedIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	sessionID := insertTestSession(t, ctx, db, userID)
+
+	noteSvc := notes.NewService(db, tags.NewService(db))
+	svc := NewService(db, noteSvc)
+
+	created, err := noteSvc.Create(ctx, notes.CreateInput{
+		UserID:    userID,
+		ClientID:  "delete-idempotent-origin",
+		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}},
+		PlainText: "v1",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	first, err := svc.Push(ctx, userID, &sessionID, Operation{
+		OpID:     "op-delete-idempotent-1",
+		Entity:   "note",
+		Action:   "delete",
+		EntityID: &created.ID,
+	})
+	if err != nil {
+		t.Fatalf("first Push(delete) error = %v", err)
+	}
+	if first.Status != "deleted" {
+		t.Fatalf("first delete status = %q, want %q", first.Status, "deleted")
+	}
+
+	second, err := svc.Push(ctx, userID, &sessionID, Operation{
+		OpID:     "op-delete-idempotent-2",
+		Entity:   "note",
+		Action:   "delete",
+		EntityID: &created.ID,
+	})
+	if err != nil {
+		t.Fatalf("second Push(delete) error = %v", err)
+	}
+	if second.Status != "already_trashed" {
+		t.Fatalf("second delete status = %q, want %q", second.Status, "already_trashed")
+	}
+	if second.NoteID == nil || *second.NoteID != created.ID {
+		t.Fatalf("second delete note_id = %v, want %s", second.NoteID, created.ID)
+	}
+}
+
 func TestPushRestoreVersionConflictCreatesConflictCopy(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)
@@ -562,12 +612,12 @@ func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create purged note: %v", err)
 	}
-	trashTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	noteSvc.SetNowForTest(func() time.Time { return trashTime })
 	if _, err := noteSvc.MoveToTrash(ctx, userID, purged.ID); err != nil {
 		t.Fatalf("move purged note to trash: %v", err)
 	}
-	noteSvc.SetNowForTest(func() time.Time { return trashTime.Add(31 * 24 * time.Hour) })
+	if _, err := db.Exec(ctx, `UPDATE notes SET purge_after = now() - interval '1 day' WHERE user_id = $1 AND id = $2`, userID, purged.ID); err != nil {
+		t.Fatalf("backdate purge_after: %v", err)
+	}
 	if _, err := noteSvc.PermanentlyDeleteExpiredTrash(ctx, userID, nil); err != nil {
 		t.Fatalf("permanently delete trash: %v", err)
 	}
@@ -580,6 +630,14 @@ func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 	seen := make(map[uuid.UUID]string)
 	for _, item := range pull.Items {
 		seen[item.NoteID] = item.Tombstone
+		if item.NoteID == purged.ID {
+			if item.PlainText != "" {
+				t.Fatalf("purged note plainText = %q, want empty", item.PlainText)
+			}
+			if len(item.Content.Blocks) != 0 {
+				t.Fatalf("purged note content blocks = %d, want 0", len(item.Content.Blocks))
+			}
+		}
 	}
 
 	if got := seen[active.ID]; got != "" {

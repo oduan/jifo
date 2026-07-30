@@ -8,7 +8,7 @@ import (
 
 func TestLoadReadsEnvironmentWithDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable")
-	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
 
 	cfg, err := Load()
 	if err != nil {
@@ -17,7 +17,7 @@ func TestLoadReadsEnvironmentWithDefaults(t *testing.T) {
 	if cfg.DatabaseURL != "postgres://jifo:jifo@localhost:5432/jifo?sslmode=disable" {
 		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
 	}
-	if cfg.JWTSecret != "test-secret" {
+	if cfg.JWTSecret != strings.Repeat("x", 32) {
 		t.Fatalf("JWTSecret = %q", cfg.JWTSecret)
 	}
 	if cfg.MediaRoot != "storage/media" {
@@ -49,19 +49,18 @@ func TestLoadReadsProductionSettings(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsShortProductionSecret(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
+func TestLoadRejectsShortSecret(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://db/jifo")
 	t.Setenv("JWT_SECRET", "short-secret")
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "at least 32 bytes") {
-		t.Fatalf("Load() error = %v, want production secret error", err)
+		t.Fatalf("Load() error = %v, want short secret error", err)
 	}
 }
 
 func TestLoadRejectsInvalidDuration(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://db/jifo")
-	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
 	t.Setenv("HTTP_READ_TIMEOUT", "never")
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "HTTP_READ_TIMEOUT") {

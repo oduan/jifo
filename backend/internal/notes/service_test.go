@@ -152,8 +152,7 @@ func TestMoveToTrashDeletesNoteTagsRecountsAndListsTrash(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	fixedNow := time.Date(2026, 5, 27, 4, 0, 0, 0, time.UTC)
-	svc.SetNowForTest(func() time.Time { return fixedNow })
+	fixedNow := time.Now().UTC()
 
 	trashed, err := svc.MoveToTrash(ctx, userID, created.ID)
 	if err != nil {
@@ -163,10 +162,10 @@ func TestMoveToTrashDeletesNoteTagsRecountsAndListsTrash(t *testing.T) {
 	if trashed.Version != created.Version+1 {
 		t.Fatalf("trashed version = %d, want %d", trashed.Version, created.Version+1)
 	}
-	if trashed.DeletedAt == nil || !trashed.DeletedAt.Equal(fixedNow) {
-		t.Fatalf("deleted_at = %v, want %v", trashed.DeletedAt, fixedNow)
+	if trashed.DeletedAt == nil || trashed.DeletedAt.Before(fixedNow.Add(-time.Minute)) {
+		t.Fatalf("deleted_at = %v, want recent timestamp", trashed.DeletedAt)
 	}
-	wantPurgeAfter := fixedNow.Add(30 * 24 * time.Hour)
+	wantPurgeAfter := trashed.DeletedAt.Add(30 * 24 * time.Hour)
 	if trashed.PurgeAfter == nil || !trashed.PurgeAfter.Equal(wantPurgeAfter) {
 		t.Fatalf("purge_after = %v, want %v", trashed.PurgeAfter, wantPurgeAfter)
 	}
@@ -213,16 +212,10 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	svc.SetNowForTest(func() time.Time {
-		return time.Date(2026, 5, 27, 4, 0, 0, 0, time.UTC)
-	})
 	trashed, err := svc.MoveToTrash(ctx, userID, created.ID)
 	if err != nil {
 		t.Fatalf("MoveToTrash() error = %v", err)
 	}
-
-	restoreNow := time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC)
-	svc.SetNowForTest(func() time.Time { return restoreNow })
 
 	restored, err := svc.Restore(ctx, userID, created.ID)
 	if err != nil {
@@ -238,8 +231,8 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	if restored.PurgeAfter != nil {
 		t.Fatalf("purge_after = %v, want nil", restored.PurgeAfter)
 	}
-	if !restored.UpdatedAt.Equal(restoreNow) {
-		t.Fatalf("updated_at = %v, want %v", restored.UpdatedAt, restoreNow)
+	if !restored.UpdatedAt.After(trashed.UpdatedAt) && !restored.UpdatedAt.Equal(trashed.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want >= %v", restored.UpdatedAt, trashed.UpdatedAt)
 	}
 
 	assertNoteTagCount(t, ctx, db, userID, created.ID, 2)
@@ -376,15 +369,15 @@ func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	trashTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	noteSvc.SetNowForTest(func() time.Time { return trashTime })
 	if _, err := noteSvc.MoveToTrash(ctx, userID, created.ID); err != nil {
 		t.Fatalf("MoveToTrash() error = %v", err)
 	}
 
-	permanentTime := trashTime.Add(31 * 24 * time.Hour)
-	noteSvc.SetNowForTest(func() time.Time { return permanentTime })
-	mediaSvc.SetNowForTest(func() time.Time { return permanentTime })
+	// Backdate purge_after so the trash entry is already expired.
+	if _, err := db.Exec(ctx, `UPDATE notes SET purge_after = now() - interval '1 day' WHERE user_id = $1 AND id = $2`, userID, created.ID); err != nil {
+		t.Fatalf("backdate purge_after: %v", err)
+	}
+
 	count, err := noteSvc.PermanentlyDeleteExpiredTrash(ctx, userID, mediaSvc)
 	if err != nil {
 		t.Fatalf("PermanentlyDeleteExpiredTrash() error = %v", err)
@@ -394,11 +387,19 @@ func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(
 	}
 
 	var permanentlyDeletedAt *time.Time
-	if err := db.QueryRow(ctx, `SELECT permanently_deleted_at FROM notes WHERE user_id = $1 AND id = $2`, userID, created.ID).Scan(&permanentlyDeletedAt); err != nil {
+	var scrubbedPlainText string
+	var scrubbedContent []byte
+	if err := db.QueryRow(ctx, `SELECT permanently_deleted_at, plain_text, content FROM notes WHERE user_id = $1 AND id = $2`, userID, created.ID).Scan(&permanentlyDeletedAt, &scrubbedPlainText, &scrubbedContent); err != nil {
 		t.Fatalf("query note permanently_deleted_at: %v", err)
 	}
-	if permanentlyDeletedAt == nil || !permanentlyDeletedAt.Equal(permanentTime) {
-		t.Fatalf("permanently_deleted_at = %v, want %v", permanentlyDeletedAt, permanentTime)
+	if permanentlyDeletedAt == nil {
+		t.Fatalf("permanently_deleted_at = nil, want set")
+	}
+	if scrubbedPlainText != "" {
+		t.Fatalf("plain_text = %q, want empty after permanent deletion", scrubbedPlainText)
+	}
+	if string(scrubbedContent) != `{"blocks": []}` && string(scrubbedContent) != `{"blocks":[]}` {
+		t.Fatalf("content = %s, want empty blocks after permanent deletion", scrubbedContent)
 	}
 	assertNoteMediaRefCount(t, ctx, db, userID, created.ID, mediaID, 0)
 
@@ -406,11 +407,11 @@ func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(
 	if err := db.QueryRow(ctx, `SELECT deleted_at, purge_after FROM media_assets WHERE user_id = $1 AND id = $2`, userID, mediaID).Scan(&mediaDeletedAt, &mediaPurgeAfter); err != nil {
 		t.Fatalf("query media deletion fields: %v", err)
 	}
-	if mediaDeletedAt == nil || !mediaDeletedAt.Equal(permanentTime) {
-		t.Fatalf("media deleted_at = %v, want %v", mediaDeletedAt, permanentTime)
+	if mediaDeletedAt == nil {
+		t.Fatalf("media deleted_at = nil, want set")
 	}
-	if mediaPurgeAfter == nil || !mediaPurgeAfter.Equal(permanentTime) {
-		t.Fatalf("media purge_after = %v, want %v", mediaPurgeAfter, permanentTime)
+	if mediaPurgeAfter == nil {
+		t.Fatalf("media purge_after = nil, want set")
 	}
 
 	trashNotes, err := noteSvc.List(ctx, ListFilter{UserID: userID, Trash: true})

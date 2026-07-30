@@ -121,7 +121,7 @@ API 启动时会自动执行尚未应用的数据库迁移。不要修改已经�
 | `POSTGRES_USER` | `jifo` | 数据库用户 |
 | `POSTGRES_DB` | `jifo` | 数据库名 |
 | `POSTGRES_PASSWORD` | 必填 | 数据库密码 |
-| `JWT_SECRET` | 必填 | 生产环境至少 32 字节 |
+| `JWT_SECRET` | 必填 | 至少 32 字节 |
 | `TRUSTED_PROXIES` | RFC1918 私网段 | API 信任的内部反向代理 CIDR；自定义 Docker 地址池时覆盖 |
 | `ACCESS_TOKEN_TTL` | `15m` | access token 有效期 |
 | `AUTH_RATE_LIMIT` | `10` | 认证接口限流次数 |
@@ -232,7 +232,7 @@ docker compose up -d --build
 ```bash
 cd backend
 DATABASE_URL=postgres://jifo:<POSTGRES_PASSWORD>@localhost:5432/jifo?sslmode=disable \
-JWT_SECRET=dev-secret-at-least-16 \
+JWT_SECRET=dev-secret-change-me-32-bytes-minimum \
 go run ./cmd/api
 ```
 

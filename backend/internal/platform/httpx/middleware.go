@@ -328,7 +328,16 @@ func (l *RateLimiter) allow(key string) bool {
 				}
 			}
 			if len(l.entries) >= l.maxEntries {
-				return false
+				// 满载且无过期项：淘汰 reset 最早的一条，接纳新来源而不是一律拒绝。
+				var oldestKey string
+				var oldestReset time.Time
+				for candidate, value := range l.entries {
+					if oldestKey == "" || value.reset.Before(oldestReset) {
+						oldestKey = candidate
+						oldestReset = value.reset
+					}
+				}
+				delete(l.entries, oldestKey)
 			}
 		}
 		l.entries[key] = rateEntry{count: 1, reset: now.Add(l.window)}

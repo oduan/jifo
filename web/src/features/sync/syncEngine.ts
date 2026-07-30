@@ -9,9 +9,41 @@ export type MediaUploadResult = {
   mediaId: string;
 };
 
+// push 操作的已知返回状态；服务端返回的未知值在边界处归一为 'unknown'。
+export const PUSH_STATUSES = [
+  'created',
+  'updated',
+  'deleted',
+  'restored',
+  'delete_conflict_ignored',
+  'conflict_copied',
+  'duplicate',
+  'already_trashed',
+  'error'
+] as const;
+
+export type PushStatus = (typeof PUSH_STATUSES)[number] | 'unknown';
+
+// 视为成功并可从 outbox 移除的状态；'error' 与 'unknown' 不在其中。
+const SUCCESSFUL_PUSH_STATUSES: readonly PushStatus[] = [
+  'created',
+  'updated',
+  'deleted',
+  'restored',
+  'delete_conflict_ignored',
+  'conflict_copied',
+  'duplicate',
+  'already_trashed'
+];
+
+export function normalizePushStatus(status: string): PushStatus {
+  return (PUSH_STATUSES as readonly string[]).includes(status) ? (status as PushStatus) : 'unknown';
+}
+
 export type PushResult = {
   opId: string;
-  status: 'created' | 'updated' | 'deleted' | 'restored' | 'delete_conflict_ignored' | 'conflict_copied' | 'duplicate' | string;
+  status: PushStatus;
+  code?: string;
   noteId?: string;
   version?: number;
   note?: CachedNote;
@@ -35,7 +67,7 @@ export type SyncEngineOptions = {
 };
 
 const runningSyncDbNames = new Set<string>();
-const successfulPushStatuses = new Set(['created', 'updated', 'deleted', 'restored', 'delete_conflict_ignored', 'conflict_copied', 'duplicate']);
+const successfulPushStatuses = new Set<PushStatus>(SUCCESSFUL_PUSH_STATUSES);
 const syncLockKey = 'sync_lock';
 const syncLockTtlMs = 30_000;
 
@@ -221,7 +253,8 @@ async function settlePushedOperations(db: JifoDb, selectedOps: OutboxOperation[]
         await db.outbox.delete(op.localSeq);
         continue;
       }
-      await db.outbox.update(op.localSeq, { status: 'failed', lastError: `push_status:${result.status}` });
+      const lastError = result.code ? `push_status:${result.status}:${result.code}` : `push_status:${result.status}`;
+      await db.outbox.update(op.localSeq, { status: 'failed', lastError });
     }
   });
 }

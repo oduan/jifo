@@ -17,22 +17,23 @@ import (
 
 var ErrNoteNotFound = errors.New("note not found")
 
+// tagWriter 是 notes 包对 tag 写入能力的窄接口，解除对 *tags.Service 具体类型的耦合。
+type tagWriter interface {
+	EnsurePathsTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, paths []string) (map[string]uuid.UUID, error)
+	RecountNoteCounts(ctx context.Context, tx pgx.Tx, userID uuid.UUID, tagIDs []uuid.UUID) error
+}
+
 type Service struct {
 	db   *pgxpool.Pool
-	tags *tags.Service
-	now  func() time.Time
+	tags tagWriter
 }
 
 type MediaDeletionMarker interface {
 	MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error
 }
 
-func NewService(db *pgxpool.Pool, tagSvc *tags.Service) *Service {
-	return &Service{db: db, tags: tagSvc, now: time.Now}
-}
-
-func (s *Service) SetNowForTest(now func() time.Time) {
-	s.now = now
+func NewService(db *pgxpool.Pool, tagSvc tagWriter) *Service {
+	return &Service{db: db, tags: tagSvc}
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
@@ -93,7 +94,21 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Note, error) {
 	return note, nil
 }
 
+// lockNoteRow 先对目标笔记行加锁，保证后续“读旧标签→改行→重建标签计数”在并发下串行，
+// 避免 tag 计数竞态。
+func lockNoteRow(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) error {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT id FROM notes WHERE user_id = $1 AND id = $2 FOR UPDATE`, userID, noteID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNoteNotFound
+	}
+	return err
+}
+
 func (s *Service) UpdateTx(ctx context.Context, tx pgx.Tx, input UpdateInput) (Note, error) {
+	if err := lockNoteRow(ctx, tx, input.UserID, input.NoteID); err != nil {
+		return Note{}, err
+	}
 	oldTagIDs, err := s.currentTagIDs(ctx, tx, input.UserID, input.NoteID)
 	if err != nil {
 		return Note{}, err
@@ -153,25 +168,26 @@ func (s *Service) MoveToTrash(ctx context.Context, userID uuid.UUID, noteID uuid
 }
 
 func (s *Service) MoveToTrashTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (Note, error) {
+	if err := lockNoteRow(ctx, tx, userID, noteID); err != nil {
+		return Note{}, err
+	}
 	oldTagIDs, err := s.currentTagIDs(ctx, tx, userID, noteID)
 	if err != nil {
 		return Note{}, err
 	}
 
-	now := s.now().UTC()
-	purgeAfter := now.Add(30 * 24 * time.Hour)
 	note, err := scanNote(tx.QueryRow(ctx, `
 		UPDATE notes
-		SET deleted_at = $3,
-		    purge_after = $4,
-		    updated_at = $3,
+		SET deleted_at = now(),
+		    purge_after = now() + interval '30 days',
+		    updated_at = now(),
 		    version = version + 1
 		WHERE user_id = $1
 		  AND id = $2
 		  AND deleted_at IS NULL
 		  AND permanently_deleted_at IS NULL
 		RETURNING id, user_id, client_id, content, plain_text, created_at, updated_at, deleted_at, purge_after, permanently_deleted_at, version
-	`, userID, noteID, now, purgeAfter))
+	`, userID, noteID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Note{}, ErrNoteNotFound
 	}
@@ -206,19 +222,21 @@ func (s *Service) Restore(ctx context.Context, userID uuid.UUID, noteID uuid.UUI
 }
 
 func (s *Service) RestoreTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (Note, error) {
-	now := s.now().UTC()
+	if err := lockNoteRow(ctx, tx, userID, noteID); err != nil {
+		return Note{}, err
+	}
 	note, err := scanNote(tx.QueryRow(ctx, `
 		UPDATE notes
 		SET deleted_at = NULL,
 		    purge_after = NULL,
-		    updated_at = $3,
+		    updated_at = now(),
 		    version = version + 1
 		WHERE user_id = $1
 		  AND id = $2
 		  AND deleted_at IS NOT NULL
 		  AND permanently_deleted_at IS NULL
 		RETURNING id, user_id, client_id, content, plain_text, created_at, updated_at, deleted_at, purge_after, permanently_deleted_at, version
-	`, userID, noteID, now))
+	`, userID, noteID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Note{}, ErrNoteNotFound
 	}
@@ -253,15 +271,14 @@ func (s *Service) PermanentlyDeleteExpiredTrash(ctx context.Context, userID uuid
 }
 
 func (s *Service) PermanentlyDeleteExpiredTrashTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, mediaMarker MediaDeletionMarker) (int64, error) {
-	now := s.now().UTC()
 	rows, err := tx.Query(ctx, `
 		SELECT id
 		FROM notes
 		WHERE user_id = $1
 		  AND deleted_at IS NOT NULL
 		  AND permanently_deleted_at IS NULL
-		  AND purge_after <= $2
-	`, userID, now)
+		  AND purge_after <= now()
+	`, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -282,13 +299,17 @@ func (s *Service) PermanentlyDeleteExpiredTrashTx(ctx context.Context, tx pgx.Tx
 	rows.Close()
 
 	for _, noteID := range noteIDs {
+		// Scrub the body so "permanently deleted" also erases user content;
+		// only tombstone metadata is kept for sync clients.
 		if _, err := tx.Exec(ctx, `
 			UPDATE notes
-			SET permanently_deleted_at = $3,
-			    updated_at = $3,
+			SET permanently_deleted_at = now(),
+			    updated_at = now(),
+			    content = '{"blocks":[]}'::jsonb,
+			    plain_text = '',
 			    version = version + 1
 			WHERE user_id = $1 AND id = $2
-		`, userID, noteID, now); err != nil {
+		`, userID, noteID); err != nil {
 			return 0, err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM note_media_refs WHERE user_id = $1 AND note_id = $2`, userID, noteID); err != nil {
@@ -363,8 +384,8 @@ func buildListQuery(filter ListFilter) (string, []any) {
 	}
 
 	if search := strings.TrimSpace(filter.Search); search != "" {
-		conditions = append(conditions, fmt.Sprintf("n.plain_text ILIKE $%d", argIndex))
-		args = append(args, "%"+search+"%")
+		conditions = append(conditions, fmt.Sprintf(`n.plain_text ILIKE $%d ESCAPE E'\\'`, argIndex))
+		args = append(args, "%"+escapeLikePattern(search)+"%")
 		argIndex++
 	}
 
@@ -379,6 +400,12 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		)`, argIndex, argIndex+1))
 		escapedTagPath := escapeLikePattern(tagPath)
 		args = append(args, tagPath, escapedTagPath+"/%")
+		argIndex += 2
+	}
+
+	if filter.CursorCreatedAt != nil && filter.CursorID != nil {
+		conditions = append(conditions, fmt.Sprintf("(n.created_at, n.id) < ($%d, $%d)", argIndex, argIndex+1))
+		args = append(args, filter.CursorCreatedAt.UTC(), *filter.CursorID)
 		argIndex += 2
 	}
 
@@ -411,7 +438,7 @@ func buildListQuery(filter ListFilter) (string, []any) {
 		args = append(args, filter.Limit)
 		argIndex++
 	}
-	if filter.Offset > 0 {
+	if filter.Offset > 0 && filter.CursorCreatedAt == nil {
 		sql += fmt.Sprintf(" OFFSET $%d", argIndex)
 		args = append(args, filter.Offset)
 	}

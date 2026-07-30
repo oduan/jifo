@@ -1,4 +1,5 @@
 import { ApiClient } from '../../shared/api/client';
+import { apiBaseUrl } from '../../shared/api/baseUrl';
 import { TagNode } from '../tags/TagTree';
 import { Note } from './NoteCard';
 import { NoteBlock } from './NoteEditor';
@@ -24,6 +25,7 @@ export type ListNotesOptions = {
   tagPath?: string;
   limit?: number;
   offset?: number;
+  cursor?: string;
 };
 
 export type ListNotesResult = {
@@ -32,6 +34,7 @@ export type ListNotesResult = {
     limit: number;
     offset: number;
     hasMore: boolean;
+    nextCursor?: string;
   };
 };
 
@@ -68,7 +71,7 @@ export function fromApiBlocks(blocks: ApiNoteBlock[] | undefined, plainText = ''
         return content.trim() ? { type: 'paragraph', content } : undefined;
       }
       if (block.type === 'image') {
-        const url = block.url ?? (block.mediaId ? `/api/media/${block.mediaId}` : '');
+        const url = block.url ?? (block.mediaId ? `${apiBaseUrl()}/media/${block.mediaId}` : '');
         return url ? { type: 'image', url, mediaId: block.mediaId, alt: block.alt } : undefined;
       }
       return undefined;
@@ -146,6 +149,9 @@ export async function listNotes(client: ApiClient, options: ListNotesOptions = {
   }
   if (typeof options.offset === 'number') {
     params.set('offset', String(options.offset));
+  }
+  if (options.cursor) {
+    params.set('cursor', options.cursor);
   }
   const response = await client.request<ListNotesResult>(`/notes${params.size ? `?${params.toString()}` : ''}`);
   return {

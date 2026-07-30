@@ -67,6 +67,21 @@ func TestBuildListQuerySupportsSearchTagPathTrashAndPagination(t *testing.T) {
 	}
 }
 
+func TestBuildListQueryEscapesSearchLikeWildcards(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	sql, args := buildListQuery(ListFilter{UserID: userID, Search: `50%_off\A`})
+
+	if !strings.Contains(sql, `n.plain_text ILIKE $2 ESCAPE E'\\'`) {
+		t.Fatalf("sql should use an explicit single-character PostgreSQL ESCAPE for search ILIKE, got: %s", sql)
+	}
+	if len(args) != 2 {
+		t.Fatalf("args len = %d, want 2", len(args))
+	}
+	if args[1] != `%50\%\_off\\A%` {
+		t.Fatalf("search arg = %q, want escaped wildcards wrapped in %%", args[1])
+	}
+}
+
 func TestBuildListQueryEscapesTagPathLikeWildcards(t *testing.T) {
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	sql, args := buildListQuery(ListFilter{UserID: userID, TagPath: `项目%_\A`})

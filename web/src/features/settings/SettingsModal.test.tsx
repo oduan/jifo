@@ -37,12 +37,41 @@ describe('SettingsModal', () => {
     await user.type(screen.getByLabelText('密钥备注'), 'CLI');
     await user.click(screen.getByRole('button', { name: '生成密钥' }));
 
-    expect(onCreateAccessKey).toHaveBeenCalledWith('CLI');
+    expect(onCreateAccessKey).toHaveBeenCalledWith('CLI', undefined);
     expect(await screen.findByText('jifo_secret_once')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '关闭' }));
 
     expect(screen.queryByText('jifo_secret_once')).not.toBeInTheDocument();
+  });
+
+  test('填写有效期天数后创建密钥会透传 expiresInDays', async () => {
+    const user = userEvent.setup();
+    const onCreateAccessKey = vi.fn(async () => ({
+      item: { id: 'k1', label: 'CLI', maskedKey: 'jifo_abcd••••••vwxyz', createdAt: '2026-05-31T00:00:00Z' },
+      secret: 'jifo_secret_once'
+    }));
+
+    render(<SettingsModal open accessKeys={[]} onClose={vi.fn()} onCreateAccessKey={onCreateAccessKey} />);
+
+    await user.click(screen.getByRole('button', { name: '新建密钥' }));
+    await user.type(screen.getByLabelText('密钥备注'), 'CLI');
+    await user.type(screen.getByLabelText('有效期（天，可选，留空表示永久）'), '90');
+    await user.click(screen.getByRole('button', { name: '生成密钥' }));
+
+    expect(onCreateAccessKey).toHaveBeenCalledWith('CLI', 90);
+  });
+
+  test('展示密钥过期时间', () => {
+    render(
+      <SettingsModal
+        open
+        accessKeys={[{ id: 'k1', label: 'CLI', maskedKey: 'jifo_abcd••••••vwxyz', createdAt: '2026-05-31T00:00:00Z', expiresAt: '2026-08-31T00:00:00Z' }]}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/到期/)).toBeInTheDocument();
   });
 
   test('点击删除并确认后删除密钥', async () => {

@@ -57,6 +57,9 @@ type ListFilter struct {
 	UpdatedTo   *time.Time
 	Limit       int
 	Offset      int
+	// Keyset 分页游标：非空时按 (created_at, id) < (cursor) 取下一页，优先于 Offset。
+	CursorCreatedAt *time.Time
+	CursorID        *uuid.UUID
 }
 
 type ListResult struct {

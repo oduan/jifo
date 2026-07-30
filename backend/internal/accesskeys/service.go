@@ -34,6 +34,7 @@ type AccessKey struct {
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
+	ExpiresAt  *time.Time
 }
 
 type CreateResult struct {
@@ -58,7 +59,7 @@ func NewService(db *pgxpool.Pool) *Service {
 
 func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]AccessKey, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, user_id, label, masked_key, created_at, last_used_at, revoked_at
+		SELECT id, user_id, label, masked_key, created_at, last_used_at, revoked_at, expires_at
 		FROM access_keys
 		WHERE user_id = $1
 		  AND revoked_at IS NULL
@@ -72,7 +73,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]AccessKey, erro
 	items := make([]AccessKey, 0)
 	for rows.Next() {
 		var item AccessKey
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Label, &item.MaskedKey, &item.CreatedAt, &item.LastUsedAt, &item.RevokedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Label, &item.MaskedKey, &item.CreatedAt, &item.LastUsedAt, &item.RevokedAt, &item.ExpiresAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -83,7 +84,8 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]AccessKey, erro
 	return items, nil
 }
 
-func (s *Service) Create(ctx context.Context, userID uuid.UUID, label string) (CreateResult, error) {
+// Create 生成新 access key。expiresInDays > 0 时设置过期时间，否则永久有效。
+func (s *Service) Create(ctx context.Context, userID uuid.UUID, label string, expiresInDays int) (CreateResult, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return CreateResult{}, ErrInvalidLabel
@@ -97,10 +99,10 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, label string) (C
 		prefix, suffix, masked := maskSecret(secret)
 		var item AccessKey
 		err = s.db.QueryRow(ctx, `
-			INSERT INTO access_keys (user_id, label, key_hash, key_prefix, key_suffix, masked_key)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			RETURNING id, user_id, label, masked_key, created_at, last_used_at, revoked_at
-		`, userID, label, hashSecret(secret), prefix, suffix, masked).Scan(
+			INSERT INTO access_keys (user_id, label, key_hash, key_prefix, key_suffix, masked_key, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7::int > 0 THEN now() + make_interval(days => $7::int) END)
+			RETURNING id, user_id, label, masked_key, created_at, last_used_at, revoked_at, expires_at
+		`, userID, label, hashSecret(secret), prefix, suffix, masked, expiresInDays).Scan(
 			&item.ID,
 			&item.UserID,
 			&item.Label,
@@ -108,6 +110,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, label string) (C
 			&item.CreatedAt,
 			&item.LastUsedAt,
 			&item.RevokedAt,
+			&item.ExpiresAt,
 		)
 		if err == nil {
 			return CreateResult{AccessKey: item, Secret: secret}, nil
@@ -152,6 +155,7 @@ func (s *Service) Validate(ctx context.Context, rawKey string) (Principal, error
 		SET last_used_at = now()
 		WHERE key_hash = $1
 		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > now())
 		RETURNING id, user_id
 	`, hashSecret(rawKey)).Scan(&principal.KeyID, &principal.UserID)
 	if err != nil {

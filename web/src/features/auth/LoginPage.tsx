@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 
 import { createApiClient } from '../../shared/api/client';
+import { apiBaseUrl } from '../../shared/api/baseUrl';
 import { Button } from '../../shared/ui/Button';
 import { Field, TextInput } from '../../shared/ui/Input';
 import { submitAuth } from './api';
@@ -26,7 +27,7 @@ type LoginPageProps = {
 };
 
 const defaultClient = createApiClient({
-  baseUrl: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  baseUrl: apiBaseUrl(),
   getAccessToken: authStore.getAccessToken
 });
 
