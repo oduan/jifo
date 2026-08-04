@@ -71,7 +71,8 @@ class NotesFragment : Fragment() {
                         repository.updateNote(note.id, MarkdownTasks.toggle(NoteJson.decodeBlocks(note.contentJson), taskIndex))
                     }
                 }
-            }
+            },
+            onExpandClick = { note -> openNoteDetail(note) }
         )
         lateinit var tagAdapter: TagAdapter
         tagAdapter = TagAdapter(
@@ -415,6 +416,13 @@ class NotesFragment : Fragment() {
         parentFragmentManager.beginTransaction()
             .replace(R.id.main_container, NoteEditFragment.newInstance(note.id))
             .addToBackStack("note-edit")
+            .commit()
+    }
+
+    private fun openNoteDetail(note: NoteEntity) {
+        parentFragmentManager.beginTransaction()
+            .replace(R.id.main_container, NoteDetailFragment.newInstance(note.id))
+            .addToBackStack("note-detail")
             .commit()
     }
 

@@ -12,6 +12,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.jifo.app.R
 import com.jifo.app.ServiceLocator
 import com.jifo.app.databinding.FragmentSearchBinding
 import kotlinx.coroutines.Job
@@ -36,6 +37,12 @@ class SearchFragment : Fragment() {
                 viewLifecycleOwner.lifecycleScope.launch {
                     repository.updateNote(note.id, MarkdownTasks.toggle(NoteJson.decodeBlocks(note.contentJson), taskIndex))
                 }
+            },
+            onExpandClick = { note ->
+                parentFragmentManager.beginTransaction()
+                    .replace(R.id.main_container, NoteDetailFragment.newInstance(note.id))
+                    .addToBackStack("note-detail")
+                    .commit()
             }
         )
         val layoutManager = LinearLayoutManager(requireContext())

@@ -34,9 +34,26 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:maxLines="6"
         android:textColor="#3A322A"
         android:textSize="14sp"
         android:lineSpacingExtra="2dp" />
+
+    <TextView
+        android:id="@+id/button_note_expand"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:background="?android:attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true"
+        android:paddingStart="2dp"
+        android:paddingEnd="2dp"
+        android:text="展开"
+        android:textColor="@color/jifo_green_dark"
+        android:textSize="12sp"
+        android:visibility="gone" />
 
     <LinearLayout
         android:id="@+id/note_images"
