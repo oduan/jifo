@@ -690,6 +690,26 @@ describe('runSync', () => {
     expect(await db.outbox.toArray()).toHaveLength(0);
   });
 
+  test('返回 pull 拉到的变更笔记，供上层同步界面状态', async () => {
+    const pulled = {
+      id: 'n-remote',
+      clientId: 'client-remote',
+      blocks: [{ type: 'paragraph' as const, content: 'remote change' }],
+      updatedAt: '2026-05-27T02:00:00Z',
+      deletedAt: '2026-05-27T02:00:00Z',
+      version: 4
+    };
+
+    const result = await runSync({
+      db,
+      uploadMedia: async () => ({ mediaId: 'unused' }),
+      pushOutbox: async () => [],
+      pullChanges: async () => ({ cursor: { updatedAt: '2026-05-27T02:00:00Z', id: 'n-remote' }, notes: [pulled] })
+    });
+
+    expect(result).toEqual([pulled]);
+  });
+
   test('后端返回 error 状态时保留 outbox 并在 lastError 记录 code', async () => {
     await db.outbox.add({
       opId: 'op-error-1',

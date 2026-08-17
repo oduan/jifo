@@ -360,10 +360,12 @@ async function recoverInterruptedPushing(db: JifoDb) {
   return pushingOps.length;
 }
 
-export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: SyncEngineOptions) {
+// 返回拉取到的变更笔记（含删除/恢复标记），供调用方把远端删除精确同步到界面状态；
+// 同步被跳过（锁冲突/并发）时返回 undefined。
+export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: SyncEngineOptions): Promise<CachedNote[] | undefined> {
   const lockName = db.name;
   if (runningSyncDbNames.has(lockName)) {
-    return;
+    return undefined;
   }
   runningSyncDbNames.add(lockName);
   let lockOwner: string | undefined;
@@ -371,7 +373,7 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
   try {
     lockOwner = await acquireSyncLock(db);
     if (!lockOwner) {
-      return;
+      return undefined;
     }
     await ensureSyncLock(db, lockOwner);
     const recoveredCount = await recoverInterruptedPushing(db);
@@ -410,6 +412,7 @@ export async function runSync({ db, uploadMedia, pushOutbox, pullChanges }: Sync
     const cursor = readCursor((await db.sync_state.get('cursor'))?.value);
     const changes = await pullChanges(cursor);
     await applyPullChanges(db, changes);
+    return changes.notes;
   } catch (error) {
     await markPushingAsFailed(db, errorMessage(error));
     throw error;

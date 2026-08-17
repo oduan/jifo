@@ -13,7 +13,7 @@ import type { TagNode } from '../features/tags/TagTree';
 import type { HeatmapCell } from '../features/heatmap/Heatmap';
 import { errorMessage } from '../shared/api/errorMessage';
 import type { ToastItem } from '../shared/ui/Toast';
-import { createJifoDb } from '../storage/db';
+import { CachedNote, createJifoDb } from '../storage/db';
 import { useAuth } from './AuthProvider';
 
 export type SelectedTag = {
@@ -83,6 +83,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastIdRef = useRef(0);
   const loadWorkspaceRef = useRef<() => Promise<void>>(async () => undefined);
+  const refreshSilentlyRef = useRef<(pulledChanges?: CachedNote[]) => Promise<void>>(async () => undefined);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -110,11 +111,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const workspace = useNotesWorkspace({ client, db: localDb, filters, reportError });
-  const { loadWorkspace } = workspace;
+  const { loadWorkspace, refreshSilently } = workspace;
   // toast 重试回调通过 ref 调用最新 loadWorkspace，避免陈旧闭包
   useEffect(() => {
     loadWorkspaceRef.current = loadWorkspace;
   }, [loadWorkspace]);
+  // 定时同步回调通过 ref 调用最新 refreshSilently，避免重置 60s 定时器
+  useEffect(() => {
+    refreshSilentlyRef.current = refreshSilently;
+  }, [refreshSilently]);
 
   useEffect(() => () => localDb?.close(), [localDb]);
 
@@ -123,10 +128,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [view.query]);
 
-  const syncNow = useCallback(async () => {
+  const syncNow = useCallback(async (): Promise<CachedNote[] | undefined> => {
     const db = localDb;
-    if (!db) return;
-    await runSync({
+    if (!db) return undefined;
+    return runSync({
       db,
       uploadMedia: async ({ localId }) => {
         const cached = await db.media_cache.where('localId').equals(localId).first();
@@ -150,8 +155,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let active = true;
     const synchronize = () => {
       if (!navigator.onLine) return;
-      void syncNow().then(async () => {
-        if (active) await loadWorkspaceRef.current();
+      // 周期同步走静默刷新：不闪烁、不动分页与滚动位置
+      void syncNow().then(async (pulledChanges) => {
+        if (active) await refreshSilentlyRef.current(pulledChanges);
       }).catch(() => undefined);
     };
     synchronize();

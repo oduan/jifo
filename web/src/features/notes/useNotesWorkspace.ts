@@ -4,7 +4,7 @@ import { HeatmapCell } from '../heatmap/Heatmap';
 import { loadHeatmap } from '../heatmap/api';
 import { ApiClient, ApiError } from '../../shared/api/client';
 import { errorMessage } from '../../shared/api/errorMessage';
-import { JifoDb } from '../../storage/db';
+import { CachedNote, JifoDb } from '../../storage/db';
 import { authStore } from '../auth/authStore';
 import { listTagTree } from '../tags/api';
 import { TagNode } from '../tags/TagTree';
@@ -14,6 +14,12 @@ import { NoteBlock } from './NoteEditor';
 import { cachedHasTag, cachedPlainText, createNotesRepository, fromCachedNote } from './notesRepository';
 
 const NOTES_PAGE_SIZE = 20;
+
+// updatedAt / version / deletedAt 三者一致即认为笔记没有实质变化，
+// 复用旧对象引用以保持 NoteCard 的 React.memo 生效，避免整流重渲染。
+function isSameNoteSnapshot(current: Note, fresh: Note) {
+  return current.updatedAt === fresh.updatedAt && current.version === fresh.version && current.deletedAt === fresh.deletedAt;
+}
 
 export type WorkspaceFilterState = {
   debouncedQuery: string;
@@ -43,11 +49,13 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
   const notesRef = useRef(notes);
   const tagsRef = useRef(tags);
   const showTrashRef = useRef(filters.showTrash);
+  const hasWorkspaceLoadedRef = useRef(hasWorkspaceLoaded);
   useEffect(() => {
     notesRef.current = notes;
     tagsRef.current = tags;
     showTrashRef.current = filters.showTrash;
-  }, [filters.showTrash, notes, tags]);
+    hasWorkspaceLoadedRef.current = hasWorkspaceLoaded;
+  }, [filters.showTrash, hasWorkspaceLoaded, notes, tags]);
   // Monotonic sequence: stale responses (superseded by a newer loadWorkspace
   // call) are discarded instead of clobbering fresher state.
   const requestSeqRef = useRef(0);
@@ -191,6 +199,84 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
     }
   }, [client, db, hasMoreNotes, isLoading, isLoadingMoreNotes, baseListOptions, reportError]);
 
+  // 后台定时同步走这里：与 loadWorkspace 拉同样的数据，但不触碰 isLoading
+  // （不触发笔记流变暗的闪烁）、不重置分页与滚动位置，只把第一页合并进现有
+  // 列表 —— 未变化的笔记保留原对象引用，新到的插入，远端删除/恢复的按
+  // pulledChanges 精确移除。
+  const refreshSilently = useCallback(
+    async (pulledChanges: CachedNote[] = []) => {
+      if (!authStore.getAccessToken()) {
+        return;
+      }
+
+      const requestKey = JSON.stringify({ debouncedQuery, tagPath, showTrash });
+      if (inFlightKeyRef.current === requestKey) {
+        return;
+      }
+      const seq = ++requestSeqRef.current;
+      inFlightKeyRef.current = requestKey;
+
+      try {
+        const nextTags = await listTagTree(client);
+        const [nextNotes, nextStats, nextHeatmap] = await Promise.all([listNotes(client, baseListOptions()), listNoteStats(client), loadHeatmap(client)]);
+        if (seq !== requestSeqRef.current) {
+          return;
+        }
+        if (db) {
+          await db.notes_cache.bulkPut(nextNotes.items.map((note) => ({
+            id: note.id,
+            clientId: note.clientId,
+            blocks: fromApiNote(note, nextTags).blocks,
+            createdAt: note.createdAt,
+            updatedAt: note.updatedAt,
+            deletedAt: note.deletedAt,
+            version: note.version
+          })));
+        }
+        if (seq !== requestSeqRef.current) {
+          return;
+        }
+        setTags(nextTags);
+        setTotalNoteCount(nextStats.total);
+        setHeatmapCells(nextHeatmap);
+
+        // 同步拉回的变更里，远端已删除的笔记要精确移除；回收站视图下，
+        // 被恢复的（deletedAt 为空）也要从回收站列表移除
+        const removedIds = new Set(
+          pulledChanges
+            .filter((note) => Boolean(note.permanentlyDeletedAt) || (showTrash ? note.deletedAt == null : Boolean(note.deletedAt)))
+            .map((note) => note.id)
+        );
+        const fetched = nextNotes.items.map((note) => fromApiNote(note, nextTags));
+        const fetchedById = new Map(fetched.map((note) => [note.id, note]));
+        setNotes((current) => {
+          const kept = current.filter((note) => !removedIds.has(note.id));
+          const keptIds = new Set(kept.map((note) => note.id));
+          const merged = kept.map((note) => {
+            const fresh = fetchedById.get(note.id);
+            return fresh && !isSameNoteSnapshot(note, fresh) ? fresh : note;
+          });
+          const arrivals = fetched.filter((note) => !keptIds.has(note.id) && !removedIds.has(note.id));
+          return arrivals.length > 0 ? [...arrivals, ...merged] : merged;
+        });
+
+        // 尚未完成首次加载时，本次静默刷新即承担首屏：补齐分页状态
+        if (!hasWorkspaceLoadedRef.current) {
+          setHasMoreNotes(nextNotes.page.hasMore);
+          nextCursorRef.current = nextNotes.page.nextCursor;
+          setHasWorkspaceLoaded(true);
+        }
+      } catch {
+        // 后台同步失败保持现状，等下一轮同步或用户操作触发的完整加载
+      } finally {
+        if (inFlightKeyRef.current === requestKey) {
+          inFlightKeyRef.current = null;
+        }
+      }
+    },
+    [client, db, debouncedQuery, baseListOptions, showTrash, tagPath]
+  );
+
   // 静默刷新侧栏元数据（标签树 / 统计 / 热力图），不触碰笔记列表与分页
   const refreshMeta = useCallback(async () => {
     try {
@@ -293,6 +379,7 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
     isLoadingMoreNotes,
     loadWorkspace,
     loadMoreNotes,
+    refreshSilently,
     createNote,
     updateNote,
     deleteNote,
