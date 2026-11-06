@@ -22,7 +22,9 @@ data class AuthResponse(val accessToken: String, val refreshToken: String?, val 
 data class NoteStatsDto(val total: Int)
 
 data class ApiNoteBlock(val type: String, val text: String? = null, val content: String? = null, val mediaId: String? = null, val url: String? = null, val alt: String? = null)
-data class ApiNoteContent(val blocks: List<ApiNoteBlock> = emptyList())
+// blocks 可空：服务端对已永久删除（scrub）的笔记会下发 "blocks": null，
+// Moshi 对 non-null 属性遇到显式 null 会抛 JsonDataException 并卡死同步。
+data class ApiNoteContent(val blocks: List<ApiNoteBlock>? = emptyList())
 data class ApiNoteDto(val id: String = "", val noteId: String? = null, val clientId: String, val content: ApiNoteContent? = null, val plainText: String? = null, val deletedAt: String? = null, val permanentlyDeletedAt: String? = null, val createdAt: String? = null, val updatedAt: String? = null, val version: Long = 0)
 data class NoteItemResponse(val item: ApiNoteDto)
 data class ListNotesPageDto(val limit: Int = 20, val offset: Int = 0, val hasMore: Boolean = false)

@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,20 @@ type Block struct {
 
 type Content struct {
 	Blocks []Block `json:"blocks"`
+}
+
+// MarshalJSON 保证 blocks 序列化为 [] 而非 null。
+// 永久删除的笔记内容被 scrub 后 Blocks 为 nil，若序列化为
+// "blocks": null，会把 non-null 客户端（如安卓 Moshi 的
+// ApiNoteContent.blocks）整个响应解析打崩，同步游标随之卡死。
+func (c Content) MarshalJSON() ([]byte, error) {
+	blocks := c.Blocks
+	if blocks == nil {
+		blocks = []Block{}
+	}
+	return json.Marshal(struct {
+		Blocks []Block `json:"blocks"`
+	}{Blocks: blocks})
 }
 
 type Note struct {
