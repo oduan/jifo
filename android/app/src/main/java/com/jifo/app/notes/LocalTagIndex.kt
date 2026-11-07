@@ -6,7 +6,13 @@ import com.jifo.app.data.local.TagEntity
 private val tagPattern = Regex("""#[^\s#]+""")
 
 object LocalTagIndex {
+    // 测试观察钩子:同步侧(M6b)把 rebuild 从"逐页/逐结果事务内"收敛为整轮一次,
+    // 单测用它统计调用次数;生产路径不设置,行为不变。
+    @Volatile
+    internal var rebuildObserver: (suspend () -> Unit)? = null
+
     suspend fun rebuild(db: JifoDatabase) {
+        rebuildObserver?.invoke()
         val counts = linkedMapOf<String, Int>()
         db.noteDao().activeNotes().forEach { note ->
             val noteTags = tagPattern.findAll(note.plainText)

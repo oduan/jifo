@@ -13,42 +13,44 @@ import retrofit2.http.Streaming
 import okhttp3.MultipartBody
 import okhttp3.ResponseBody
 
+// M1: 所有 DTO 的非 null 字段都带默认值——服务端脏数据缺字段时落默认值而不是
+// 抛 JsonDataException 打崩解析;显式 null 的字段仍由 pull 的逐条容错跳过。
 // Auth
-data class AuthRequest(val email: String, val password: String, val username: String? = null, val deviceCode: String)
-data class RefreshRequest(val refreshToken: String)
-data class UserDto(val id: String, val email: String, val username: String?)
-data class AuthResponse(val accessToken: String, val refreshToken: String?, val user: UserDto?)
+data class AuthRequest(val email: String = "", val password: String = "", val username: String? = null, val deviceCode: String = "")
+data class RefreshRequest(val refreshToken: String = "")
+data class UserDto(val id: String = "", val email: String = "", val username: String? = null)
+data class AuthResponse(val accessToken: String = "", val refreshToken: String? = null, val user: UserDto? = null)
 
-data class NoteStatsDto(val total: Int)
+data class NoteStatsDto(val total: Int = 0)
 
-data class ApiNoteBlock(val type: String, val text: String? = null, val content: String? = null, val mediaId: String? = null, val url: String? = null, val alt: String? = null)
+data class ApiNoteBlock(val type: String = "", val text: String? = null, val content: String? = null, val mediaId: String? = null, val url: String? = null, val alt: String? = null)
 // blocks 可空：服务端对已永久删除（scrub）的笔记会下发 "blocks": null，
 // Moshi 对 non-null 属性遇到显式 null 会抛 JsonDataException 并卡死同步。
 data class ApiNoteContent(val blocks: List<ApiNoteBlock>? = emptyList())
-data class ApiNoteDto(val id: String = "", val noteId: String? = null, val clientId: String, val content: ApiNoteContent? = null, val plainText: String? = null, val deletedAt: String? = null, val permanentlyDeletedAt: String? = null, val createdAt: String? = null, val updatedAt: String? = null, val version: Long = 0)
+data class ApiNoteDto(val id: String = "", val noteId: String? = null, val clientId: String = "", val content: ApiNoteContent? = null, val plainText: String? = null, val deletedAt: String? = null, val permanentlyDeletedAt: String? = null, val createdAt: String? = null, val updatedAt: String? = null, val version: Long = 0)
 data class NoteItemResponse(val item: ApiNoteDto)
 data class ListNotesPageDto(val limit: Int = 20, val offset: Int = 0, val hasMore: Boolean = false)
 data class ListNotesResponse(val items: List<ApiNoteDto> = emptyList(), val page: ListNotesPageDto = ListNotesPageDto())
 data class NotePayload(val clientId: String? = null, val content: ApiNoteContent, val plainText: String)
 
-data class TagDto(val id: String, val name: String, val path: String? = null, val parentId: String? = null, val depth: Int = 0, val noteCount: Int = 0, val children: List<TagDto> = emptyList())
+data class TagDto(val id: String = "", val name: String = "", val path: String? = null, val parentId: String? = null, val depth: Int = 0, val noteCount: Int = 0, val children: List<TagDto> = emptyList())
 data class TagTreeResponse(val items: List<TagDto> = emptyList())
-data class HeatmapDayDto(val date: String, val createdCount: Int, val updatedCount: Int, val totalCount: Int)
+data class HeatmapDayDto(val date: String = "", val createdCount: Int = 0, val updatedCount: Int = 0, val totalCount: Int = 0)
 data class HeatmapResponse(val days: List<HeatmapDayDto> = emptyList())
 
-data class AccessKeyDto(val id: String, val label: String, val maskedKey: String, val createdAt: String, val lastUsedAt: String? = null)
+data class AccessKeyDto(val id: String = "", val label: String = "", val maskedKey: String = "", val createdAt: String = "", val lastUsedAt: String? = null)
 data class AccessKeyListResponse(val items: List<AccessKeyDto> = emptyList())
 data class CreateAccessKeyRequest(val label: String)
-data class CreateAccessKeyResponse(val item: AccessKeyDto, val secret: String)
+data class CreateAccessKeyResponse(val item: AccessKeyDto, val secret: String = "")
 data class ChangePasswordRequest(val currentPassword: String, val newPassword: String)
 data class RenameTagRequest(val path: String)
-data class MediaAssetDto(val id: String, val kind: String, val mimeType: String, val sizeBytes: Long, val checksum: String, val url: String, val createdAt: String)
+data class MediaAssetDto(val id: String = "", val kind: String = "", val mimeType: String = "", val sizeBytes: Long = 0, val checksum: String = "", val url: String = "", val createdAt: String = "")
 data class MediaItemResponse(val item: MediaAssetDto)
 
-data class SyncPushRequest(val operations: List<SyncOperationDto>)
-data class SyncOperationDto(val opId: String, val entity: String, val action: String, val clientId: String, val noteId: String? = null, val baseVersion: Long, val payload: Map<String, Any?>)
+data class SyncPushRequest(val operations: List<SyncOperationDto> = emptyList())
+data class SyncOperationDto(val opId: String = "", val entity: String = "", val action: String = "", val clientId: String = "", val noteId: String? = null, val baseVersion: Long = 0, val payload: Map<String, Any?> = emptyMap())
 data class SyncPushResponse(val results: List<PushResultDto> = emptyList())
-data class PushResultDto(val opId: String, val status: String, val noteId: String? = null, val version: Long = 0)
+data class PushResultDto(val opId: String = "", val status: String = "", val noteId: String? = null, val version: Long = 0)
 data class SyncCursorDto(val updatedAt: String? = null, val id: String? = null)
 data class SyncPullResponse(val notes: List<ApiNoteDto> = emptyList(), val items: List<ApiNoteDto> = emptyList(), val cursor: SyncCursorDto? = null, val nextCursor: SyncCursorDto? = null)
 
@@ -83,5 +85,7 @@ interface JifoApi {
     @POST("auth/logout") suspend fun logout()
 
     @POST("sync/push") suspend fun push(@Body body: SyncPushRequest): SyncPushResponse
-    @GET("sync/pull") suspend fun pull(@Query("updatedAt") updatedAt: String? = null, @Query("id") id: String? = null, @Query("limit") limit: Int = 100): SyncPullResponse
+    // M1: pull 返回原始响应体,由 JifoSyncRemote 逐条容错解析——单条脏数据跳过并留痕,
+    // 不让一页里的一条坏记录打崩整页;页面级 JSON 结构损坏仍抛异常,交由同步重试。
+    @GET("sync/pull") suspend fun pull(@Query("updatedAt") updatedAt: String? = null, @Query("id") id: String? = null, @Query("limit") limit: Int = 100): ResponseBody
 }

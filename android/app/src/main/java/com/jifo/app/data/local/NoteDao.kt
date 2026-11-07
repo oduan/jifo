@@ -8,14 +8,17 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NoteDao {
+    // L6:搜索词与标签路径里的 % _ \ 必须按字面匹配——先在 SQL 里把参数中的
+    // \(自身)、%、_ 依次转义(反斜杠最先转义,避免二次转义),再配合 ESCAPE '\'。
+    // 只在 SQL 内转换,调用方(含禁改的 NotesRepository)无需感知。
     @Query("""
         SELECT * FROM notes
         WHERE ((:trash = 0 AND deletedAt IS NULL) OR (:trash = 1 AND deletedAt IS NOT NULL))
-          AND (:search IS NULL OR plainText LIKE '%' || :search || '%')
+          AND (:search IS NULL OR plainText LIKE '%' || replace(replace(replace(:search, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\')
           AND (
               :tagPath IS NULL
-              OR (' ' || replace(replace(replace(plainText, char(10), ' '), char(13), ' '), char(9), ' ') || ' ') LIKE '% #' || :tagPath || ' %'
-              OR (' ' || replace(replace(replace(plainText, char(10), ' '), char(13), ' '), char(9), ' ') || ' ') LIKE '% #' || :tagPath || '/%'
+              OR (' ' || replace(replace(replace(plainText, char(10), ' '), char(13), ' '), char(9), ' ') || ' ') LIKE '% #' || replace(replace(replace(:tagPath, '\', '\\'), '%', '\%'), '_', '\_') || ' %' ESCAPE '\'
+              OR (' ' || replace(replace(replace(plainText, char(10), ' '), char(13), ' '), char(9), ' ') || ' ') LIKE '% #' || replace(replace(replace(:tagPath, '\', '\\'), '%', '\%'), '_', '\_') || '/%' ESCAPE '\'
           )
         ORDER BY createdAt DESC
         LIMIT :limit

@@ -20,6 +20,7 @@ import com.jifo.app.network.ApiClientFactory
 import com.jifo.app.network.AuthResponse
 import com.jifo.app.network.JifoApi
 import com.jifo.app.network.TokenStore
+import com.jifo.app.notes.MediaImageLoader
 import com.jifo.app.notes.NotesRepository
 import com.jifo.app.notes.OfflineMediaRepository
 import com.jifo.app.settings.JifoSettingsRemote
@@ -41,7 +42,7 @@ object ServiceLocator {
 
     fun database(context: Context): JifoDatabase = db ?: synchronized(this) {
         db ?: Room.databaseBuilder(context.applicationContext, JifoDatabase::class.java, "jifo.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build().also { db = it }
     }
 
@@ -132,6 +133,16 @@ object ServiceLocator {
         }
     }
 
+    // L2: v3→v4 为 notes 建查询索引,纯 DDL 不搬数据。索引名必须与 Room 的默认
+    // 命名约定(index_<table>_<columns>)一致,否则迁移后 schema 校验失败。
+    // internal 供迁移测试复用同一份 SQL,避免测试与生产迁移漂移。
+    internal val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_clientId` ON `notes` (`clientId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_deletedAt_createdAt` ON `notes` (`deletedAt`, `createdAt`)")
+        }
+    }
+
     private fun normalizeApiBaseUrl(raw: String): String {
         val value = raw.trim()
         require(value.isNotEmpty()) { "服务器地址不能为空" }
@@ -156,12 +167,14 @@ class WorkManagerSyncScheduler(context: Context) : SyncScheduler {
         val request = OneTimeWorkRequestBuilder<JifoSyncWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        WorkManager.getInstance(appContext).enqueueUniqueWork("jifo-sync", ExistingWorkPolicy.REPLACE, request)
+        // M8: 同步幂等(runOnce 重复执行无害),用 KEEP——调度时若有同步在跑就让它
+        // 跑完,不再用 REPLACE 取消进行中的 Worker(跑到一半被杀反而留下中间态)。
+        WorkManager.getInstance(appContext).enqueueUniqueWork("jifo-sync", ExistingWorkPolicy.KEEP, request)
     }
 }
 
 class RoomTokenStore(private val db: JifoDatabase) : TokenStore, com.jifo.app.auth.SessionStore {
-    override suspend fun accessToken(): String? = db.authSessionDao().current()?.accessToken
+    override suspend fun accessToken(): String? = db.authSessionDao().current()?.accessToken?.takeIf { it.isNotBlank() }
     override suspend fun refreshToken(): String? = db.authSessionDao().current()?.refreshToken
     override suspend fun save(accessToken: String, refreshToken: String?) {
         val current = db.authSessionDao().current()
@@ -173,10 +186,19 @@ class RoomTokenStore(private val db: JifoDatabase) : TokenStore, com.jifo.app.au
             db.authSessionDao().clear()
         }
     }
-    override suspend fun current(): com.jifo.app.auth.StoredSession? = db.authSessionDao().current()?.let {
-        val user = parseUserJson(it.userJson)
-        com.jifo.app.auth.StoredSession(it.accessToken, it.refreshToken, user.email, user.username, it.deviceCode, it.userId)
+    // 凭证失效（refresh 401）走这里：只作废 token，保留会话行本身。行内的 userId 是
+    // save() 判断「是否换了账号」的唯一依据——若整行删除，用户重新登录同一账号会被
+    // 误判为换号而清光本地业务数据，H3 的丢失只是从 401 当下推迟到重新登录时。
+    override suspend fun clearCredentials() {
+        val current = db.authSessionDao().current() ?: return
+        db.authSessionDao().save(current.copy(accessToken = "", refreshToken = null))
     }
+    override suspend fun current(): com.jifo.app.auth.StoredSession? = db.authSessionDao().current()
+        ?.takeIf { it.accessToken.isNotBlank() }
+        ?.let {
+            val user = parseUserJson(it.userJson)
+            com.jifo.app.auth.StoredSession(it.accessToken, it.refreshToken, user.email, user.username, it.deviceCode, it.userId)
+        }
     override suspend fun deviceCode(): String? = db.authSessionDao().current()?.deviceCode
     override suspend fun save(response: AuthResponse, deviceCode: String) {
         val user = requireNotNull(response.user) { "认证响应缺少用户信息" }
@@ -195,6 +217,7 @@ class RoomTokenStore(private val db: JifoDatabase) : TokenStore, com.jifo.app.au
     }
 
     private suspend fun clearAccountData() {
+        MediaImageLoader.clearMemoryCache()
         db.outboxDao().clear()
         db.pendingMediaDao().clear()
         db.noteDao().clear()

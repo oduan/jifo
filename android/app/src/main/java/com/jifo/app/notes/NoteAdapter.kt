@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.jifo.app.data.local.NoteEntity
 import com.jifo.app.databinding.ItemNoteBinding
 import com.jifo.app.core.model.NoteBlock
+import com.jifo.app.core.time.formatNoteTimestamp
 
 // 与 web 端 NoteCard 保持一致：正文超过 6 个非空行即折叠预览。
 private const val MAX_PREVIEW_LINES = 6
@@ -49,7 +50,7 @@ class NoteAdapter(
             onTaskClick: ((NoteEntity, Int) -> Unit)?,
             onExpandClick: ((NoteEntity) -> Unit)?
         ) {
-            binding.textNoteTime.text = note.createdAt.replace('T', ' ').take(19)
+            binding.textNoteTime.text = formatNoteTimestamp(note.createdAt)
             val blocks = NoteJson.decodeBlocks(note.contentJson)
             val displayText = blocks.filterIsInstance<NoteBlock.Paragraph>().joinToString("\n\n") { it.text }.ifBlank { note.plainText }
             binding.textNoteContent.text = markdownRenderer.render(

@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -71,6 +72,53 @@ class AuthInterceptorTest {
             assertEquals("new-refresh", session.refreshToken())
         } finally {
             server.shutdown()
+        }
+    }
+
+    @Test
+    fun refreshUnauthorizedClearsCredentialsWithoutClearingAccountData() = runTest {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("{\"error\":{\"code\":\"unauthorized\"}}"))
+        server.enqueue(MockResponse().setResponseCode(401).setBody("{\"error\":{\"code\":\"unauthorized\"}}"))
+        server.start()
+
+        try {
+            val session = RecordingTokenStore()
+            val api = ApiClientFactory.createForTest(server.url("/api/").toString(), session)
+
+            runCatching { api.noteStats() }
+
+            // 审计 High H3：refresh 401 只清凭证，绝不走清业务数据的 clear()。
+            assertEquals(1, session.clearCredentialsCalls.get())
+            assertEquals(0, session.clearAllCalls.get())
+            assertNull(session.accessToken())
+            assertNull(session.refreshToken())
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    private class RecordingTokenStore : TokenStore {
+        private var accessToken: String? = "old-access"
+        private var refreshToken: String? = "old-refresh"
+        val clearCredentialsCalls = AtomicInteger(0)
+        val clearAllCalls = AtomicInteger(0)
+
+        override suspend fun accessToken() = accessToken
+        override suspend fun refreshToken() = refreshToken
+        override suspend fun save(accessToken: String, refreshToken: String?) {
+            this.accessToken = accessToken
+            this.refreshToken = refreshToken ?: this.refreshToken
+        }
+        override suspend fun clear() {
+            clearAllCalls.incrementAndGet()
+            accessToken = null
+            refreshToken = null
+        }
+        override suspend fun clearCredentials() {
+            clearCredentialsCalls.incrementAndGet()
+            accessToken = null
+            refreshToken = null
         }
     }
 }

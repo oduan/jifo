@@ -12,6 +12,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.jifo.app.ServiceLocator
 import com.jifo.app.core.model.NoteBlock
+import com.jifo.app.core.time.formatNoteTimestamp
 import com.jifo.app.databinding.FragmentNoteDetailBinding
 import kotlinx.coroutines.launch
 
@@ -37,7 +38,7 @@ class NoteDetailFragment : Fragment() {
                 parentFragmentManager.popBackStack()
                 return@launch
             }
-            b.textNoteDetailTime.text = note.createdAt.replace('T', ' ').take(19)
+            b.textNoteDetailTime.text = formatNoteTimestamp(note.createdAt)
             val blocks = NoteJson.decodeBlocks(note.contentJson)
             val displayText = blocks.filterIsInstance<NoteBlock.Paragraph>().joinToString("\n\n") { it.text }.ifBlank { note.plainText }
             b.textNoteDetailContent.text = markdownRenderer.render(

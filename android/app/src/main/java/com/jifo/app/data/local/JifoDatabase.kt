@@ -13,7 +13,7 @@ import androidx.room.RoomDatabase
         SyncStateEntity::class,
         PendingMediaEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class JifoDatabase : RoomDatabase() {

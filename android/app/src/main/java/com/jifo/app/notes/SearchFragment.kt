@@ -16,6 +16,7 @@ import com.jifo.app.R
 import com.jifo.app.ServiceLocator
 import com.jifo.app.databinding.FragmentSearchBinding
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class SearchFragment : Fragment() {
@@ -55,7 +56,7 @@ class SearchFragment : Fragment() {
                 val lastVisible = layoutManager.findLastVisibleItemPosition()
                 if (total > 0 && lastVisible >= total - 8 && total >= visibleLimit) {
                     visibleLimit += PAGE_SIZE
-                    observeSearch()
+                    observeSearch(immediate = true)
                 }
             }
         })
@@ -73,15 +74,18 @@ class SearchFragment : Fragment() {
             val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(b.inputSearchPage, InputMethodManager.SHOW_IMPLICIT)
         }
-        observeSearch()
+        observeSearch(immediate = true)
     }
 
-    private fun observeSearch() {
+    private fun observeSearch(immediate: Boolean = false) {
         val b = binding ?: return
         val adapter = b.searchResultsRecycler.adapter as? NoteAdapter ?: return
         val query = b.inputSearchPage.text?.toString().orEmpty()
         searchJob?.cancel()
         searchJob = viewLifecycleOwner.lifecycleScope.launch {
+            // L7: 打字路径延迟 SEARCH_DEBOUNCE_MS 再查询,连续击键只保留最后一次;
+            // 滚动翻页与初始进入走 immediate,不做无谓等待。
+            if (!immediate) delay(SEARCH_DEBOUNCE_MS)
             if (query.isBlank()) {
                 adapter.submitList(emptyList())
             } else {
@@ -99,5 +103,8 @@ class SearchFragment : Fragment() {
 
     companion object {
         private const val PAGE_SIZE = 50
+
+        // L7: 输入防抖窗口;此前每敲一个键都会取消重建 Flow 并触发一次全表查询。
+        const val SEARCH_DEBOUNCE_MS = 200L
     }
 }

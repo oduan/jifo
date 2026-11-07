@@ -16,6 +16,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.TimeZone
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -73,5 +74,27 @@ class NoteAdapterTest {
         binding.buttonNoteExpand.performClick()
 
         assertEquals("n-20", expandedId)
+    }
+
+    @Test
+    fun `note time renders utc timestamp in local timezone`() {
+        val original = TimeZone.getDefault()
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+        try {
+            val note = noteWithLines(3).copy(createdAt = "2026-08-04T10:00:00Z", updatedAt = "2026-08-04T10:00:00Z")
+            val binding = bindAndSettle(note)
+
+            assertEquals("2026-08-04 18:00", binding.textNoteTime.text.toString())
+        } finally {
+            TimeZone.setDefault(original)
+        }
+    }
+
+    @Test
+    fun `note time falls back to raw string when unparseable`() {
+        val note = noteWithLines(3).copy(createdAt = "bad-time", updatedAt = "bad-time")
+        val binding = bindAndSettle(note)
+
+        assertEquals("bad-time", binding.textNoteTime.text.toString())
     }
 }

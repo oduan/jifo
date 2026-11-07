@@ -51,6 +51,35 @@ class NoteDaoTest {
         assertEquals(listOf("newline", "child", "exact"), rows.map { it.id })
     }
 
+    @Test fun searchTreatsLikeWildcardsLiterally() = runTest {
+        db.noteDao().upsertAll(listOf(
+            NoteEntity(id = "percent", clientId = "c1", contentJson = "[]", plainText = "进度 100% 完成", createdAt = "2026-05-31T01:00:00Z", updatedAt = "2026-05-31T01:00:00Z", version = 1),
+            NoteEntity(id = "percent-lookalike", clientId = "c2", contentJson = "[]", plainText = "进度 100x 完成", createdAt = "2026-05-31T02:00:00Z", updatedAt = "2026-05-31T02:00:00Z", version = 1),
+            NoteEntity(id = "underscore", clientId = "c3", contentJson = "[]", plainText = "变量 under_score 定义", createdAt = "2026-05-31T03:00:00Z", updatedAt = "2026-05-31T03:00:00Z", version = 1),
+            NoteEntity(id = "underscore-lookalike", clientId = "c4", contentJson = "[]", plainText = "变量 underXscore 定义", createdAt = "2026-05-31T04:00:00Z", updatedAt = "2026-05-31T04:00:00Z", version = 1),
+            NoteEntity(id = "backslash", clientId = "c5", contentJson = "[]", plainText = "路径 back\\slash 文件", createdAt = "2026-05-31T05:00:00Z", updatedAt = "2026-05-31T05:00:00Z", version = 1)
+        ))
+
+        // % _ 是 LIKE 通配符,旧实现会把 "100%" 搜成 "100任意字符"、"under_score" 搜成
+        // "under任意字符score",误匹配 lookalike 行;转义后必须按字面匹配。
+        assertEquals(listOf("percent"), db.noteDao().observeNotes(search = "%", tagPath = null, limit = 50).first().map { it.id })
+        assertEquals(listOf("underscore"), db.noteDao().observeNotes(search = "under_score", tagPath = null, limit = 50).first().map { it.id })
+        assertEquals(listOf("backslash"), db.noteDao().observeNotes(search = "back\\slash", tagPath = null, limit = 50).first().map { it.id })
+        // 无通配符的常规搜索不受影响:两行都含 "100",按 createdAt 倒序返回
+        assertEquals(listOf("percent-lookalike", "percent"), db.noteDao().observeNotes(search = "100", tagPath = null, limit = 50).first().map { it.id })
+    }
+
+    @Test fun tagFilterTreatsLikeWildcardsLiterally() = runTest {
+        db.noteDao().upsertAll(listOf(
+            NoteEntity(id = "literal", clientId = "c1", contentJson = "[]", plainText = "#a_b 字面标签", createdAt = "2026-05-31T01:00:00Z", updatedAt = "2026-05-31T01:00:00Z", version = 1),
+            NoteEntity(id = "lookalike", clientId = "c2", contentJson = "[]", plainText = "#axb 不应该匹配", createdAt = "2026-05-31T02:00:00Z", updatedAt = "2026-05-31T02:00:00Z", version = 1)
+        ))
+
+        val rows = db.noteDao().observeNotes(search = null, tagPath = "a_b", limit = 50).first()
+
+        assertEquals(listOf("literal"), rows.map { it.id })
+    }
+
     @Test fun outboxOrdersPendingOperationsByLocalSeq() = runTest {
         db.outboxDao().insert(OutboxOperationEntity(opId = "op-2", entity = "note", action = "update", clientId = "c", baseVersion = 1, payloadJson = "{}", createdAt = "2026-05-31T02:00:00Z"))
         db.outboxDao().insert(OutboxOperationEntity(opId = "op-1", entity = "note", action = "create", clientId = "c", baseVersion = 0, payloadJson = "{}", createdAt = "2026-05-31T01:00:00Z"))

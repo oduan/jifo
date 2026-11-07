@@ -13,10 +13,13 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
 object ApiClientFactory {
+    // M1: Retrofit 转换器与 JifoSyncRemote 的 pull 容错解析共用同一份 Moshi 配置,
+    // 避免两处配置漂移。
+    val moshi: Moshi by lazy { Moshi.Builder().add(KotlinJsonAdapterFactory()).build() }
+
     fun create(baseUrl: String, tokenStore: TokenStore): JifoApi = createForTest(baseUrl, tokenStore)
 
     fun createForTest(baseUrl: String, tokenStore: TokenStore): JifoApi {
-        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         val refreshApi = Retrofit.Builder()
             .baseUrl(baseUrl)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
@@ -45,7 +48,10 @@ object ApiClientFactory {
                         val refreshed = try {
                             runBlocking { refreshApi.refresh(RefreshRequest(refresh)) }
                         } catch (error: HttpException) {
-                            if (error.code() == 401) runBlocking { tokenStore.clear() }
+                            // 一次瞬时 401（服务端丢 session、token 轮换竞态、另一设备
+                            // 消耗 token family）不能清掉本地笔记与未推送的离线草稿，
+                            // 这里只清凭证；全量清空仅保留在用户主动退出登录路径。
+                            if (error.code() == 401) runBlocking { tokenStore.clearCredentials() }
                             return@synchronized null
                         } catch (_: Exception) {
                             return@synchronized null

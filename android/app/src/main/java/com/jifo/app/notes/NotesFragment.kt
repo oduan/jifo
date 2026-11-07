@@ -39,6 +39,9 @@ import com.jifo.app.data.local.HeatmapDayEntity
 import com.jifo.app.settings.SettingsBottomSheet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
@@ -126,9 +129,12 @@ class NotesFragment : Fragment() {
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
-            repository.observeNotes(search = null, tagPath = null, limit = Int.MAX_VALUE).collect { notes ->
-                textNoteCount.text = notes.size.toString()
-                buttonAllNotes.text = "▦ 全部笔记  ${notes.size}"
+            // (M6a)抽屉计数只要数量。查询成本未变:NoteDao 暂无 COUNT(data/local/
+            // 禁改),Room 仍会整表 SELECT 并物化实体,只是在此投影成数量并去重,
+            // 不再把整个列表发射给 UI/文案刷新;换 COUNT 查询的时机见 noteCountFlow。
+            noteCountFlow(repository.observeNotes(search = null, tagPath = null, limit = Int.MAX_VALUE)).collect { count ->
+                textNoteCount.text = count.toString()
+                buttonAllNotes.text = "▦ 全部笔记  $count"
             }
         }
         installElasticPullToRefresh()
@@ -468,6 +474,14 @@ class NotesFragment : Fragment() {
 
     companion object {
         private const val PAGE_SIZE = 50
+
+        // (M6a)计数流:NoteDao 暂无 COUNT 查询(data/local/ 本批禁改,并行任务在改
+        // schema/DAO),先用现有 observeNotes Flow 在内存投影成数量并去重——列表内容
+        // 变化但数量不变时不再刷新文案。注意这只是内存投影:Room 每次表失效仍执行
+        // 整表 SELECT 并物化全部 NoteEntity,查询/内存成本在 COUNT 查询落地前不会
+        // 消失,届时整体换成本函数的返回即可,调用点无需再动。
+        internal fun noteCountFlow(notes: Flow<List<NoteEntity>>): Flow<Int> =
+            notes.map { it.size }.distinctUntilChanged()
     }
 
     override fun onDestroyView() {
