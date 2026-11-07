@@ -115,6 +115,99 @@ describe('createNotesRepository 离线 id 解析', () => {
   });
 });
 
+describe('createNotesRepository 撤销删除与在途推送', () => {
+  let db = createJifoDb('notes-repository-undo-inflight');
+
+  const current: Note = {
+    id: 'server-note-1',
+    clientId: 'web-note-client-1',
+    createdAt: '2026-05-27T00:00:00Z',
+    updatedAt: '2026-05-27T00:00:00Z',
+    version: 1,
+    deletedAt: '2026-05-27T01:00:00Z',
+    blocks: [{ type: 'paragraph', content: 'deleted note' }],
+    tagIds: []
+  };
+
+  beforeEach(async () => {
+    await db.delete();
+    db = createJifoDb('notes-repository-undo-inflight');
+    vi.clearAllMocks();
+    await db.notes_cache.put({
+      id: 'server-note-1',
+      clientId: 'web-note-client-1',
+      blocks: [{ type: 'paragraph', content: 'deleted note' }],
+      createdAt: '2026-05-27T00:00:00Z',
+      updatedAt: '2026-05-27T01:00:00Z',
+      version: 1,
+      deletedAt: '2026-05-27T01:00:00Z'
+    });
+  });
+
+  test('删除操作正在推送(pushing)时撤销:保留在途操作并补 force restore,不走在线恢复', async () => {
+    await db.outbox.add({
+      opId: 'op-delete-1',
+      entity: 'note',
+      action: 'delete',
+      noteId: 'server-note-1',
+      clientId: 'web-note-client-1',
+      baseVersion: 1,
+      payload: {},
+      createdAt: '2026-05-27T01:00:00Z',
+      status: 'pushing'
+    });
+
+    const repository = createNotesRepository({ client: {} as ApiClient, db });
+    const restored = await repository.restore('server-note-1', current, []);
+
+    expect(apiRestoreNote).not.toHaveBeenCalled();
+    expect(restored.deletedAt).toBeNull();
+    const operations = await db.outbox.toArray();
+    const deletes = operations.filter((operation) => operation.action === 'delete');
+    const restores = operations.filter((operation) => operation.action === 'restore');
+    // 在途删除由同步自行结算,不在这里移除;恢复操作必须 force(推送省略 baseVersion)
+    expect(deletes).toHaveLength(1);
+    expect(restores).toHaveLength(1);
+    expect(restores[0]).toMatchObject({ noteId: 'server-note-1', force: true });
+    expect((await db.notes_cache.get('server-note-1'))?.deletedAt).toBeNull();
+  });
+
+  test('outbox 无删除痕迹时离线恢复:入队 force restore,避免过期 baseVersion 触发冲突副本', async () => {
+    vi.mocked(apiRestoreNote).mockRejectedValue(new NetworkError('offline'));
+
+    const repository = createNotesRepository({ client: {} as ApiClient, db });
+    const restored = await repository.restore('server-note-1', current, []);
+
+    expect(restored.deletedAt).toBeNull();
+    const [operation] = await db.outbox.toArray();
+    expect(operation).toMatchObject({ action: 'restore', noteId: 'server-note-1', force: true });
+    expect((await db.notes_cache.get('server-note-1'))?.deletedAt).toBeNull();
+  });
+
+  test('未离开本地的删除(pending/failed)撤销仍直接移除,不追加恢复操作', async () => {
+    await db.outbox.add({
+      opId: 'op-delete-2',
+      entity: 'note',
+      action: 'delete',
+      noteId: 'server-note-1',
+      clientId: 'web-note-client-1',
+      baseVersion: 1,
+      payload: {},
+      createdAt: '2026-05-27T01:00:00Z',
+      status: 'failed',
+      lastError: 'network request failed'
+    });
+
+    const repository = createNotesRepository({ client: {} as ApiClient, db });
+    const restored = await repository.restore('server-note-1', current, []);
+
+    expect(apiRestoreNote).not.toHaveBeenCalled();
+    expect(restored.deletedAt).toBeNull();
+    expect(await db.outbox.toArray()).toEqual([]);
+    expect((await db.notes_cache.get('server-note-1'))?.deletedAt).toBeNull();
+  });
+});
+
 describe('createNotesRepository 待上传图片的离线队列', () => {
   let db = createJifoDb('notes-repository-pending-image');
 

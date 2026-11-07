@@ -578,8 +578,20 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText('离线撤销笔记')).toBeInTheDocument());
 
     const db = createJifoDb('jifo-offline-user');
+    // 撤销与后台同步周期存在竞态:若删除操作恰在推送中(pushing),撤销会保留该
+    // 操作并补一条 force restore。断言语义不变式而不是精确快照——不允许存在
+    // 没有配对强制恢复的未完成删除。
+    await waitFor(async () => {
+      const pushing = await db.outbox.filter((operation) => operation.status === 'pushing').toArray();
+      expect(pushing).toEqual([]);
+    });
     const operations = await db.outbox.filter((operation) => operation.noteId === 'offline-note').toArray();
-    expect(operations).toEqual([]);
+    const deletes = operations.filter((operation) => operation.action === 'delete');
+    const restores = operations.filter((operation) => operation.action === 'restore');
+    if (deletes.length > 0) {
+      expect(restores.length).toBeGreaterThan(0);
+      expect(restores.every((operation) => operation.force === true)).toBe(true);
+    }
     expect((await db.notes_cache.get('offline-note'))?.deletedAt).toBeNull();
     db.close();
   });

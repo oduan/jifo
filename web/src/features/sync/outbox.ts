@@ -7,6 +7,8 @@ type BaseNoteOperationInput = {
   blocks?: CachedNoteBlock[];
   createdAt?: string;
   opId?: string;
+  /** 见 OutboxOperation.force:推送时省略 baseVersion,服务端强制应用。 */
+  force?: boolean;
 };
 
 type CreateOfflineNoteInput = {
@@ -52,6 +54,7 @@ function noteOperation(action: OutboxAction, input: BaseNoteOperationInput): Out
     noteId: input.noteId,
     clientId: input.clientId,
     baseVersion: input.baseVersion ?? 0,
+    ...(input.force ? { force: true } : {}),
     payload: input.blocks ? { blocks: input.blocks } : {},
     createdAt: input.createdAt ?? nowIso(),
     status: 'pending'

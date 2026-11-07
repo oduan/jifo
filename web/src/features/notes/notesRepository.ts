@@ -168,15 +168,18 @@ export function createNotesRepository({ client, db }: { client: ApiClient; db: J
                 operation.entity === 'note' &&
                 operation.noteId === targetId &&
                 operation.action === 'delete' &&
-                (operation.status === 'pending' || operation.status === 'failed')
+                (operation.status === 'pending' || operation.status === 'failed' || operation.status === 'pushing')
             )
             .toArray()
         : [];
-      if (db && pendingDeletes.length > 0) {
+      const settledDeletes = pendingDeletes.filter((operation) => operation.status !== 'pushing');
+      const inFlightDeletes = pendingDeletes.filter((operation) => operation.status === 'pushing');
+      if (db && settledDeletes.length > 0 && inFlightDeletes.length === 0) {
+        // 删除操作确定未离开本地:撤销 = 移除这些操作即可,服务端从未见过这次删除。
         const restoredAt = new Date().toISOString();
         await db.transaction('rw', db.notes_cache, db.outbox, async () => {
           await db.notes_cache.update(targetId, { deletedAt: null, updatedAt: restoredAt });
-          for (const operation of pendingDeletes) {
+          for (const operation of settledDeletes) {
             if (operation.localSeq !== undefined) {
               await db.outbox.delete(operation.localSeq);
             }
@@ -184,10 +187,25 @@ export function createNotesRepository({ client, db }: { client: ApiClient; db: J
         });
         return { ...current, id: targetId, deletedAt: null, updatedAt: restoredAt };
       }
+      if (db && inFlightDeletes.length > 0) {
+        // 删除推送正在进行:无法得知它最终是否送达服务端。不移除在途操作(由同步
+        // 自行结算),改为排队一条 force restore——推送时省略 baseVersion,服务端
+        // 强制恢复,不因版本过期 fork 冲突副本。localSeq 顺序保证服务端按
+        // 删除→恢复 处理,终态正确。
+        const restoredAt = new Date().toISOString();
+        const operation = restoreNoteOutboxOperation({ noteId: targetId, clientId: current.clientId, baseVersion: resolved?.version ?? current.version, blocks: toCachedBlocks(current.blocks), force: true });
+        await db.transaction('rw', db.notes_cache, db.outbox, async () => {
+          await db.notes_cache.update(targetId, { deletedAt: null, updatedAt: restoredAt });
+          await db.outbox.add(operation);
+        });
+        return { ...current, id: targetId, deletedAt: null, updatedAt: restoredAt };
+      }
 
       const applyOfflineRestore = async (database: JifoDb) => {
         const blocks = toCachedBlocks(current.blocks);
-        const operation = restoreNoteOutboxOperation({ noteId: targetId, clientId: current.clientId, baseVersion: resolved?.version ?? current.version, blocks });
+        // 离线入队的恢复同样 force:删除可能已在更早的同步中送达服务端(本地
+        // outbox 里已无其痕迹),带本地过期 baseVersion 的恢复会被 fork 冲突副本。
+        const operation = restoreNoteOutboxOperation({ noteId: targetId, clientId: current.clientId, baseVersion: resolved?.version ?? current.version, blocks, force: true });
         const updatedAt = new Date().toISOString();
         await database.transaction('rw', database.notes_cache, database.outbox, async () => {
           await database.notes_cache.update(targetId, { deletedAt: null, updatedAt, blocks });

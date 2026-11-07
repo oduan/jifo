@@ -36,7 +36,10 @@ function toPushOperation(operation: OutboxOperation) {
     // identified by clientId; sending that local key as noteId would be
     // rejected by the backend UUID parser.
     noteId: operation.action === 'create' ? undefined : operation.noteId,
-    baseVersion: operation.baseVersion,
+    // force 操作(撤销删除的恢复)不发送 baseVersion:服务端把它视为强制应用,
+    // 跳过版本冲突检查——撤销时无法得知删除是否已送达/推进了版本,带上本地
+    // 过期的 baseVersion 会被 fork 成「此条笔记冲突」副本。
+    baseVersion: operation.force ? undefined : operation.baseVersion,
     payload: { blocks: blocks.map(toApiBlock), plainText: plainText(blocks) }
   };
 }

@@ -40,6 +40,8 @@ export type OutboxOperation = {
   noteId?: string;
   clientId: string;
   baseVersion: number;
+  /** 推送时省略 baseVersion(服务端视为强制应用,跳过版本冲突检查):撤销删除时无法确定删除是否已送达,带过期 baseVersion 会被 fork 成冲突副本。 */
+  force?: boolean;
   payload: Record<string, unknown> & { blocks?: CachedNoteBlock[] };
   createdAt: string;
   status: OutboxStatus;
