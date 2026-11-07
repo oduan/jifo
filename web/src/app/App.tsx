@@ -14,12 +14,13 @@ function AppRoutes() {
       <LoginPage
         onSubmit={submitLogin}
         onSuccess={(result) => {
-          authStore.setSession({ accessToken: result.accessToken, refreshToken: result.refreshToken ?? null, user: result.user ?? null });
+          // 响应里的 refreshToken 字段忽略:刷新令牌由后端写进 HttpOnly Cookie,不落 Web 存储。
+          authStore.setSession({ accessToken: result.accessToken, user: result.user ?? null });
           // 响应缺 user 时用新 token 调 /me 补齐，避免落入无本地库的在线降级态。
           if (!result.user) {
             void fetchCurrentUser(client)
               .then((user) => {
-                authStore.setSession({ accessToken: result.accessToken, refreshToken: result.refreshToken ?? null, user });
+                authStore.setSession({ accessToken: result.accessToken, user });
               })
               .catch(() => undefined);
           }

@@ -544,4 +544,73 @@ describe('NoteCard', () => {
 
     expect(onUpdate).toHaveBeenCalledWith('n1', [{ type: 'paragraph', content: '仅剩文本' }]);
   });
+
+  test('localId 图片块从 resolveLocalMediaUrl 读回本地 blob 展示，URL 由卡片卸载时集中回收', async () => {
+    const revoke = vi.fn();
+    const originalRevoke = URL.revokeObjectURL;
+    URL.revokeObjectURL = revoke;
+    const resolveLocalMediaUrl = vi.fn().mockResolvedValue('blob:local-cached-1');
+
+    try {
+      const { unmount } = render(
+        <NoteCard
+          note={{
+            id: 'n1',
+            createdAt: '2026-05-27',
+            blocks: [
+              { type: 'paragraph', content: '离线粘贴的笔记' },
+              { type: 'image', localId: 'local-media-1', alt: 'offline.png' }
+            ],
+            tagIds: []
+          }}
+          onDelete={vi.fn()}
+          onUpdate={vi.fn()}
+          resolveLocalMediaUrl={resolveLocalMediaUrl}
+        />
+      );
+
+      await screen.findByRole('button', { name: '放大预览 offline.png' });
+      expect(resolveLocalMediaUrl).toHaveBeenCalledWith('local-media-1');
+      expect(screen.getByAltText('offline.png')).toHaveAttribute('src', 'blob:local-cached-1');
+
+      unmount();
+      expect(revoke).toHaveBeenCalledWith('blob:local-cached-1');
+    } finally {
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  test('离线 localId 图片块在编辑模式同样可展示并可随提交保留', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const resolveLocalMediaUrl = vi.fn().mockResolvedValue('blob:local-cached-2');
+
+    render(
+      <NoteCard
+        note={{
+          id: 'n1',
+          createdAt: '2026-05-27',
+          blocks: [
+            { type: 'paragraph', content: '离线编辑' },
+            { type: 'image', localId: 'local-media-2', alt: 'offline-2.png' }
+          ],
+          tagIds: []
+        }}
+        onDelete={vi.fn()}
+        onUpdate={onUpdate}
+        resolveLocalMediaUrl={resolveLocalMediaUrl}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+
+    expect(await screen.findByAltText('offline-2.png')).toHaveAttribute('src', 'blob:local-cached-2');
+    await user.click(screen.getByRole('button', { name: '发送笔记' }));
+
+    expect(onUpdate).toHaveBeenCalledWith('n1', [
+      { type: 'paragraph', content: '离线编辑' },
+      { type: 'image', localId: 'local-media-2', alt: 'offline-2.png' }
+    ]);
+  });
 });

@@ -80,4 +80,24 @@ describe('createApiClient', () => {
 
     expect(receivedSignal).toBeInstanceOf(AbortSignal);
   });
+
+  test('请求与 401 后的重试都携带 credentials:include,让 HttpOnly 刷新 Cookie 随行', async () => {
+    const credentials: Array<string | undefined> = [];
+    const client = createApiClient({
+      baseUrl: '/api',
+      getAccessToken: () => 'expired-token',
+      refreshAccessToken: async () => 'fresh-token',
+      fetchImpl: async (_input, init) => {
+        credentials.push(init?.credentials);
+        if (credentials.length === 1) {
+          return new Response('unauthorized', { status: 401 });
+        }
+        return jsonResponse({ ok: true });
+      }
+    });
+
+    await client.request('/notes');
+
+    expect(credentials).toEqual(['include', 'include']);
+  });
 });

@@ -42,11 +42,14 @@ export async function submitAuth(client: ApiClient, payload: LoginPayload): Prom
   });
 }
 
-export async function refreshAuth(client: ApiClient, refreshToken: string): Promise<LoginResult> {
+// 刷新只靠后端写入的 HttpOnly Cookie(credentials:'include' 由 client 统一注入):
+// 本地不持有 refreshToken,请求体留空,后端回退到 Cookie 取刷新令牌并轮换写回。
+// 响应体里的 refreshToken 字段(为兼容 Android 仍会返回)在这里被忽略,绝不落 Web 存储。
+export async function refreshAuth(client: ApiClient): Promise<LoginResult> {
   return client.request<LoginResult>('/auth/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken })
+    body: JSON.stringify({})
   });
 }
 

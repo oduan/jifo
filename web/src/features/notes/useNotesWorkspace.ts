@@ -127,7 +127,8 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
       }
       reportError(errorMessage(loadError), true);
       if (!db) {
-        if (loadError instanceof ApiError && loadError.status === 401 && !authStore.getState().refreshToken) {
+        // 401 浮出说明 client 已尝试过 Cookie 刷新且失败,直接清场回登录页。
+        if (loadError instanceof ApiError && loadError.status === 401) {
           authStore.clear();
         }
         return;
@@ -142,7 +143,8 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
         .filter((note) => !query || cachedPlainText(note).toLocaleLowerCase().includes(query))
         .filter((note) => !tagPath || cachedHasTag(note, tagPath))
         .map(fromCachedNote));
-      if (loadError instanceof ApiError && loadError.status === 401 && !authStore.getState().refreshToken) {
+      // 401 浮出说明 client 已尝试过 Cookie 刷新且失败,直接清场回登录页。
+      if (loadError instanceof ApiError && loadError.status === 401) {
         authStore.clear();
       }
     } finally {
@@ -241,22 +243,39 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
         setHeatmapCells(nextHeatmap);
 
         // 同步拉回的变更里，远端已删除的笔记要精确移除；回收站视图下，
-        // 被恢复的（deletedAt 为空）也要从回收站列表移除
-        const removedIds = new Set(
-          pulledChanges
-            .filter((note) => Boolean(note.permanentlyDeletedAt) || (showTrash ? note.deletedAt == null : Boolean(note.deletedAt)))
-            .map((note) => note.id)
+        // 被恢复的（deletedAt 为空）也要从回收站列表移除。删除匹配同时按
+        // id 与 clientId，覆盖本地草稿 id 尚未被服务端 id 替换的迁移窗口。
+        const removedChanges = pulledChanges.filter(
+          (note) => Boolean(note.permanentlyDeletedAt) || (showTrash ? note.deletedAt == null : Boolean(note.deletedAt))
         );
+        const removedIds = new Set(removedChanges.map((note) => note.id));
+        const removedClientIds = new Set(removedChanges.map((note) => note.clientId));
         const fetched = nextNotes.items.map((note) => fromApiNote(note, nextTags));
         const fetchedById = new Map(fetched.map((note) => [note.id, note]));
+        // clientId 是笔记的稳定身份：本地草稿推送成功后 id 会从 local-note-*
+        // 换成服务端 UUID，仅按 id 去重会让同一笔记在列表里出现两张卡（旧
+        // id 卡 + 新 id 卡）。这里以 clientId 作为次级匹配键：合并时把旧 id
+        // 卡整体替换为服务端卡（界面随即采用新 id），并阻止服务端卡重复插入。
+        const fetchedByClientId = new Map(fetched.map((note) => [note.clientId, note]));
         setNotes((current) => {
-          const kept = current.filter((note) => !removedIds.has(note.id));
-          const keptIds = new Set(kept.map((note) => note.id));
-          const merged = kept.map((note) => {
-            const fresh = fetchedById.get(note.id);
-            return fresh && !isSameNoteSnapshot(note, fresh) ? fresh : note;
-          });
-          const arrivals = fetched.filter((note) => !keptIds.has(note.id) && !removedIds.has(note.id));
+          const kept = current.filter((note) => !removedIds.has(note.id) && !removedClientIds.has(note.clientId));
+          const merged: Note[] = [];
+          const mergedIds = new Set<string>();
+          const mergedClientIds = new Set<string>();
+          for (const note of kept) {
+            const fresh = fetchedById.get(note.id) ?? fetchedByClientId.get(note.clientId);
+            // fresh.id 与旧卡不同说明发生了 id 迁移，必须整体替换为新卡
+            const next = fresh && (fresh.id !== note.id || !isSameNoteSnapshot(note, fresh)) ? fresh : note;
+            if (mergedIds.has(next.id) || mergedClientIds.has(next.clientId)) {
+              continue;
+            }
+            mergedIds.add(next.id);
+            mergedClientIds.add(next.clientId);
+            merged.push(next);
+          }
+          const arrivals = fetched.filter(
+            (note) => !mergedIds.has(note.id) && !mergedClientIds.has(note.clientId) && !removedIds.has(note.id) && !removedClientIds.has(note.clientId)
+          );
           return arrivals.length > 0 ? [...arrivals, ...merged] : merged;
         });
 
@@ -266,9 +285,10 @@ export function useNotesWorkspace({ client, db, filters, reportError }: UseNotes
           nextCursorRef.current = nextNotes.page.nextCursor;
           setHasWorkspaceLoaded(true);
         }
-      } catch {
-        // 后台同步失败保持现状，等下一轮同步或用户操作触发的完整加载
       } finally {
+        // 失败不再就地吞掉：错误沿调用链抛给 WorkspaceProvider 的周期同步，
+        // 由它按「连续失败达到阈值才提示」的策略统一呈现（单次失败不打扰）。
+        // 本函数自身保持「失败不触碰已加载状态」的语义。
         if (inFlightKeyRef.current === requestKey) {
           inFlightKeyRef.current = null;
         }

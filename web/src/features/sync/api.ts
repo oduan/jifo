@@ -20,29 +20,39 @@ function plainText(blocks: CachedNoteBlock[]) {
   return blocks.filter((block): block is Extract<CachedNoteBlock, { type: 'paragraph' }> => block.type === 'paragraph').map((block) => block.content).join('\n\n');
 }
 
+// 后端 /sync/push 单批最多 500 条操作,超出整批 400 拒绝(backend/internal/sync/handler.go
+// maxPushOperations)。客户端按 400 一批分批顺序推送,结果按批次顺序拼接,
+// 避免离线积压超过上限时所有操作一起被 400 打回。
+const PUSH_BATCH_SIZE = 400;
+
+function toPushOperation(operation: OutboxOperation) {
+  const blocks = operation.payload.blocks ?? [];
+  return {
+    opId: operation.opId,
+    entity: operation.entity,
+    action: operation.action,
+    clientId: operation.clientId,
+    // A Web offline draft uses a local-note-* cache key. Creates are
+    // identified by clientId; sending that local key as noteId would be
+    // rejected by the backend UUID parser.
+    noteId: operation.action === 'create' ? undefined : operation.noteId,
+    baseVersion: operation.baseVersion,
+    payload: { blocks: blocks.map(toApiBlock), plainText: plainText(blocks) }
+  };
+}
+
 export async function pushOutbox(client: ApiClient, operations: OutboxOperation[]): Promise<PushResult[]> {
-  const response = await client.request<{ results: Array<Omit<PushResult, 'status'> & { status: string }> }>('/sync/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      operations: operations.map((operation) => {
-        const blocks = operation.payload.blocks ?? [];
-        return {
-          opId: operation.opId,
-          entity: operation.entity,
-          action: operation.action,
-          clientId: operation.clientId,
-          // A Web offline draft uses a local-note-* cache key. Creates are
-          // identified by clientId; sending that local key as noteId would be
-          // rejected by the backend UUID parser.
-          noteId: operation.action === 'create' ? undefined : operation.noteId,
-          baseVersion: operation.baseVersion,
-          payload: { blocks: blocks.map(toApiBlock), plainText: plainText(blocks) }
-        };
-      })
-    })
-  });
-  return response.results.map((result) => ({ ...result, status: normalizePushStatus(result.status) }));
+  const results: PushResult[] = [];
+  for (let start = 0; start < operations.length; start += PUSH_BATCH_SIZE) {
+    const batch = operations.slice(start, start + PUSH_BATCH_SIZE);
+    const response = await client.request<{ results: Array<Omit<PushResult, 'status'> & { status: string }> }>('/sync/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operations: batch.map(toPushOperation) })
+    });
+    results.push(...response.results.map((result) => ({ ...result, status: normalizePushStatus(result.status) })));
+  }
+  return results;
 }
 
 type PullNote = {

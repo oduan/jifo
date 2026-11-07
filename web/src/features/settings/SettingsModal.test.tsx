@@ -165,4 +165,46 @@ describe('SettingsModal', () => {
 
     expect(onChangePassword).toHaveBeenCalledWith('old-password', 'new-password');
   });
+
+  test('仅登出(保留本地缓存)不经确认直接登出', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    const onLogout = vi.fn(async () => undefined);
+    render(<SettingsModal open accessKeys={[]} onClose={vi.fn()} onLogout={onLogout} />);
+
+    await user.click(screen.getByRole('button', { name: '账户' }));
+    await user.click(screen.getByRole('button', { name: '仅登出(保留本地缓存)' }));
+
+    // 默认动作是保留本地数据,不弹删除确认
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(onLogout).toHaveBeenCalledWith({ clearLocalData: false });
+  });
+
+  test('登出并清除本地数据确认后说明删除范围且服务器不受影响', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onLogout = vi.fn(async () => undefined);
+    render(<SettingsModal open accessKeys={[]} onClose={vi.fn()} onLogout={onLogout} />);
+
+    await user.click(screen.getByRole('button', { name: '账户' }));
+    await user.click(screen.getByRole('button', { name: '登出并清除本地数据' }));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const message = String(confirmSpy.mock.calls[0][0]);
+    expect(message).toContain('删除此浏览器上的全部本地笔记缓存');
+    expect(message).toContain('服务器上的笔记不受影响');
+    expect(onLogout).toHaveBeenCalledWith({ clearLocalData: true });
+  });
+
+  test('拒绝确认时不登出也不清除本地数据', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const onLogout = vi.fn();
+    render(<SettingsModal open accessKeys={[]} onClose={vi.fn()} onLogout={onLogout} />);
+
+    await user.click(screen.getByRole('button', { name: '账户' }));
+    await user.click(screen.getByRole('button', { name: '登出并清除本地数据' }));
+
+    expect(onLogout).not.toHaveBeenCalled();
+  });
 });

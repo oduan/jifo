@@ -63,7 +63,7 @@ const client = {} as ApiClient;
 
 describe('useNotesWorkspace loadWorkspace', () => {
   beforeEach(() => {
-    authStore.setSession({ accessToken: 'token', refreshToken: 'refresh', user: { id: 'u1', email: 'u@example.com' } });
+    authStore.setSession({ accessToken: 'token', user: { id: 'u1', email: 'u@example.com' } });
     vi.mocked(listNoteStats).mockResolvedValue({ total: 0 });
   });
 
@@ -162,7 +162,7 @@ describe('useNotesWorkspace loadWorkspace', () => {
 
 describe('useNotesWorkspace refreshSilently', () => {
   beforeEach(() => {
-    authStore.setSession({ accessToken: 'token', refreshToken: 'refresh', user: { id: 'u1', email: 'u@example.com' } });
+    authStore.setSession({ accessToken: 'token', user: { id: 'u1', email: 'u@example.com' } });
     vi.mocked(listNoteStats).mockResolvedValue({ total: 0 });
   });
 
@@ -275,7 +275,34 @@ describe('useNotesWorkspace refreshSilently', () => {
     expect(result.current.notes.map((note) => note.id)).toEqual(['note-1']);
   });
 
-  test('静默刷新失败时保留现有数据且不上报错误', async () => {
+  test('id 迁移期间以 clientId 去重：本地草稿卡被同 clientId 的服务端卡替换而不是双卡', async () => {
+    // 服务端已把本地草稿重命名为 UUID，但界面仍持着旧 id 的卡
+    vi.mocked(listNotes)
+      .mockResolvedValueOnce({
+        items: [apiNote('local-note-1', { clientId: 'web-note-migrate' })],
+        page: { limit: 20, offset: 0, hasMore: false }
+      })
+      .mockResolvedValueOnce({
+        items: [apiNote('server-note-1', { clientId: 'web-note-migrate', version: 2 })],
+        page: { limit: 20, offset: 0, hasMore: false }
+      });
+
+    const { result } = setup({ debouncedQuery: '', showTrash: false });
+    await act(async () => {
+      await result.current.loadWorkspace();
+    });
+    expect(result.current.notes.map((note) => note.id)).toEqual(['local-note-1']);
+
+    await act(async () => {
+      await result.current.refreshSilently();
+    });
+
+    // 同 clientId 的新卡替换旧 id 卡，同一笔记不出现两张卡
+    expect(result.current.notes).toHaveLength(1);
+    expect(result.current.notes[0]).toMatchObject({ id: 'server-note-1', clientId: 'web-note-migrate' });
+  });
+
+  test('静默刷新失败时保留现有数据，并把错误抛给调用方按阈值策略提示', async () => {
     vi.mocked(listNotes)
       .mockResolvedValueOnce(notesPage(['note-1']))
       .mockRejectedValueOnce(new Error('network down'));
@@ -285,8 +312,9 @@ describe('useNotesWorkspace refreshSilently', () => {
       await result.current.loadWorkspace();
     });
 
+    // 失败不再就地吞掉：沿调用链抛给 WorkspaceProvider 的周期同步统一计数提示
     await act(async () => {
-      await result.current.refreshSilently();
+      await expect(result.current.refreshSilently()).rejects.toThrow('network down');
     });
 
     expect(result.current.notes.map((note) => note.id)).toEqual(['note-1']);

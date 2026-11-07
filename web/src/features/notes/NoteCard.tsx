@@ -29,6 +29,7 @@ type NoteCardProps = {
   onRestore?: (id: string) => void;
   onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
   resolveMediaUrl?: (mediaId: string) => Promise<string>;
+  resolveLocalMediaUrl?: (localId: string) => Promise<string>;
 };
 
 const NOTE_TAG_PATTERN = /#[^\s#]+/g;
@@ -38,7 +39,10 @@ function blockText(block: NoteBlock): string {
   if (block.type === 'paragraph') {
     return block.content;
   }
-  return block.alt ? `[图片] ${block.alt}` : `[图片] ${block.url}`;
+  if (block.alt) return `[图片] ${block.alt}`;
+  // 离线粘贴的 localId 块没有可展示的 url,只给出图片占位标记
+  if (block.url) return `[图片] ${block.url}`;
+  return '[图片]';
 }
 
 function paragraphText(blocks: NoteBlock[]): string {
@@ -63,18 +67,33 @@ function noteText(blocks: NoteBlock[]): string {
   return blocks.filter((block) => block.type === 'paragraph').map(blockText).join('\n');
 }
 
-function NoteImage({ block, resolveMediaUrl, onPreview, onResolved, onObjectUrl }: {
+function NoteImage({ block, resolveMediaUrl, resolveLocalMediaUrl, onPreview, onResolved, onObjectUrl }: {
   block: Extract<NoteBlock, { type: 'image' }>;
   resolveMediaUrl?: (mediaId: string) => Promise<string>;
+  resolveLocalMediaUrl?: (localId: string) => Promise<string>;
   onPreview: () => void;
   onResolved: (image: { source: string; alt: string }) => void;
   onObjectUrl: (url: string) => void;
 }) {
-  const [source, setSource] = useState(block.mediaId ? undefined : block.url);
+  const [source, setSource] = useState(block.mediaId || block.localId ? undefined : block.url);
   const [failed, setFailed] = useState(false);
   const alt = block.alt ?? '笔记图片';
 
   useEffect(() => {
+    // 离线粘贴的 localId 块:从 media_cache 读回本地缓存的 blob 生成 object URL。
+    if (block.localId && resolveLocalMediaUrl) {
+      const localId = block.localId;
+      let active = true;
+      void resolveLocalMediaUrl(localId)
+        .then((url) => {
+          onObjectUrl(url);
+          if (active) setSource(url);
+        })
+        .catch(() => active && setFailed(true));
+      return () => {
+        active = false;
+      };
+    }
     if (!block.mediaId || !resolveMediaUrl) return;
     let active = true;
     void resolveMediaUrl(block.mediaId)
@@ -88,7 +107,7 @@ function NoteImage({ block, resolveMediaUrl, onPreview, onResolved, onObjectUrl 
     return () => {
       active = false;
     };
-  }, [block.mediaId, resolveMediaUrl, onObjectUrl]);
+  }, [block.localId, block.mediaId, resolveLocalMediaUrl, resolveMediaUrl, onObjectUrl]);
 
   useEffect(() => {
     if (source) onResolved({ source, alt });
@@ -178,7 +197,7 @@ function stepPreview(index: number | null, delta: number, count: number): number
   return (index + delta + count) % count;
 }
 
-function NoteCardComponent({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl }: NoteCardProps) {
+function NoteCardComponent({ note, onDelete, onUpdate, onTagSelect, tags = [], trash = false, onRestore, onUploadImage, resolveMediaUrl, resolveLocalMediaUrl }: NoteCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -326,6 +345,7 @@ function NoteCardComponent({ note, onDelete, onUpdate, onTagSelect, tags = [], t
           tags={tags}
           onUploadImage={onUploadImage}
           resolveMediaUrl={resolveMediaUrl}
+          resolveLocalMediaUrl={resolveLocalMediaUrl}
           autoFocus
           onCancel={() => setEditing(false)}
           onSubmit={async (blocks) => {
@@ -384,9 +404,10 @@ function NoteCardComponent({ note, onDelete, onUpdate, onTagSelect, tags = [], t
         <div className="note-card__images">
           {noteImages.map((block, index) => (
             <NoteImage
-              key={`${block.mediaId ?? block.url}-${index}`}
+              key={`${block.localId ?? block.mediaId ?? block.url}-${index}`}
               block={block}
               resolveMediaUrl={resolveMediaUrl}
+              resolveLocalMediaUrl={resolveLocalMediaUrl}
               onPreview={() => setPreviewIndex(index)}
               onResolved={(image) => handleImageResolved(index, image)}
               onObjectUrl={registerObjectUrl}

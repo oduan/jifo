@@ -68,6 +68,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       response = await fetcher(joinUrl(options.baseUrl, path), {
         ...init,
         headers,
+        // 携带刷新令牌 HttpOnly Cookie(同源 /api 下浏览器自动附带;跨域部署也显式带上,
+        // 401 刷新路径与首次请求保持一致)。放在展开之后,调用方无法意外丢掉它。
+        credentials: 'include',
         signal: withDefaultTimeout(init.signal)
       });
     } catch (fetchError) {
@@ -122,7 +125,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     }
     let response: Response;
     try {
-      response = await fetcher(joinUrl(options.baseUrl, path), { ...init, headers, signal: withDefaultTimeout(init.signal) });
+      response = await fetcher(joinUrl(options.baseUrl, path), { ...init, headers, credentials: 'include', signal: withDefaultTimeout(init.signal) });
     } catch (fetchError) {
       if (fetchError instanceof TypeError) {
         throw new NetworkError('network request failed', { cause: fetchError });

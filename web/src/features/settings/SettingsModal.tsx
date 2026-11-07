@@ -16,13 +16,14 @@ type SettingsModalProps = {
   onCreateAccessKey?: (label: string, expiresInDays?: number) => Promise<CreateAccessKeyResult>;
   onDeleteAccessKey?: (id: string) => Promise<void>;
   onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
+  onLogout?: (options?: { clearLocalData?: boolean }) => void | Promise<void>;
 };
 
 export function SettingsModal(props: SettingsModalProps) {
   return props.open ? <SettingsModalContent {...props} /> : null;
 }
 
-function SettingsModalContent({ accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey, onDeleteAccessKey, onChangePassword }: SettingsModalProps) {
+function SettingsModalContent({ accessKeys, isLoading = false, isCreating = false, error, onClose, onLoadAccessKeys, onCreateAccessKey, onDeleteAccessKey, onChangePassword, onLogout }: SettingsModalProps) {
   const [activeSection, setActiveSection] = useState<'account' | 'keys'>('keys');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [label, setLabel] = useState('');
@@ -109,6 +110,21 @@ function SettingsModalContent({ accessKeys, isLoading = false, isCreating = fals
     }
   };
 
+  // 登出:默认动作是「仅登出」并保留本地缓存;「登出并清除本地数据」会删除
+  // 该浏览器上的全部本地笔记缓存,属删除用户数据的操作,必须先经确认对话框,
+  // 用户拒绝则不做任何事。
+  const requestLogout = async (clearLocalData: boolean) => {
+    if (clearLocalData) {
+      const confirmed = window.confirm(
+        '将删除此浏览器上的全部本地笔记缓存(包括离线草稿与图片缓存),删除后无法恢复。服务器上的笔记不受影响,重新登录后会重新同步。确定要登出并清除本地数据吗?'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    await onLogout?.({ clearLocalData });
+  };
+
   return (
     <div className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div className="settings-modal__backdrop" aria-hidden="true" />
@@ -150,6 +166,22 @@ function SettingsModalContent({ accessKeys, isLoading = false, isCreating = fals
                   </Button>
                 </div>
               </form>
+              <div className="account-logout">
+                <div className="settings-modal__section-head">
+                  <div>
+                    <h3>登出</h3>
+                    <p>仅登出会保留本浏览器上的笔记缓存,重新登录后可继续离线查看;两种方式都不会影响服务器上的笔记。</p>
+                  </div>
+                </div>
+                <div className="account-logout__actions">
+                  <Button type="button" variant="secondary" onClick={() => void requestLogout(false)}>
+                    仅登出(保留本地缓存)
+                  </Button>
+                  <Button type="button" variant="ghost" className="access-key-action access-key-action--danger" onClick={() => void requestLogout(true)}>
+                    登出并清除本地数据
+                  </Button>
+                </div>
+              </div>
             </section>
           ) : (
           <section className="settings-modal__content" aria-label="密钥设置">

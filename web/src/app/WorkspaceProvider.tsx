@@ -1,6 +1,7 @@
 import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { loadMediaObjectUrl, uploadMedia } from '../features/media/api';
+import { loadLocalMediaObjectUrl, uploadImageBlock } from '../features/media/localMedia';
 import type { Note } from '../features/notes/NoteCard';
 import type { NoteBlock } from '../features/notes/NoteEditor';
 import { useNotesWorkspace } from '../features/notes/useNotesWorkspace';
@@ -50,7 +51,9 @@ export type WorkspaceBindings = {
   onDeleteNote: (id: string) => void | Promise<void>;
   onRestoreNote: (id: string) => void | Promise<void>;
   onSelectTrash: () => void;
-  onLogout: () => void;
+  // 默认仅登出并保留本地缓存;显式传 clearLocalData 时先删除本浏览器上
+  // 该用户的 IndexedDB 笔记缓存(需调用方先行确认)。
+  onLogout: (options?: { clearLocalData?: boolean }) => void | Promise<void>;
   onDismissToast: (id: number) => void;
   onLoadAccessKeys: () => void | Promise<void>;
   onCreateAccessKey: (label: string, expiresInDays?: number) => Promise<CreateAccessKeyResult>;
@@ -58,9 +61,15 @@ export type WorkspaceBindings = {
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   onUploadImage: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
   resolveMediaUrl: (mediaId: string) => Promise<string>;
+  // 离线粘贴图片(localId 块)时从 media_cache 读回本地 blob 生成 object URL。
+  resolveLocalMediaUrl: (localId: string) => Promise<string>;
 };
 
 const WorkspaceContext = createContext<WorkspaceBindings | null>(null);
+
+// 周期同步失败可见性：单次失败不打扰；连续失败达到阈值才提示一次
+// 「同步失败,改动暂存本地」，恢复成功后重置计数并提示恢复。
+const SYNC_FAILURE_TOAST_THRESHOLD = 3;
 
 // WorkspaceProvider 汇聚工作区数据（笔记/标签/热力图）、视图状态、toast 与所有变更行为，
 // 供 NotesPage 及其子组件通过 useWorkspace / useOptionalWorkspace 取用，避免逐层透传大量 props。
@@ -82,6 +91,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [isCreatingAccessKey, setCreatingAccessKey] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastIdRef = useRef(0);
+  // 周期同步的连续失败计数（成功即清零），见 SYNC_FAILURE_TOAST_THRESHOLD。
+  const syncFailureCountRef = useRef(0);
   const loadWorkspaceRef = useRef<() => Promise<void>>(async () => undefined);
   const refreshSilentlyRef = useRef<(pulledChanges?: CachedNote[]) => Promise<void>>(async () => undefined);
 
@@ -155,10 +166,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let active = true;
     const synchronize = () => {
       if (!navigator.onLine) return;
-      // 周期同步走静默刷新：不闪烁、不动分页与滚动位置
+      // 周期同步走静默刷新：不闪烁、不动分页与滚动位置。失败不再全静默：
+      // syncNow（push/pull）与 refreshSilently（工作区刷新，失败沿 then 链抛到这里）
+      // 都汇聚到同一个连续失败计数，达到阈值提示一次，成功后重置并提示恢复。
       void syncNow().then(async (pulledChanges) => {
+        // syncNow 返回 undefined 说明本轮被跳过（并发同步/锁冲突）：既不算成功
+        // 也不算失败，不动失败计数，也不与正在写库的同步并发刷新工作区。
+        if (pulledChanges === undefined) {
+          return;
+        }
         if (active) await refreshSilentlyRef.current(pulledChanges);
-      }).catch(() => undefined);
+        if (syncFailureCountRef.current >= SYNC_FAILURE_TOAST_THRESHOLD) {
+          pushToast('同步已恢复');
+        }
+        syncFailureCountRef.current = 0;
+      }).catch(() => {
+        syncFailureCountRef.current += 1;
+        // 达到阈值才提示一次（长故障期间不重复轰炸；pushToast 会对同文案去重）
+        if (syncFailureCountRef.current === SYNC_FAILURE_TOAST_THRESHOLD) {
+          pushToast('同步失败,改动暂存本地');
+        }
+      });
     };
     synchronize();
     window.addEventListener('online', synchronize);
@@ -168,7 +196,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', synchronize);
       window.clearInterval(timer);
     };
-  }, [syncNow]);
+  }, [syncNow, pushToast]);
 
   const loadAccessKeys = useCallback(async () => {
     if (!authState.accessToken) {
@@ -217,12 +245,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [client]
   );
 
-  const uploadImage = useCallback(async (file: File): Promise<Extract<NoteBlock, { type: 'image' }>> => {
-    const asset = await uploadMedia(client, file);
-    return { type: 'image', mediaId: asset.id, url: URL.createObjectURL(file), alt: file.name };
-  }, [client]);
+  // 粘贴图片:在线即传即用;断网或上传因网络故障失败时降级为 media_cache 本地
+  // 缓存(local_pending),返回 localId 图片块,由同步引擎恢复联网后补传。
+  const uploadImage = useCallback(
+    (file: File) => uploadImageBlock({ client, db: localDb, file }),
+    [client, localDb]
+  );
 
   const resolveMediaUrl = useCallback((mediaId: string) => loadMediaObjectUrl(client, mediaId), [client]);
+
+  const resolveLocalMediaUrl = useCallback(
+    async (localId: string) => {
+      if (!localDb) throw new Error('local media is unavailable');
+      return loadLocalMediaObjectUrl(localDb, localId);
+    },
+    [localDb]
+  );
 
   const restoreNoteById = useCallback((id: string) => void workspace.restoreNote(id), [workspace]);
 
@@ -279,7 +317,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const onDeleteTag = useCallback((tagId: string, deleteNotes: boolean) => runTagMutation(() => deleteTag(client, tagId, deleteNotes)), [client, runTagMutation]);
   const onLoadMoreNotes = useCallback(() => void workspace.loadMoreNotes(), [workspace]);
   const onDeleteNote = useCallback((id: string) => void handleDeleteNote(id), [handleDeleteNote]);
-  const onLogout = useCallback(() => void logout(), [logout]);
+  // 登出:默认仅清会话、保留本地缓存(默认动作是保留);显式 clearLocalData 时先删除
+  // 本浏览器上该用户的 IndexedDB 库(jifo-<userId>,含全部笔记缓存与离线草稿),
+  // 服务器数据不受影响。删除失败不阻断登出,但如实提示缓存仍在。
+  const onLogout = useCallback(
+    async (options?: { clearLocalData?: boolean }) => {
+      if (options?.clearLocalData && localDb) {
+        try {
+          await localDb.delete();
+        } catch {
+          pushToast('本地数据清除失败,该浏览器上的笔记缓存已保留');
+        }
+      }
+      await logout();
+    },
+    [localDb, logout, pushToast]
+  );
 
   const userName = authState.user?.username || authState.user?.email || 'Jifo 用户';
 
@@ -319,7 +372,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       onDeleteAccessKey: deleteExistingAccessKey,
       onChangePassword: updatePassword,
       onUploadImage: uploadImage,
-      resolveMediaUrl
+      resolveMediaUrl,
+      resolveLocalMediaUrl
     }),
     [
       userName,
@@ -356,7 +410,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       deleteExistingAccessKey,
       updatePassword,
       uploadImage,
-      resolveMediaUrl
+      resolveMediaUrl,
+      resolveLocalMediaUrl
     ]
   );
 

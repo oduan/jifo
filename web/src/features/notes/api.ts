@@ -97,9 +97,33 @@ export function plainTextFromBlocks(blocks: NoteBlock[]) {
     .join('\n\n');
 }
 
-function extractTagPaths(text: string) {
+// expandTagPath 与后端 backend/internal/tags/parser.go 的 expandPath 对齐:
+// 每段 TrimSpace、过滤空段(#a//b、#/a/b/ 的空段不产生路径),并展开祖先路径
+// (#a/b 同时命中 a 与 a/b 两级标签)。
+function expandTagPath(path: string): string[] {
+  const segments = path.split('/').map((segment) => segment.trim()).filter(Boolean);
+  const expanded: string[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    expanded.push(segments.slice(0, i + 1).join('/'));
+  }
+  return expanded;
+}
+
+// 与后端 ExtractTagPaths 同口径:按出现顺序收集 # 标签,展开祖先并全局去重。
+export function extractTagPaths(text: string) {
   const matches = text.match(/#[^\s#]+/g) ?? [];
-  return [...new Set(matches.map((match) => match.slice(1).replace(/^\/+|\/+$/g, '')).filter(Boolean))];
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const match of matches) {
+    for (const path of expandTagPath(match.slice(1))) {
+      if (seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      paths.push(path);
+    }
+  }
+  return paths;
 }
 
 function tagIdsForNote(note: ApiNote, tags: TagNode[]) {

@@ -276,4 +276,24 @@ describe('NoteEditor', () => {
     expect(screen.getByRole('button', { name: '发送笔记' })).toBeDisabled();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview');
   });
+
+  test('离线 localId 图片块经 resolveLocalMediaUrl 读本地缓存展示，提交时保留 localId', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onUploadImage = vi.fn(async () => ({ type: 'image' as const, localId: 'local-media-1', alt: 'offline.png' }));
+    const resolveLocalMediaUrl = vi.fn().mockResolvedValue('blob:local-1');
+    render(<NoteEditor onSubmit={onSubmit} onUploadImage={onUploadImage} resolveLocalMediaUrl={resolveLocalMediaUrl} />);
+
+    const file = new File(['png'], 'offline.png', { type: 'image/png' });
+    const textarea = screen.getByLabelText('笔记内容');
+    fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] } });
+
+    const preview = await screen.findByAltText('offline.png');
+    expect(resolveLocalMediaUrl).toHaveBeenCalledWith('local-media-1');
+    expect(preview).toHaveAttribute('src', 'blob:local-1');
+
+    await user.click(screen.getByRole('button', { name: '发送笔记' }));
+
+    expect(onSubmit).toHaveBeenCalledWith([{ type: 'image', localId: 'local-media-1', alt: 'offline.png' }]);
+  });
 });

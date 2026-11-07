@@ -1629,6 +1629,20 @@ h3 {
   margin-top: 8px;
 }
 
+.account-logout {
+  width: min(100%, 380px);
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(32, 27, 22, 0.1);
+}
+
+.account-logout__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .access-key-create__row,
 .access-key-secret__actions {
   display: flex;

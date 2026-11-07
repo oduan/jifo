@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { fromApiNote, listNoteStats, listNotes, plainTextFromBlocks, toApiBlocks } from './api';
+import { extractTagPaths, fromApiNote, listNoteStats, listNotes, plainTextFromBlocks, toApiBlocks } from './api';
 
 describe('notes API DTO conversion', () => {
   test('converts UI paragraph blocks to backend text blocks and plain text', () => {
@@ -79,5 +79,46 @@ describe('notes API DTO conversion', () => {
     await listNotes(client, { tagPath: '&' });
 
     expect(calls).toEqual(['/notes?tagPath=%26']);
+  });
+});
+
+// 用例与 backend/internal/tags/parser_test.go 对齐,口径以 expandPath 为准。
+describe('extractTagPaths(与后端 tags parser 对齐)', () => {
+  test('嵌套路径展开祖先并按出现顺序去重', () => {
+    expect(extractTagPaths('#思考 #电视剧/电视剧1 这个电视剧真的很好看 #思考')).toEqual([
+      '思考',
+      '电视剧',
+      '电视剧/电视剧1'
+    ]);
+  });
+
+  test('标签在空白处截断,首尾空白不进入路径', () => {
+    expect(extractTagPaths('hello #工作/项目A 今天继续')).toEqual(['工作', '工作/项目A']);
+    // 标签后的尾随空白属于正文;# 后紧跟空格不构成标签
+    expect(extractTagPaths('#工作/前端 今天的事')).toEqual(['工作', '工作/前端']);
+    expect(extractTagPaths('# 工作')).toEqual([]);
+  });
+
+  test('空段被过滤(#a//b 与首尾斜杠都不产生空路径)', () => {
+    expect(extractTagPaths('#a//b')).toEqual(['a', 'a/b']);
+    expect(extractTagPaths('#/工作/前端/')).toEqual(['工作', '工作/前端']);
+    expect(extractTagPaths('#//')).toEqual([]);
+  });
+
+  test('标签内部的标点与符号保留', () => {
+    expect(extractTagPaths('#思考…后面文字 #work.project #项目/子项')).toEqual([
+      '思考…后面文字',
+      'work.project',
+      '项目',
+      '项目/子项'
+    ]);
+  });
+
+  test('支持纯符号标签', () => {
+    expect(extractTagPaths('#& #...... #符号&.组合')).toEqual(['&', '......', '符号&.组合']);
+  });
+
+  test('祖先路径先于完整路径登记,重复标签不产生重复祖先', () => {
+    expect(extractTagPaths('#a/b #a')).toEqual(['a', 'a/b']);
   });
 });

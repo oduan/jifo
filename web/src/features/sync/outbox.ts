@@ -22,6 +22,24 @@ function newId(prefix: string) {
   return `${prefix}-${randomId}`;
 }
 
+// 本地草稿的 note id 前缀（createOfflineNote 生成）。重命名发生后，cache/outbox
+// 中残留的 local-note-* 都属于已被服务端 UUID 取代的旧身份。
+export function isLocalDraftNoteId(id: string) {
+  return id.startsWith('local-note-');
+}
+
+// 同一 clientId 在 notes_cache 里可能并存两条记录：服务端 UUID 记录，以及重命名
+// 后被离线编辑以旧 id put 重建的 local-note-* 记录。等值 clientId 的索引游标按
+// 主键（id）升序返回，local-note-* 字典序小于 UUID 会先命中陈旧记录，因此显式
+// 优先非本地草稿记录；无法区分时退回第一条。
+export async function findAuthoritativeCachedNote(db: JifoDb, clientId: string): Promise<CachedNote | undefined> {
+  const candidates = await db.notes_cache.where('clientId').equals(clientId).toArray();
+  if (candidates.length <= 1) {
+    return candidates[0];
+  }
+  return candidates.find((note) => !isLocalDraftNoteId(note.id)) ?? candidates[0];
+}
+
 function nowIso() {
   return new Date().toISOString();
 }

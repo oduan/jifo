@@ -4,7 +4,8 @@ import { Button } from '../../shared/ui/Button';
 
 type SettingsPopoverProps = {
   userName: string;
-  onLogout?: () => void;
+  // 选项参数留给「登出并清除本地数据」路径;弹层里的退出登录是默认的仅登出。
+  onLogout?: (options?: { clearLocalData?: boolean }) => void | Promise<void>;
   onOpenSettings?: () => void;
 };
 
@@ -67,7 +68,8 @@ export function SettingsPopover({ userName, onLogout, onOpenSettings }: Settings
             设置
           </Button>
           {onLogout ? (
-            <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={onLogout}>
+            // 包一层避免把点击事件对象当作 onLogout 的 options 参数传入
+            <Button type="button" variant="ghost" className="dropdown-menu__item" onClick={() => void onLogout?.()}>
               退出登录
             </Button>
           ) : null}

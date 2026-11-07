@@ -83,7 +83,8 @@ export function NotesPage(props: NotesPageProps) {
     onDeleteAccessKey,
     onChangePassword,
     onUploadImage,
-    resolveMediaUrl
+    resolveMediaUrl,
+    resolveLocalMediaUrl
   }: NotesPageProps = { ...(workspace ?? {}), ...definedOnly(props) };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tagsDrawerOpen, setTagsDrawerOpen] = useState(false);
@@ -277,7 +278,7 @@ export function NotesPage(props: NotesPageProps) {
         <div className={`composer-shell${trash ? ' composer-shell--collapsed' : ''}`} aria-hidden={trash}>
           <div className="composer-shell__inner">
             <section className="composer-card" aria-label="新笔记编辑器">
-              <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} onUploadImage={onUploadImage} />
+              <NoteEditor tags={tags} onSubmit={(blocks) => onCreateNote?.(blocks)} onUploadImage={onUploadImage} resolveLocalMediaUrl={resolveLocalMediaUrl} />
             </section>
           </div>
         </div>
@@ -296,6 +297,7 @@ export function NotesPage(props: NotesPageProps) {
                 onRestore={handleNoteRestore}
                 onUploadImage={onUploadImage}
                 resolveMediaUrl={resolveMediaUrl}
+                resolveLocalMediaUrl={resolveLocalMediaUrl}
               />
             ))}
             {hasMoreNotes ? <div ref={loadMoreRef} className="notes-stream__sentinel" aria-hidden="true" /> : null}
@@ -330,6 +332,7 @@ export function NotesPage(props: NotesPageProps) {
             onCreateAccessKey={onCreateAccessKey}
             onDeleteAccessKey={onDeleteAccessKey}
             onChangePassword={onChangePassword}
+            onLogout={onLogout}
           />
         </Suspense>
       ) : null}

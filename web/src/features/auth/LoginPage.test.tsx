@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import { createApiClient } from '../../shared/api/client';
 import { LoginPage } from './LoginPage';
-import { authStore } from './authStore';
+import { authStore, migrateLegacyAuthStorage } from './authStore';
 
 afterEach(() => {
   authStore.clear();
@@ -101,12 +101,49 @@ describe('authStore', () => {
     authStore.clear();
   });
 
-  test('接收其他标签页写入的最新会话', () => {
-    const next = { accessToken: 'tab-access', refreshToken: 'tab-refresh', user: { id: 'u1', email: 'tab@example.com' } };
-    window.dispatchEvent(new StorageEvent('storage', { key: 'jifo.auth', newValue: JSON.stringify(next) }));
+  test('token 只存内存，localStorage 只保留非敏感 user', () => {
+    authStore.setSession({ accessToken: 'token-1', user: { id: 'u1', email: 'a@b.c' } });
 
-    expect(authStore.getState()).toEqual(next);
+    const raw = localStorage.getItem('jifo.auth');
+    expect(raw).not.toBeNull();
+    expect(raw).not.toContain('token-1');
+    expect(JSON.parse(raw ?? '{}')).toEqual({ user: { id: 'u1', email: 'a@b.c' } });
+
+    // setAccessToken 同样只改内存,不触碰 localStorage
+    authStore.setAccessToken('token-2');
+    expect(localStorage.getItem('jifo.auth')).not.toContain('token-2');
+
     authStore.clear();
+    expect(localStorage.getItem('jifo.auth')).toBeNull();
+  });
+
+  test('migrateLegacyAuthStorage 剥离旧版本明文 token，只保留 user', () => {
+    localStorage.setItem(
+      'jifo.auth',
+      JSON.stringify({ accessToken: 'old-access', refreshToken: 'old-refresh', user: { id: 'u1', email: 'a@b.c' } })
+    );
+
+    migrateLegacyAuthStorage();
+
+    const raw = localStorage.getItem('jifo.auth');
+    expect(raw).not.toContain('old-access');
+    expect(raw).not.toContain('old-refresh');
+    expect(JSON.parse(raw ?? '{}')).toEqual({ user: { id: 'u1', email: 'a@b.c' } });
+  });
+
+  test('migrateLegacyAuthStorage 对没有有效 user 的旧数据整键删除', () => {
+    localStorage.setItem('jifo.auth', 'not-json');
+    migrateLegacyAuthStorage();
+    expect(localStorage.getItem('jifo.auth')).toBeNull();
+
+    localStorage.setItem('jifo.auth', JSON.stringify({ accessToken: 'a', refreshToken: 'r' }));
+    migrateLegacyAuthStorage();
+    expect(localStorage.getItem('jifo.auth')).toBeNull();
+
+    localStorage.setItem('jifo.auth', JSON.stringify({ user: { id: 'u1', email: 'a@b.c' } }));
+    migrateLegacyAuthStorage();
+    // 已经是干净数据时保持原样
+    expect(JSON.parse(localStorage.getItem('jifo.auth') ?? '{}')).toEqual({ user: { id: 'u1', email: 'a@b.c' } });
   });
 });
 

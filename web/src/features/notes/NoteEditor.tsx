@@ -4,7 +4,7 @@ import { Textarea } from '../../shared/ui/Input';
 
 export type NoteBlock =
   | { type: 'paragraph'; content: string }
-  | { type: 'image'; url?: string; mediaId?: string; alt?: string };
+  | { type: 'image'; url?: string; localId?: string; mediaId?: string; alt?: string };
 
 export type NoteEditorTag = {
   id: string;
@@ -29,6 +29,8 @@ type NoteEditorProps = {
   onCancel?: () => void;
   onUploadImage?: (file: File) => Promise<Extract<NoteBlock, { type: 'image' }>>;
   resolveMediaUrl?: (mediaId: string) => Promise<string>;
+  // 离线粘贴的图片块带 localId:从 media_cache 读回本地 blob 生成 object URL 展示。
+  resolveLocalMediaUrl?: (localId: string) => Promise<string>;
 };
 
 type TagTrigger = {
@@ -102,19 +104,40 @@ function assembleBlocks(text: string, images: EditorImage[]): NoteBlock[] {
   return result;
 }
 
-// 编辑态图片缩略图：blob:/data: 直接展示，mediaId 引用则经 resolveMediaUrl 解析并在卸载时回收。
+// 编辑态图片缩略图：blob:/data: 直接展示，localId 引用经 resolveLocalMediaUrl 从
+// media_cache 读回本地 blob，mediaId 引用则经 resolveMediaUrl 解析；两者创建的
+// object URL 都在卸载时回收。
 function EditorImageThumbnail({
   block,
-  resolveMediaUrl
+  resolveMediaUrl,
+  resolveLocalMediaUrl
 }: {
   block: Extract<NoteBlock, { type: 'image' }>;
   resolveMediaUrl?: (mediaId: string) => Promise<string>;
+  resolveLocalMediaUrl?: (localId: string) => Promise<string>;
 }) {
   const isDirectUrl = Boolean(block.url && (block.url.startsWith('blob:') || block.url.startsWith('data:')));
   const [source, setSource] = useState<string | undefined>(isDirectUrl ? block.url : undefined);
 
   useEffect(() => {
-    if (isDirectUrl || !block.mediaId || !resolveMediaUrl) return;
+    if (isDirectUrl) return;
+    if (block.localId && resolveLocalMediaUrl) {
+      const localId = block.localId;
+      let active = true;
+      let created: string | undefined;
+      void resolveLocalMediaUrl(localId)
+        .then((url) => {
+          created = url;
+          if (active) setSource(url);
+          else URL.revokeObjectURL(url);
+        })
+        .catch(() => undefined);
+      return () => {
+        active = false;
+        if (created) URL.revokeObjectURL(created);
+      };
+    }
+    if (!block.mediaId || !resolveMediaUrl) return;
     let active = true;
     let created: string | undefined;
     void resolveMediaUrl(block.mediaId)
@@ -128,7 +151,7 @@ function EditorImageThumbnail({
       active = false;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [block.mediaId, isDirectUrl, resolveMediaUrl]);
+  }, [block.localId, block.mediaId, isDirectUrl, resolveLocalMediaUrl, resolveMediaUrl]);
 
   return <img src={source} alt={block.alt ?? '待发送图片'} />;
 }
@@ -242,7 +265,7 @@ function caretDropdownPosition(textarea: HTMLTextAreaElement, caret: number): Su
   };
 }
 
-export function NoteEditor({ initialText = '', initialImages, tags = [], autoFocus = false, onSubmit, onCancel, onUploadImage, resolveMediaUrl }: NoteEditorProps) {
+export function NoteEditor({ initialText = '', initialImages, tags = [], autoFocus = false, onSubmit, onCancel, onUploadImage, resolveMediaUrl, resolveLocalMediaUrl }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState(initialText);
@@ -470,8 +493,8 @@ export function NoteEditor({ initialText = '', initialImages, tags = [], autoFoc
         {images.length > 0 ? (
           <div className="note-editor__image-tray" aria-label="待发送图片">
             {images.map(({ block }, index) => (
-              <div className="note-editor__image-thumbnail" key={`${block.mediaId ?? block.url}-${index}`}>
-                <EditorImageThumbnail block={block} resolveMediaUrl={resolveMediaUrl} />
+              <div className="note-editor__image-thumbnail" key={`${block.localId ?? block.mediaId ?? block.url}-${index}`}>
+                <EditorImageThumbnail block={block} resolveMediaUrl={resolveMediaUrl} resolveLocalMediaUrl={resolveLocalMediaUrl} />
                 <button
                   type="button"
                   className="note-editor__image-remove"
