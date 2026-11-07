@@ -59,6 +59,10 @@ type UpdateInput struct {
 	NoteID    uuid.UUID
 	Content   Content
 	PlainText string
+	// BaseVersion 可选乐观锁：非 nil 时与当前 version 不符则返回 ErrVersionConflict
+	// 并拒绝写入，防止 REST/MCP 路径静默覆盖并发修改；nil 时保持原有覆盖行为，
+	// 兼容未提供 baseVersion 的既有客户端（web/CLI/sync 均未传时行为不变）。
+	BaseVersion *int64
 }
 
 type ListFilter struct {

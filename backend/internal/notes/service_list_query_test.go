@@ -67,6 +67,35 @@ func TestBuildListQuerySupportsSearchTagPathTrashAndPagination(t *testing.T) {
 	}
 }
 
+func TestBuildListQueryUsesFullRowCursorComparison(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	cursorCreatedAt := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+	cursorID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	filter := ListFilter{
+		UserID:          userID,
+		CursorCreatedAt: &cursorCreatedAt,
+		CursorID:        &cursorID,
+		Limit:           20,
+	}
+
+	sql, args := buildListQuery(filter)
+
+	// 游标比较用全行形式：user_id 等值常量 $1 放进行值里，命中
+	// idx_notes_user_active_created_id 的 (user_id, created_at, id) 复合前缀。
+	if !strings.Contains(sql, "(n.user_id, n.created_at, n.id) < ($1, $2, $3)") {
+		t.Fatalf("sql should use full-row cursor comparison, got: %s", sql)
+	}
+	if len(args) != 4 {
+		t.Fatalf("args len = %d, want 4 (userID, cursor time, cursor id, limit)", len(args))
+	}
+	if args[0] != userID || args[1] != cursorCreatedAt.UTC() || args[2] != cursorID {
+		t.Fatalf("cursor args = %v, want [%v %v %v]", args[:3], userID, cursorCreatedAt.UTC(), cursorID)
+	}
+	if args[3] != 20 {
+		t.Fatalf("limit arg = %v, want 20", args[3])
+	}
+}
+
 func TestBuildListQueryEscapesSearchLikeWildcards(t *testing.T) {
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	sql, args := buildListQuery(ListFilter{UserID: userID, Search: `50%_off\A`})

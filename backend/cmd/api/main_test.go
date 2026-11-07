@@ -100,8 +100,8 @@ func (f *fakeAccessKeyService) Validate(ctx context.Context, rawKey string) (acc
 
 type fakeNotesService struct{}
 
-func (f *fakeNotesService) Create(ctx context.Context, input notes.CreateInput) (notes.Note, error) {
-	return notes.Note{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: input.UserID, ClientID: input.ClientID, Content: input.Content, PlainText: input.PlainText, Version: 1}, nil
+func (f *fakeNotesService) Create(ctx context.Context, input notes.CreateInput) (notes.Note, bool, error) {
+	return notes.Note{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), UserID: input.UserID, ClientID: input.ClientID, Content: input.Content, PlainText: input.PlainText, Version: 1}, false, nil
 }
 
 func (f *fakeNotesService) List(ctx context.Context, filter notes.ListFilter) (notes.ListResult, error) {
@@ -336,6 +336,75 @@ func TestAPINotFoundReturnsJSONError(t *testing.T) {
 	if errorObj["code"] == "" || errorObj["message"] == "" {
 		t.Fatalf("invalid error payload: %#v", payload)
 	}
+}
+
+func TestAuthRefreshCookieFlow(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	router := NewRouter(Dependencies{Auth: &fakeAuthService{userID: userID}})
+
+	// 登录：JSON 响应之外同时下发 HttpOnly Cookie。
+	loginResp := doJSON(t, router, http.MethodPost, "/api/auth/login", map[string]any{"email": "a@example.com", "password": "p", "deviceCode": "dev"}, "")
+	if loginResp.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d", loginResp.Code, http.StatusOK)
+	}
+	loginCookie := findSetCookie(t, loginResp, auth.RefreshCookieName)
+	if loginCookie.Value != "refresh-token-2" {
+		t.Fatalf("login cookie value = %q, want the rotated refresh token", loginCookie.Value)
+	}
+	if !loginCookie.HttpOnly || loginCookie.SameSite != http.SameSiteStrictMode || loginCookie.Path != auth.RefreshCookiePath {
+		t.Fatalf("login cookie attributes = %+v, want HttpOnly/SameSite=Strict/Path=%s", loginCookie, auth.RefreshCookiePath)
+	}
+
+	// 刷新：只带 Cookie、不带请求体 token 也能成功，且 Cookie 被改写为新 token。
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", bytes.NewBufferString("{}"))
+	refreshReq.Header.Set("Content-Type", "application/json")
+	refreshReq.AddCookie(&http.Cookie{Name: auth.RefreshCookieName, Value: loginCookie.Value})
+	refreshResp := httptest.NewRecorder()
+	router.ServeHTTP(refreshResp, refreshReq)
+	if refreshResp.Code != http.StatusOK {
+		t.Fatalf("cookie refresh status = %d body=%s, want %d", refreshResp.Code, refreshResp.Body.String(), http.StatusOK)
+	}
+	rotatedCookie := findSetCookie(t, refreshResp, auth.RefreshCookieName)
+	if rotatedCookie.Value != "refresh-token-3" {
+		t.Fatalf("refresh must rewrite the cookie with the rotated token, got %q", rotatedCookie.Value)
+	}
+
+	// 请求体优先于 Cookie：fake 只认 refresh-token-2，能成功即证明用的是请求体。
+	bodyRefreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", bytes.NewBufferString(`{"refreshToken":"refresh-token-2"}`))
+	bodyRefreshReq.Header.Set("Content-Type", "application/json")
+	bodyRefreshReq.AddCookie(&http.Cookie{Name: auth.RefreshCookieName, Value: "stale-cookie-token"})
+	bodyRefreshResp := httptest.NewRecorder()
+	router.ServeHTTP(bodyRefreshResp, bodyRefreshReq)
+	if bodyRefreshResp.Code != http.StatusOK {
+		t.Fatalf("body-preferring refresh status = %d body=%s, want %d", bodyRefreshResp.Code, bodyRefreshResp.Body.String(), http.StatusOK)
+	}
+
+	// 无 token 无 Cookie：400。
+	emptyResp := doJSON(t, router, http.MethodPost, "/api/auth/refresh", map[string]any{}, "")
+	if emptyResp.Code != http.StatusBadRequest {
+		t.Fatalf("refresh without tokens status = %d, want %d", emptyResp.Code, http.StatusBadRequest)
+	}
+
+	// 登出：撤销会话的同时清除 Cookie。
+	logoutResp := doJSON(t, router, http.MethodPost, "/api/auth/logout", nil, "access-token")
+	if logoutResp.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d body=%s, want %d", logoutResp.Code, logoutResp.Body.String(), http.StatusNoContent)
+	}
+	clearedCookie := findSetCookie(t, logoutResp, auth.RefreshCookieName)
+	if clearedCookie.Value != "" || clearedCookie.MaxAge >= 0 {
+		t.Fatalf("logout cookie = %+v, want empty value with negative MaxAge", clearedCookie)
+	}
+}
+
+func findSetCookie(t *testing.T, resp *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+	for _, cookie := range resp.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	t.Fatalf("cookie %q not found in Set-Cookie headers", name)
+	return nil
 }
 
 func doJSON(t *testing.T, h http.Handler, method, target string, body any, token string) *httptest.ResponseRecorder {

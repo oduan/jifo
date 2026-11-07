@@ -185,6 +185,8 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "invalid_media_size", "invalid media size")
 	case errors.Is(err, ErrFileTooLarge):
 		httpx.WriteError(w, r, http.StatusRequestEntityTooLarge, "file_too_large", "media file too large")
+	case errors.Is(err, ErrQuotaExceeded):
+		httpx.WriteError(w, r, http.StatusRequestEntityTooLarge, "quota_exceeded", "media storage quota exceeded")
 	case errors.Is(err, ErrChecksumMismatch):
 		httpx.WriteError(w, r, http.StatusBadRequest, "checksum_mismatch", "media checksum mismatch")
 	default:

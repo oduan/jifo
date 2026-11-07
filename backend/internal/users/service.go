@@ -84,6 +84,15 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentP
 	`, now, userID); err != nil {
 		return err
 	}
+	// 改密后同时撤销该用户全部未撤销的 access key，避免旧密钥继续绕过会话。
+	if _, err := tx.Exec(ctx, `
+		UPDATE access_keys
+		SET revoked_at = $1
+		WHERE user_id = $2
+		  AND revoked_at IS NULL
+	`, now, userID); err != nil {
+		return err
+	}
 
 	return tx.Commit(ctx)
 }

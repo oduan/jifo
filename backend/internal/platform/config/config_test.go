@@ -49,6 +49,78 @@ func TestLoadReadsProductionSettings(t *testing.T) {
 	}
 }
 
+func TestLoadParsesMediaUserQuotaBytes(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://db/jifo")
+	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
+
+	// 未配置：保持 nil，由 media 包取默认 5 GiB。
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MediaUserQuotaBytes != nil {
+		t.Fatalf("MediaUserQuotaBytes = %v, want nil when unset", *cfg.MediaUserQuotaBytes)
+	}
+
+	// 显式配置 0：不限制。
+	t.Setenv("MEDIA_USER_QUOTA_BYTES", "0")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MediaUserQuotaBytes == nil || *cfg.MediaUserQuotaBytes != 0 {
+		t.Fatalf("MediaUserQuotaBytes = %v, want 0 (unlimited)", cfg.MediaUserQuotaBytes)
+	}
+
+	// 正常覆盖。
+	t.Setenv("MEDIA_USER_QUOTA_BYTES", "1073741824")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MediaUserQuotaBytes == nil || *cfg.MediaUserQuotaBytes != 1073741824 {
+		t.Fatalf("MediaUserQuotaBytes = %v, want 1073741824", cfg.MediaUserQuotaBytes)
+	}
+
+	// 非法值（负数/非数字）报错。
+	for _, raw := range []string{"-1", "abc"} {
+		t.Setenv("MEDIA_USER_QUOTA_BYTES", raw)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MEDIA_USER_QUOTA_BYTES") {
+			t.Fatalf("Load() with %q error = %v, want MEDIA_USER_QUOTA_BYTES error", raw, err)
+		}
+	}
+}
+
+func TestLoadParsesPGPoolMaxConns(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://db/jifo")
+	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
+
+	// 未配置：保持 0，由 db 包取默认 min(20, max(4, NumCPU))。
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.PoolMaxConns != 0 {
+		t.Fatalf("PoolMaxConns = %d, want 0 when unset", cfg.PoolMaxConns)
+	}
+
+	t.Setenv("PGPOOL_MAX_CONNS", "42")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.PoolMaxConns != 42 {
+		t.Fatalf("PoolMaxConns = %d, want 42", cfg.PoolMaxConns)
+	}
+
+	for _, raw := range []string{"0", "-3", "many"} {
+		t.Setenv("PGPOOL_MAX_CONNS", raw)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PGPOOL_MAX_CONNS") {
+			t.Fatalf("Load() with %q error = %v, want PGPOOL_MAX_CONNS error", raw, err)
+		}
+	}
+}
+
 func TestLoadRejectsShortSecret(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://db/jifo")
 	t.Setenv("JWT_SECRET", "short-secret")

@@ -17,11 +17,12 @@ import (
 )
 
 type fakeNotes struct {
-	filter notes.ListFilter
+	filter      notes.ListFilter
+	updateInput notes.UpdateInput
 }
 
-func (f *fakeNotes) Create(_ context.Context, input notes.CreateInput) (notes.Note, error) {
-	return notes.Note{ID: uuid.New(), UserID: input.UserID, ClientID: input.ClientID, Content: input.Content, PlainText: input.PlainText, Version: 1}, nil
+func (f *fakeNotes) Create(_ context.Context, input notes.CreateInput) (notes.Note, bool, error) {
+	return notes.Note{ID: uuid.New(), UserID: input.UserID, ClientID: input.ClientID, Content: input.Content, PlainText: input.PlainText, Version: 1}, false, nil
 }
 
 func (f *fakeNotes) List(_ context.Context, filter notes.ListFilter) (notes.ListResult, error) {
@@ -30,6 +31,7 @@ func (f *fakeNotes) List(_ context.Context, filter notes.ListFilter) (notes.List
 }
 
 func (f *fakeNotes) Update(_ context.Context, input notes.UpdateInput) (notes.Note, error) {
+	f.updateInput = input
 	return notes.Note{ID: input.NoteID, UserID: input.UserID, ClientID: "c1", Content: input.Content, PlainText: input.PlainText, Version: 2}, nil
 }
 
@@ -102,6 +104,64 @@ func TestSearchNotesInputRejectsInvertedRanges(t *testing.T) {
 	_, _, _, err := (searchNotesInput{CreatedFrom: "2026-02-01T00:00:00Z", CreatedTo: "2026-01-01T00:00:00Z"}).filter(uuid.New())
 	if err == nil {
 		t.Fatal("expected inverted range error")
+	}
+}
+
+func TestUpdateNoteToolPassesOptionalVersionAsBaseVersion(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	noteService := &fakeNotes{}
+	handler := httpx.RequireAuth(func(context.Context, string) (uuid.UUID, uuid.UUID, error) {
+		return userID, uuid.Nil, nil
+	})(NewHandler(noteService, &fakeTags{}))
+
+	response := callMCP(t, handler, "token", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "update_note",
+			"arguments": map[string]any{
+				"note_id":    "33333333-3333-3333-3333-333333333333",
+				"plain_text": "updated text",
+				"version":    7,
+			},
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if noteService.updateInput.BaseVersion == nil || *noteService.updateInput.BaseVersion != 7 {
+		t.Fatalf("base version = %v, want 7", noteService.updateInput.BaseVersion)
+	}
+	if noteService.updateInput.NoteID != uuid.MustParse("33333333-3333-3333-3333-333333333333") {
+		t.Fatalf("note id = %s, want parsed note_id", noteService.updateInput.NoteID)
+	}
+}
+
+func TestUpdateNoteToolLeavesBaseVersionNilWithoutVersionArgument(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	noteService := &fakeNotes{}
+	handler := httpx.RequireAuth(func(context.Context, string) (uuid.UUID, uuid.UUID, error) {
+		return userID, uuid.Nil, nil
+	})(NewHandler(noteService, &fakeTags{}))
+
+	response := callMCP(t, handler, "token", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "update_note",
+			"arguments": map[string]any{
+				"note_id":    "33333333-3333-3333-3333-333333333333",
+				"plain_text": "updated text",
+			},
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if noteService.updateInput.BaseVersion != nil {
+		t.Fatalf("base version = %v, want nil when version argument omitted", noteService.updateInput.BaseVersion)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"jifo/backend/internal/tags"
@@ -17,6 +18,7 @@ import (
 
 var (
 	ErrNoteNotFound          = errors.New("note not found")
+	ErrVersionConflict       = errors.New("note version conflict")
 	ErrMediaAssetUnavailable = errors.New("media asset is unavailable")
 )
 
@@ -39,21 +41,49 @@ func NewService(db *pgxpool.Pool, tagSvc tagWriter) *Service {
 	return &Service{db: db, tags: tagSvc}
 }
 
-func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
+// Create 是 REST/MCP 直连写路径的入口，在 CreateTx 之上做了 (user_id, client_id)
+// 唯一约束(23505)的幂等处理：客户端超时重试会复用同一 clientId，此时回读既有行
+// 并以 duplicate=true 返回，而不是把唯一冲突当 500 抛给客户端（否则客户端换新
+// clientId 重发会产生重复笔记）。
+// sync 路径不走这里——它在 applyNewOperationTx 里自行捕获 23505 并返回
+// status="duplicate"，CreateTx 因此保持原样返回原始约束错误。
+func (s *Service) Create(ctx context.Context, input CreateInput) (Note, bool, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return Note{}, err
+		return Note{}, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	note, err := s.CreateTx(ctx, tx, input)
+	// 用嵌套事务(savepoint)包住插入：INSERT 命中 23505 时先回滚到 savepoint，
+	// 外层事务才不会停留在 aborted 状态，随后的回读才可能成功——否则服务端会以
+	// 25P02 "current transaction is aborted" 拒绝同一事务里的后续语句。
+	// 与 sync 路径 applyNewOperationTx 对 create 操作的处理保持同一模式。
+	createTx, err := tx.Begin(ctx)
 	if err != nil {
-		return Note{}, err
+		return Note{}, false, err
+	}
+	note, err := s.CreateTx(ctx, createTx, input)
+	if err != nil {
+		_ = createTx.Rollback(ctx)
+		// 该写路径上 note_tags/note_media_refs/tags 的插入都带 ON CONFLICT DO NOTHING/UPDATE，
+		// 23505 几乎只可能来自 notes(user_id, client_id) 唯一约束；回读既有行确认，
+		// 回读不到（约束来自其他列）则保留原始错误。
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			existing, readErr := noteByUserAndClientIDTx(ctx, tx, input.UserID, input.ClientID)
+			if readErr == nil {
+				return existing, true, nil
+			}
+		}
+		return Note{}, false, err
+	}
+	if err := createTx.Commit(ctx); err != nil {
+		return Note{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Note{}, err
+		return Note{}, false, err
 	}
-	return note, nil
+	return note, false, nil
 }
 
 func (s *Service) CreateTx(ctx context.Context, tx pgx.Tx, input CreateInput) (Note, error) {
@@ -111,6 +141,20 @@ func lockNoteRow(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.U
 func (s *Service) UpdateTx(ctx context.Context, tx pgx.Tx, input UpdateInput) (Note, error) {
 	if err := lockNoteRow(ctx, tx, input.UserID, input.NoteID); err != nil {
 		return Note{}, err
+	}
+	// 可选乐观锁：行已被 FOR UPDATE 锁定，此刻读到的 version 即最新提交值，
+	// 读后比对不会被并发写入插队。与 sync 路径不同，这里冲突时直接报
+	// ErrVersionConflict 而不创建冲突副本：REST/MCP 是同步请求-响应，客户端在场，
+	// 收到冲突可重新拉取、合并后再试；冲突副本是 sync 异步客户端防数据丢失的策略
+	// （客户端可能早已离线，静默丢弃其写入会丢数据），不适用于同步调用方。
+	if input.BaseVersion != nil {
+		currentVersion, err := noteVersionTx(ctx, tx, input.UserID, input.NoteID)
+		if err != nil {
+			return Note{}, err
+		}
+		if *input.BaseVersion != currentVersion {
+			return Note{}, ErrVersionConflict
+		}
 	}
 	oldTagIDs, err := s.currentTagIDs(ctx, tx, input.UserID, input.NoteID)
 	if err != nil {
@@ -407,7 +451,11 @@ func buildListQuery(filter ListFilter) (string, []any) {
 	}
 
 	if filter.CursorCreatedAt != nil && filter.CursorID != nil {
-		conditions = append(conditions, fmt.Sprintf("(n.created_at, n.id) < ($%d, $%d)", argIndex, argIndex+1))
+		// 游标比较用全行形式并把 user_id 等值常量放进行值里：这样能命中
+		// idx_notes_user_active_created_id / idx_notes_user_trash_created_id
+		// 的 (user_id, created_at, id) 复合前缀，行值比较只留最后两列为范围条件；
+		// 语义与只比较 (created_at, id) 等价，因为 user_id 已被 $1 的等值条件固定。
+		conditions = append(conditions, fmt.Sprintf("(n.user_id, n.created_at, n.id) < ($1, $%d, $%d)", argIndex, argIndex+1))
 		args = append(args, filter.CursorCreatedAt.UTC(), *filter.CursorID)
 		argIndex += 2
 	}
@@ -529,6 +577,36 @@ func (s *Service) rebuildMediaRefs(ctx context.Context, tx pgx.Tx, userID uuid.U
 		}
 	}
 	return nil
+}
+
+// noteByUserAndClientIDTx 按 (user_id, client_id) 回读既有笔记（含回收站中的行，
+// 与唯一约束的口径一致），供 Create 幂等重试返回 duplicate 时使用。
+func noteByUserAndClientIDTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, clientID string) (Note, error) {
+	return scanNote(tx.QueryRow(ctx, `
+		SELECT id, user_id, client_id, content, plain_text, created_at, updated_at, deleted_at, purge_after, permanently_deleted_at, version
+		FROM notes
+		WHERE user_id = $1 AND client_id = $2
+	`, userID, clientID))
+}
+
+// noteVersionTx 在行锁保护下读取当前 version，供 UpdateTx 的可选乐观锁校验使用。
+// 过滤条件与 UpdateTx 随后的 UPDATE 语句逐字一致（回收站/永久删除的笔记不可更新），
+// 保证"校验通过的行"就是"即将被更新的行"；回收态笔记在此统一返回 ErrNoteNotFound，
+// 使带与不带 baseVersion 的 PATCH 错误契约一致（都是 404，而不是 409/404 摇摆）。
+func noteVersionTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) (int64, error) {
+	var version int64
+	err := tx.QueryRow(ctx, `
+		SELECT version
+		FROM notes
+		WHERE user_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+		  AND permanently_deleted_at IS NULL
+	`, userID, noteID).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNoteNotFound
+	}
+	return version, err
 }
 
 func (s *Service) currentTagIDs(ctx context.Context, tx pgx.Tx, userID uuid.UUID, noteID uuid.UUID) ([]uuid.UUID, error) {

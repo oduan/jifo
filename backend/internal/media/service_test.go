@@ -55,6 +55,88 @@ func TestUploadRejectsChecksumMismatchBeforeWritingFinalFile(t *testing.T) {
 	}
 }
 
+func TestUploadEnforcesPerUserQuota(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	svc := NewService(db, t.TempDir())
+	svc.SetUserQuotaBytes(100)
+
+	upload := func(size int64) error {
+		_, err := svc.Upload(ctx, UploadInput{
+			UserID:    userID,
+			Kind:      "image",
+			MIMEType:  "image/png",
+			SizeBytes: size,
+			Reader:    bytes.NewReader(make([]byte, size)),
+		})
+		return err
+	}
+
+	// 60 字节放行；再传 41 字节超限（60+41 > 100）拒绝；边界 40 字节（60+40 == 100）放行。
+	if err := upload(60); err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+	if err := upload(41); err != ErrQuotaExceeded {
+		t.Fatalf("over-quota upload error = %v, want %v", err, ErrQuotaExceeded)
+	}
+	if err := upload(40); err != nil {
+		t.Fatalf("boundary upload at exactly quota: %v", err)
+	}
+	// 配额已满：哪怕 1 字节也应拒绝。
+	if err := upload(1); err != ErrQuotaExceeded {
+		t.Fatalf("full-quota upload error = %v, want %v", err, ErrQuotaExceeded)
+	}
+}
+
+func TestUploadQuotaCountsSoftDeletedAssets(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	svc := NewService(db, t.TempDir())
+	svc.SetUserQuotaBytes(40)
+
+	body := []byte("deleted but still on disk")
+	asset, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)})
+	if err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+	// 标记删除（宽限期内，文件仍在）：统计应继续计入配额。
+	if _, err := db.Exec(ctx, `UPDATE media_assets SET deleted_at = now(), purge_after = now() + interval '7 days' WHERE user_id = $1 AND id = $2`, userID, asset.ID); err != nil {
+		t.Fatalf("mark deleted: %v", err)
+	}
+	if _, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)}); err != ErrQuotaExceeded {
+		t.Fatalf("upload after soft delete error = %v, want %v", err, ErrQuotaExceeded)
+	}
+}
+
+func TestUploadAllowsUnlimitedQuotaWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+	svc := NewService(db, t.TempDir())
+
+	body := []byte("quota disabled")
+	// 对照：配额 50 时第二次上传应被拒。
+	svc.SetUserQuotaBytes(50)
+	if _, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)}); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+	if _, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)}); err != ErrQuotaExceeded {
+		t.Fatalf("second upload under quota 50 error = %v, want %v", err, ErrQuotaExceeded)
+	}
+	// 0 = 不限制：同样的上传立刻放行，多次累计也放行。
+	svc.SetUserQuotaBytes(0)
+	for i := 0; i < 3; i++ {
+		if _, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)}); err != nil {
+			t.Fatalf("upload %d with quota disabled: %v", i+1, err)
+		}
+	}
+}
+
 func TestUploadStoresAssetMetadataAndFile(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenTestDB(t)

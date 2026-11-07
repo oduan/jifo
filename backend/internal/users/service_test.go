@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"jifo/backend/internal/accesskeys"
 	"jifo/backend/internal/auth"
 	"jifo/backend/internal/platform/testutil"
 )
@@ -185,11 +186,71 @@ func TestGetByIDMissingUser(t *testing.T) {
 	}
 }
 
+func TestChangePasswordRevokesAllAccessKeys(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	passwordHash, err := auth.HashPassword("old-password")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID := uuid.New()
+	_, err = db.Exec(ctx, `
+		INSERT INTO users (id, email, password_hash, username)
+		VALUES ($1, $2, $3, $4)
+	`, userID, "change-password-keys@example.com", passwordHash, "change-password-keys")
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	keySvc := accesskeys.NewService(db)
+	first, err := keySvc.Create(ctx, userID, "CLI", 0)
+	if err != nil {
+		t.Fatalf("Create(first key): %v", err)
+	}
+	second, err := keySvc.Create(ctx, userID, "CI", 0)
+	if err != nil {
+		t.Fatalf("Create(second key): %v", err)
+	}
+	if _, err := keySvc.Validate(ctx, first.Secret); err != nil {
+		t.Fatalf("Validate(first key before change): %v", err)
+	}
+
+	svc := NewService(db)
+	if err := svc.ChangePassword(ctx, userID, "old-password", "new-password"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+
+	var revokedCount int
+	err = db.QueryRow(ctx, `SELECT count(*) FROM access_keys WHERE user_id = $1 AND revoked_at IS NOT NULL`, userID).Scan(&revokedCount)
+	if err != nil {
+		t.Fatalf("count revoked access keys: %v", err)
+	}
+	if revokedCount != 2 {
+		t.Fatalf("revoked access keys = %d, want 2", revokedCount)
+	}
+
+	items, err := keySvc.List(ctx, userID)
+	if err != nil {
+		t.Fatalf("List(): %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("List() returned %d items, want 0 after password change", len(items))
+	}
+	if _, err := keySvc.Validate(ctx, first.Secret); !errors.Is(err, accesskeys.ErrInvalidAccessKey) {
+		t.Fatalf("Validate(first key after change) error = %v, want %v", err, accesskeys.ErrInvalidAccessKey)
+	}
+	if _, err := keySvc.Validate(ctx, second.Secret); !errors.Is(err, accesskeys.ErrInvalidAccessKey) {
+		t.Fatalf("Validate(second key after change) error = %v, want %v", err, accesskeys.ErrInvalidAccessKey)
+	}
+}
+
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 	testutil.ResetDatabase(t, ctx, db)
 
-	for _, name := range []string{"001_init.sql", "006_session_hardening.sql", "009_refresh_token_families.sql"} {
+	for _, name := range []string{"001_init.sql", "002_access_keys.sql", "006_session_hardening.sql", "007_access_key_expiry.sql", "009_refresh_token_families.sql"} {
 		if _, err := db.Exec(ctx, loadMigration(t, name)); err != nil {
 			t.Fatalf("execute migration %s: %v", name, err)
 		}

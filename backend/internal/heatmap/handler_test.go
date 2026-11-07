@@ -54,3 +54,32 @@ func TestHandlerRejectsInvalidTimezone(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rr.Code)
 	}
 }
+
+func TestHandlerMapsLocalTimezoneToUTC(t *testing.T) {
+	// PostgreSQL 的 AT TIME ZONE 不认识 Go 的 "Local"，必须映射为 UTC 而不是 500。
+	svc := &capturingHeatmapService{}
+	rr := serveAuthenticatedHeatmap(http.HandlerFunc(NewHandler(svc).Get), "/heatmap?from=2026-05-01&to=2026-05-02&timezone=Local")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := svc.from.Location().String(); got != "UTC" {
+		t.Fatalf("from location = %s, want UTC", got)
+	}
+	if got := svc.to.Location().String(); got != "UTC" {
+		t.Fatalf("to location = %s, want UTC", got)
+	}
+	if got := svc.from.Format(time.RFC3339); got != "2026-05-01T00:00:00Z" {
+		t.Fatalf("from = %s, want UTC midnight", got)
+	}
+}
+
+func TestHandlerMapsLowercaseUTCTimezone(t *testing.T) {
+	svc := &capturingHeatmapService{}
+	rr := serveAuthenticatedHeatmap(http.HandlerFunc(NewHandler(svc).Get), "/heatmap?from=2026-05-01&to=2026-05-02&timezone=utc")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := svc.from.Location().String(); got != "UTC" {
+		t.Fatalf("from location = %s, want UTC", got)
+	}
+}

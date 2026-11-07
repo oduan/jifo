@@ -143,12 +143,17 @@ func (s *Service) Revoke(ctx context.Context, userID uuid.UUID, keyID uuid.UUID)
 	return nil
 }
 
+// lastUsedUpdateInterval 控制 last_used_at 的写入节流：距上次写入不足该间隔的
+// 重复校验不再落库，减少高频请求下的 WAL 写放大。校验结果本身不受节流影响。
+const lastUsedUpdateInterval = 60 * time.Second
+
 func (s *Service) Validate(ctx context.Context, rawKey string) (Principal, error) {
 	rawKey = strings.TrimSpace(rawKey)
 	if rawKey == "" {
 		return Principal{}, ErrInvalidAccessKey
 	}
 
+	keyHash := hashSecret(rawKey)
 	var principal Principal
 	err := s.db.QueryRow(ctx, `
 		UPDATE access_keys
@@ -156,8 +161,24 @@ func (s *Service) Validate(ctx context.Context, rawKey string) (Principal, error
 		WHERE key_hash = $1
 		  AND revoked_at IS NULL
 		  AND (expires_at IS NULL OR expires_at > now())
+		  AND (last_used_at IS NULL OR last_used_at <= now() - make_interval(secs => $2))
 		RETURNING id, user_id
-	`, hashSecret(rawKey)).Scan(&principal.KeyID, &principal.UserID)
+	`, keyHash, int(lastUsedUpdateInterval.Seconds())).Scan(&principal.KeyID, &principal.UserID)
+	if err == nil {
+		return principal, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Principal{}, err
+	}
+
+	// 节流窗口内不写 last_used_at，但 key 本身可能仍有效，回退为只读校验。
+	err = s.db.QueryRow(ctx, `
+		SELECT id, user_id
+		FROM access_keys
+		WHERE key_hash = $1
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > now())
+	`, keyHash).Scan(&principal.KeyID, &principal.UserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Principal{}, ErrInvalidAccessKey

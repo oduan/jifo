@@ -386,6 +386,39 @@ func TestValidateAccessTokenRejectsRevokedOrVersionMismatchedSession(t *testing.
 	}
 }
 
+func TestValidateAccessTokenRejectsExpiredSession(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+
+	svc, err := NewService(db, testAccessTokenSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	registered, err := svc.Register(ctx, RegisterInput{
+		Email:      "expired-session@example.com",
+		Password:   "expired-session-password",
+		DeviceCode: "device-expired-session",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if _, err := svc.ValidateAccessToken(ctx, registered.AccessToken); err != nil {
+		t.Fatalf("ValidateAccessToken(valid session): %v", err)
+	}
+
+	// 把 session 过期时间回拨到过去，模拟已过期的会话。
+	if _, err := db.Exec(ctx, `UPDATE user_sessions SET expires_at = now() - interval '1 minute' WHERE user_id = $1`, registered.User.ID); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
+
+	_, err = svc.ValidateAccessToken(ctx, registered.AccessToken)
+	if !errors.Is(err, ErrInvalidAccessToken) {
+		t.Fatalf("ValidateAccessToken(expired session) error = %v, want %v", err, ErrInvalidAccessToken)
+	}
+}
+
 func resetSchemaAndMigrate(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 	testutil.ResetDatabase(t, ctx, db)

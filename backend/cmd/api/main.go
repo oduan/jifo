@@ -51,7 +51,7 @@ type AccessKeyService interface {
 }
 
 type NotesService interface {
-	Create(ctx context.Context, input notes.CreateInput) (notes.Note, error)
+	Create(ctx context.Context, input notes.CreateInput) (notes.Note, bool, error)
 	List(ctx context.Context, filter notes.ListFilter) (notes.ListResult, error)
 	CountActive(ctx context.Context, userID uuid.UUID) (int64, error)
 	Update(ctx context.Context, input notes.UpdateInput) (notes.Note, error)
@@ -99,6 +99,9 @@ type RouterOptions struct {
 	Logger      *slog.Logger
 	Proxy       *httpx.ProxyResolver
 	AuthLimiter *httpx.RateLimiter
+	// CookieSecure 表示生产环境（APP_ENV=production）：auth 刷新 Cookie 一律加
+	// Secure 属性（生产 TLS 由 nginx 反代终止，后端看不到请求是否走 TLS）。
+	CookieSecure bool
 }
 
 func NewRouterWithOptions(deps Dependencies, options RouterOptions) http.Handler {
@@ -153,10 +156,12 @@ func NewRouterWithOptions(deps Dependencies, options RouterOptions) http.Handler
 			httpx.WriteError(w, req, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		})
 
-		authHandler := auth.NewHandler(deps.Auth)
+		authHandler := auth.NewHandlerWithOptions(deps.Auth, auth.HandlerOptions{SecureCookie: options.CookieSecure})
 		if options.AuthLimiter != nil {
-			api.With(options.AuthLimiter.Middleware).Post("/auth/register", authHandler.Register)
-			api.With(options.AuthLimiter.Middleware).Post("/auth/login", authHandler.Login)
+			// login/register 在 IP+path 桶之外叠加 per-email 桶（见 EmailMiddleware 注释）；
+			// refresh 不解析请求体 email，仍只走 IP+path 桶。
+			api.With(options.AuthLimiter.Middleware, options.AuthLimiter.EmailMiddleware).Post("/auth/register", authHandler.Register)
+			api.With(options.AuthLimiter.Middleware, options.AuthLimiter.EmailMiddleware).Post("/auth/login", authHandler.Login)
 			api.With(options.AuthLimiter.Middleware).Post("/auth/refresh", authHandler.Refresh)
 		} else {
 			api.Post("/auth/register", authHandler.Register)
@@ -228,7 +233,13 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("load trusted proxies: %w", err)
 	}
 
-	database, err := db.Open(ctx, cfg.DatabaseURL)
+	// PGPOOL_MAX_CONNS 覆盖默认 MaxConns（min(20, max(4, NumCPU))）；
+	// 其余池参数（MinConns/生命周期/健康检查）用 db 包的显式默认值。
+	poolSettings := db.DefaultPoolSettings()
+	if cfg.PoolMaxConns > 0 {
+		poolSettings.MaxConns = cfg.PoolMaxConns
+	}
+	database, err := db.Open(ctx, cfg.DatabaseURL, poolSettings)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
@@ -244,6 +255,11 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("init auth service: %w", err)
 	}
 	mediaSvc := media.NewService(database, cfg.MediaRoot)
+	if cfg.MediaUserQuotaBytes != nil {
+		// MEDIA_USER_QUOTA_BYTES 显式配置时生效（0 = 不限制）；
+		// 未配置时保留 NewService 的默认 5 GiB。
+		mediaSvc.SetUserQuotaBytes(*cfg.MediaUserQuotaBytes)
+	}
 	syncSvc := sync.NewService(database, noteSvc)
 	heatmapSvc := heatmap.NewService(database)
 	accessKeySvc := accesskeys.NewService(database)
@@ -252,7 +268,7 @@ func run(logger *slog.Logger) error {
 	healthHandler := health.NewHandler(database, cfg.MediaRoot)
 	router := NewRouterWithOptions(
 		Dependencies{Auth: authSvc, AccessKeys: accessKeySvc, Notes: noteSvc, Tags: tagSvc, Heatmap: heatmapSvc, Sync: syncSvc, Media: mediaSvc, Health: healthHandler, Users: usersSvc},
-		RouterOptions{Logger: logger, Proxy: proxy, AuthLimiter: httpx.NewRateLimiter(cfg.AuthRateLimit, cfg.AuthRateWindow)},
+		RouterOptions{Logger: logger, Proxy: proxy, AuthLimiter: httpx.NewRateLimiter(cfg.AuthRateLimit, cfg.AuthRateWindow), CookieSecure: cfg.Environment == "production"},
 	)
 
 	cleanupSvc := cleanup.NewService(database, mediaSvc, logger)

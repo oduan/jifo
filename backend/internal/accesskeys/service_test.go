@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -155,6 +156,60 @@ func TestCreateWithoutExpiryStaysPermanent(t *testing.T) {
 	}
 	if created.AccessKey.ExpiresAt != nil {
 		t.Fatalf("ExpiresAt = %v, want nil for permanent key", created.AccessKey.ExpiresAt)
+	}
+}
+
+func TestValidateThrottlesLastUsedAtWrite(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db)
+	created, err := svc.Create(ctx, userID, "CLI", 0)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 首次校验：last_used_at 为空，写入一次。
+	if _, err := svc.Validate(ctx, created.Secret); err != nil {
+		t.Fatalf("Validate() first error = %v", err)
+	}
+	var firstUsed *time.Time
+	if err := db.QueryRow(ctx, `SELECT last_used_at FROM access_keys WHERE id = $1`, created.AccessKey.ID).Scan(&firstUsed); err != nil {
+		t.Fatalf("query last_used_at: %v", err)
+	}
+	if firstUsed == nil {
+		t.Fatal("first Validate() should set last_used_at")
+	}
+
+	// 60 秒内重复校验：key 依然有效，但 last_used_at 只保留首次写入值。
+	for i := 0; i < 3; i++ {
+		if _, err := svc.Validate(ctx, created.Secret); err != nil {
+			t.Fatalf("Validate() repeat #%d error = %v", i+1, err)
+		}
+	}
+	var throttledUsed *time.Time
+	if err := db.QueryRow(ctx, `SELECT last_used_at FROM access_keys WHERE id = $1`, created.AccessKey.ID).Scan(&throttledUsed); err != nil {
+		t.Fatalf("query last_used_at after repeats: %v", err)
+	}
+	if !throttledUsed.Equal(*firstUsed) {
+		t.Fatalf("last_used_at = %v, want unchanged %v within 60s throttle window", *throttledUsed, *firstUsed)
+	}
+
+	// 距上次写入超过 60 秒：允许再次写入。
+	if _, err := db.Exec(ctx, `UPDATE access_keys SET last_used_at = now() - interval '61 seconds' WHERE id = $1`, created.AccessKey.ID); err != nil {
+		t.Fatalf("backdate last_used_at: %v", err)
+	}
+	if _, err := svc.Validate(ctx, created.Secret); err != nil {
+		t.Fatalf("Validate() after throttle window error = %v", err)
+	}
+	var refreshedUsed *time.Time
+	if err := db.QueryRow(ctx, `SELECT last_used_at FROM access_keys WHERE id = $1`, created.AccessKey.ID).Scan(&refreshedUsed); err != nil {
+		t.Fatalf("query last_used_at after window: %v", err)
+	}
+	if !refreshedUsed.After(*firstUsed) {
+		t.Fatalf("last_used_at = %v, want refreshed after %v once throttle window elapsed", *refreshedUsed, *firstUsed)
 	}
 }
 

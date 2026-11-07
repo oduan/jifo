@@ -26,6 +26,12 @@ type Config struct {
 	AuthRateLimit     int
 	AuthRateWindow    time.Duration
 	AccessTokenTTL    time.Duration
+	// MediaUserQuotaBytes 是 per-user 媒体存储配额（字节）：nil = 未配置
+	// （用 media 包默认 5 GiB），非 nil 的 0 = 不限制。
+	MediaUserQuotaBytes *int64
+	// PoolMaxConns 是 pgxpool 最大连接数；0 表示未配置，由 db 包取默认值
+	// min(20, max(4, NumCPU))。
+	PoolMaxConns int32
 }
 
 func Load() (Config, error) {
@@ -76,6 +82,23 @@ func Load() (Config, error) {
 			return Config{}, errors.New("AUTH_RATE_LIMIT must be a positive integer")
 		}
 		cfg.AuthRateLimit = value
+	}
+	// MEDIA_USER_QUOTA_BYTES：per-user 媒体配额，单位字节；未配置时保持 nil
+	//（由 media 包取默认 5 GiB），显式配置 0 表示不限制。
+	if raw := strings.TrimSpace(os.Getenv("MEDIA_USER_QUOTA_BYTES")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 0 {
+			return Config{}, errors.New("MEDIA_USER_QUOTA_BYTES must be a non-negative integer")
+		}
+		cfg.MediaUserQuotaBytes = &value
+	}
+	// PGPOOL_MAX_CONNS：pgxpool 最大连接数；未配置时留 0，由 db 包取默认值。
+	if raw := strings.TrimSpace(os.Getenv("PGPOOL_MAX_CONNS")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			return Config{}, errors.New("PGPOOL_MAX_CONNS must be a positive integer")
+		}
+		cfg.PoolMaxConns = int32(value)
 	}
 	return cfg, nil
 }

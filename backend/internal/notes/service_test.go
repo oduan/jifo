@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func TestServiceListReturnsHasMoreWhenLimitHasExtraRow(t *testing.T) {
 
 	svc := NewService(db, tags.NewService(db))
 	for i := 0; i < 3; i++ {
-		_, err := svc.Create(ctx, CreateInput{
+		_, _, err := svc.Create(ctx, CreateInput{
 			UserID:    userID,
 			ClientID:  fmt.Sprintf("client-%d", i),
 			Content:   Content{Blocks: []Block{{Type: "paragraph", Text: fmt.Sprintf("note %d", i)}}},
@@ -66,7 +67,7 @@ func TestCreateCreatesTagsNoteTagsAndCounts(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	note, err := svc.Create(ctx, CreateInput{
+	note, _, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-create-1",
 		Content:   textContent("#思考 #电视剧/电视剧1"),
@@ -105,7 +106,7 @@ func TestUpdateRebuildsTagsRecountsAndBumpsVersion(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	created, err := svc.Create(ctx, CreateInput{
+	created, _, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-update-1",
 		Content:   textContent("#A"),
@@ -142,7 +143,7 @@ func TestMoveToTrashDeletesNoteTagsRecountsAndListsTrash(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	created, err := svc.Create(ctx, CreateInput{
+	created, _, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-trash-1",
 		Content:   textContent("#思考 #电视剧/电视剧1"),
@@ -202,7 +203,7 @@ func TestRestoreRebuildsNoteTagsRecountsAndBumpsVersion(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	created, err := svc.Create(ctx, CreateInput{
+	created, _, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-restore-1",
 		Content:   textContent("#恢复/子"),
@@ -265,7 +266,7 @@ func TestCreateAndUpdateMaintainMediaRefs(t *testing.T) {
 	secondMediaID := insertTestMedia(t, ctx, db, userID, "second")
 
 	svc := NewService(db, tags.NewService(db))
-	created, err := svc.Create(ctx, CreateInput{
+	created, _, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-media-1",
 		Content:   Content{Blocks: []Block{{Type: "paragraph", Text: "hello"}, {Type: "image", MediaID: &firstMediaID}, {Type: "image", MediaID: &firstMediaID}}},
@@ -298,7 +299,7 @@ func TestCreateRejectsCrossUserMediaRef(t *testing.T) {
 	otherMediaID := insertTestMedia(t, ctx, db, otherID, "other-media")
 
 	svc := NewService(db, tags.NewService(db))
-	_, err := svc.Create(ctx, CreateInput{
+	_, _, err := svc.Create(ctx, CreateInput{
 		UserID:    ownerID,
 		ClientID:  "note-cross-media-1",
 		Content:   Content{Blocks: []Block{{Type: "image", MediaID: &otherMediaID}}},
@@ -324,7 +325,7 @@ func TestMutationsRejectMissingOrCrossUserNotes(t *testing.T) {
 	otherID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	created, err := svc.Create(ctx, CreateInput{
+	created, _, err := svc.Create(ctx, CreateInput{
 		UserID:    ownerID,
 		ClientID:  "note-negative-1",
 		Content:   textContent("#私有"),
@@ -359,7 +360,7 @@ func TestPermanentlyDeleteExpiredTrashRemovesMediaRefsAndMarksUnreferencedMedia(
 	noteSvc := NewService(db, tagSvc)
 	mediaSvc := media.NewService(db, t.TempDir())
 
-	created, err := noteSvc.Create(ctx, CreateInput{
+	created, _, err := noteSvc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-permanent-1",
 		Content:   Content{Blocks: []Block{{Type: "image", MediaID: &mediaID}}},
@@ -430,19 +431,19 @@ func TestListSupportsPaginationSearchTagPathAndTrash(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	noteA, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-a", Content: textContent("#项目/后端 alpha"), PlainText: "#项目/后端 alpha"})
+	noteA, _, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-a", Content: textContent("#项目/后端 alpha"), PlainText: "#项目/后端 alpha"})
 	if err != nil {
 		t.Fatalf("Create(noteA) error = %v", err)
 	}
-	noteB, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-b", Content: textContent("#项目 beta"), PlainText: "#项目 beta"})
+	noteB, _, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-b", Content: textContent("#项目 beta"), PlainText: "#项目 beta"})
 	if err != nil {
 		t.Fatalf("Create(noteB) error = %v", err)
 	}
-	noteTrash, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-trash", Content: textContent("#项目/前端 trash me"), PlainText: "#项目/前端 trash me"})
+	noteTrash, _, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-trash", Content: textContent("#项目/前端 trash me"), PlainText: "#项目/前端 trash me"})
 	if err != nil {
 		t.Fatalf("Create(noteTrash) error = %v", err)
 	}
-	notePermanent, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-permanent", Content: textContent("#生活 permanent"), PlainText: "#生活 permanent"})
+	notePermanent, _, err := svc.Create(ctx, CreateInput{UserID: userID, ClientID: "list-permanent", Content: textContent("#生活 permanent"), PlainText: "#生活 permanent"})
 	if err != nil {
 		t.Fatalf("Create(notePermanent) error = %v", err)
 	}
@@ -507,7 +508,7 @@ func TestCreateDeduplicatesRepeatedTags(t *testing.T) {
 	userID := insertTestUser(t, ctx, db)
 
 	svc := NewService(db, tags.NewService(db))
-	created, err := svc.Create(ctx, CreateInput{
+	created, _, err := svc.Create(ctx, CreateInput{
 		UserID:    userID,
 		ClientID:  "note-dedup-1",
 		Content:   textContent("#重复 #重复 #重复/子 #重复/子"),
@@ -520,6 +521,138 @@ func TestCreateDeduplicatesRepeatedTags(t *testing.T) {
 	assertTagCount(t, ctx, db, userID, "重复", 1)
 	assertTagCount(t, ctx, db, userID, "重复/子", 1)
 	assertNoteTagCount(t, ctx, db, userID, created.ID, 2)
+}
+
+// 本测试必须在真实 PostgreSQL 上运行才有意义：它守护 Service.Create 的 savepoint
+// 模式——若去掉嵌套事务直接在外层 tx 上回读，回读会被服务端以 25P02
+// "current transaction is aborted" 拒绝，重试 Create 将返回原始 23505，
+// 下面的 retried Create 断言随即失败。TEST_DATABASE_URL 未设置时本测试跳过，
+// 该修复在无真库环境没有可执行覆盖。
+func TestCreateDuplicateClientIDReturnsExistingNoteWithoutNewRow(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db, tags.NewService(db))
+	input := CreateInput{
+		UserID:    userID,
+		ClientID:  "note-idempotent-1",
+		Content:   textContent("#幂等 首次内容"),
+		PlainText: "#幂等 首次内容",
+	}
+	created, duplicate, err := svc.Create(ctx, input)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if duplicate {
+		t.Fatal("first Create() duplicate = true, want false")
+	}
+
+	// 模拟客户端超时重试：同 clientId 携带不同内容重发，应回读既有行，
+	// 既不报 500 也不新建重复笔记；内容以库里已有笔记为准。
+	retried, duplicate, err := svc.Create(ctx, CreateInput{
+		UserID:    userID,
+		ClientID:  input.ClientID,
+		Content:   textContent("#幂等 重试内容"),
+		PlainText: "#幂等 重试内容",
+	})
+	if err != nil {
+		t.Fatalf("duplicate Create() error = %v", err)
+	}
+	if !duplicate {
+		t.Fatal("duplicate Create() duplicate = false, want true")
+	}
+	if retried.ID != created.ID {
+		t.Fatalf("retried note id = %s, want existing %s", retried.ID, created.ID)
+	}
+	if retried.PlainText != created.PlainText {
+		t.Fatalf("retried plain_text = %q, want existing %q", retried.PlainText, created.PlainText)
+	}
+	if retried.Version != created.Version {
+		t.Fatalf("retried version = %d, want %d", retried.Version, created.Version)
+	}
+
+	var count int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM notes WHERE user_id = $1 AND client_id = $2`, userID, input.ClientID).Scan(&count); err != nil {
+		t.Fatalf("count notes: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("notes count = %d, want 1 after duplicate create", count)
+	}
+}
+
+func TestUpdateBaseVersionGuardsAgainstConcurrentModification(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	svc := NewService(db, tags.NewService(db))
+	created, _, err := svc.Create(ctx, CreateInput{
+		UserID:    userID,
+		ClientID:  "note-optlock-1",
+		Content:   textContent("#乐观锁 v1"),
+		PlainText: "#乐观锁 v1",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 不带 BaseVersion 的更新维持原有行为：无条件覆盖，版本 +1。
+	first, err := svc.Update(ctx, UpdateInput{
+		UserID:    userID,
+		NoteID:    created.ID,
+		Content:   textContent("#乐观锁 v2"),
+		PlainText: "#乐观锁 v2",
+	})
+	if err != nil {
+		t.Fatalf("Update() without base version error = %v", err)
+	}
+	if first.Version != created.Version+1 {
+		t.Fatalf("first update version = %d, want %d", first.Version, created.Version+1)
+	}
+
+	// 带过期 BaseVersion：返回 ErrVersionConflict，且内容与版本都不被覆盖。
+	stale := created.Version
+	_, err = svc.Update(ctx, UpdateInput{
+		UserID:      userID,
+		NoteID:      created.ID,
+		Content:     textContent("#乐观锁 过期写入"),
+		PlainText:   "#乐观锁 过期写入",
+		BaseVersion: &stale,
+	})
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale Update() error = %v, want %v", err, ErrVersionConflict)
+	}
+
+	var plainText string
+	var version int64
+	if err := db.QueryRow(ctx, `SELECT plain_text, version FROM notes WHERE user_id = $1 AND id = $2`, userID, created.ID).Scan(&plainText, &version); err != nil {
+		t.Fatalf("query note after conflict: %v", err)
+	}
+	if plainText != "#乐观锁 v2" {
+		t.Fatalf("plain_text after conflict = %q, want unchanged %q", plainText, "#乐观锁 v2")
+	}
+	if version != first.Version {
+		t.Fatalf("version after conflict = %d, want unchanged %d", version, first.Version)
+	}
+
+	// 带当前 BaseVersion：校验通过，正常更新，版本再 +1。
+	current := first.Version
+	updated, err := svc.Update(ctx, UpdateInput{
+		UserID:      userID,
+		NoteID:      created.ID,
+		Content:     textContent("#乐观锁 v3"),
+		PlainText:   "#乐观锁 v3",
+		BaseVersion: &current,
+	})
+	if err != nil {
+		t.Fatalf("Update() with current base version error = %v", err)
+	}
+	if updated.Version != first.Version+1 {
+		t.Fatalf("second update version = %d, want %d", updated.Version, first.Version+1)
+	}
 }
 
 func assertTagCount(t *testing.T, ctx context.Context, db *pgxpool.Pool, userID uuid.UUID, path string, want int) {

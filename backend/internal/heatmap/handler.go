@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,11 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	timezone := r.URL.Query().Get("timezone")
 	if timezone == "" {
+		timezone = "UTC"
+	}
+	// Go 的 "Local" 是运行时概念，PostgreSQL 的 AT TIME ZONE 'Local' 无法识别
+	// （会导致 500），统一把它（含 UTC 的大小写变体）映射为标准的 "UTC"。
+	if strings.EqualFold(timezone, "local") || strings.EqualFold(timezone, "utc") {
 		timezone = "UTC"
 	}
 	location, err := time.LoadLocation(timezone)

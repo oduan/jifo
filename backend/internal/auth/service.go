@@ -311,9 +311,10 @@ func (s *Service) ValidateAccessToken(ctx context.Context, tokenString string) (
 	var revokedAt *time.Time
 	err = s.db.QueryRow(ctx, `
 		SELECT jwt_version, revoked_at
-		FROM user_sessions
-		WHERE id = $1
-		  AND user_id = $2
+		FROM user_sessions s
+		WHERE s.id = $1
+		  AND s.user_id = $2
+		  AND s.expires_at > now()
 	`, claims.SessionID, claims.UserID).Scan(&dbJWTVersion, &revokedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

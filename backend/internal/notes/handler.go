@@ -22,7 +22,7 @@ const (
 )
 
 type HandlerService interface {
-	Create(ctx context.Context, input CreateInput) (Note, error)
+	Create(ctx context.Context, input CreateInput) (note Note, duplicate bool, err error)
 	List(ctx context.Context, filter ListFilter) (ListResult, error)
 	CountActive(ctx context.Context, userID uuid.UUID) (int64, error)
 	Update(ctx context.Context, input UpdateInput) (Note, error)
@@ -47,6 +47,9 @@ type createNoteRequest struct {
 type updateNoteRequest struct {
 	Content   Content `json:"content"`
 	PlainText string  `json:"plainText"`
+	// BaseVersion 可选乐观锁：提供时与当前版本不符返回 409 version_conflict，
+	// 不提供则维持原有覆盖行为（兼容现有 web/CLI 客户端）。
+	BaseVersion *int64 `json:"baseVersion"`
 }
 
 type noteDTO struct {
@@ -89,13 +92,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.svc.Create(r.Context(), CreateInput{UserID: userID, ClientID: req.ClientID, Content: req.Content, PlainText: req.PlainText})
+	note, duplicate, err := h.svc.Create(r.Context(), CreateInput{UserID: userID, ClientID: req.ClientID, Content: req.Content, PlainText: req.PlainText})
 	if err != nil {
 		if errors.Is(err, ErrMediaAssetUnavailable) {
 			httpx.WriteError(w, r, http.StatusBadRequest, "media_unavailable", "referenced media is unavailable")
 			return
 		}
 		httpx.WriteError(w, r, http.StatusInternalServerError, "internal_error", "create note failed")
+		return
+	}
+	if duplicate {
+		// 幂等重试命中：同 (user_id, client_id) 的笔记已存在，返回 200 + status=duplicate
+		// + 既有笔记。选 200 + 显式 status 字段而非仅靠 201/200 状态码区分，是为了与
+		// sync 路径 PushResult 的 status="duplicate" 语义对齐，客户端不依赖状态码也能
+		// 识别重试命中，并可直接用返回的既有笔记（id/version）继续后续操作。
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "item": toNoteDTO(note)})
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"item": toNoteDTO(note)})
@@ -197,8 +208,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
-	note, err := h.svc.Update(r.Context(), UpdateInput{UserID: userID, NoteID: noteID, Content: req.Content, PlainText: req.PlainText})
+	note, err := h.svc.Update(r.Context(), UpdateInput{UserID: userID, NoteID: noteID, Content: req.Content, PlainText: req.PlainText, BaseVersion: req.BaseVersion})
 	if err != nil {
+		if errors.Is(err, ErrVersionConflict) {
+			// 客户端携带的 baseVersion 已过期：按 REST 惯例返回 409，让客户端
+			// 重新拉取合并后重试，而不是静默覆盖并发修改。
+			httpx.WriteError(w, r, http.StatusConflict, "version_conflict", "note was modified concurrently; reload the note and retry with its current version")
+			return
+		}
 		writeMutationError(w, r, err, "update note failed")
 		return
 	}

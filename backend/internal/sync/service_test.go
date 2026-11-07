@@ -198,7 +198,7 @@ func TestPushUpdateVersionConflictCreatesConflictCopy(t *testing.T) {
 	noteSvc := notes.NewService(db, tags.NewService(db))
 	svc := NewService(db, noteSvc)
 
-	original, err := noteSvc.Create(ctx, notes.CreateInput{
+	original, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "origin-note",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "#原始 v1"}}},
@@ -331,7 +331,7 @@ func TestConcurrentUpdatesWithSameBaseVersionProduceConflictCopy(t *testing.T) {
 
 	noteSvc := notes.NewService(db, tags.NewService(db))
 	svc := NewService(db, noteSvc)
-	created, err := noteSvc.Create(ctx, notes.CreateInput{
+	created, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "concurrent-update-origin",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}},
@@ -405,7 +405,7 @@ func TestPushDeleteVersionConflictIsIgnored(t *testing.T) {
 	noteSvc := notes.NewService(db, tags.NewService(db))
 	svc := NewService(db, noteSvc)
 
-	created, err := noteSvc.Create(ctx, notes.CreateInput{
+	created, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "delete-conflict-origin",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}},
@@ -467,7 +467,7 @@ func TestPushDeleteAlreadyTrashedIsIdempotent(t *testing.T) {
 	noteSvc := notes.NewService(db, tags.NewService(db))
 	svc := NewService(db, noteSvc)
 
-	created, err := noteSvc.Create(ctx, notes.CreateInput{
+	created, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "delete-idempotent-origin",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}},
@@ -516,7 +516,7 @@ func TestPushRestoreVersionConflictCreatesConflictCopy(t *testing.T) {
 
 	noteSvc := notes.NewService(db, tags.NewService(db))
 	svc := NewService(db, noteSvc)
-	created, err := noteSvc.Create(ctx, notes.CreateInput{UserID: userID, ClientID: "restore-conflict-origin", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}}, PlainText: "v1"})
+	created, _, err := noteSvc.Create(ctx, notes.CreateInput{UserID: userID, ClientID: "restore-conflict-origin", Content: notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "v1"}}}, PlainText: "v1"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -580,7 +580,7 @@ func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 	noteSvc := notes.NewService(db, tags.NewService(db))
 	svc := NewService(db, noteSvc)
 
-	active, err := noteSvc.Create(ctx, notes.CreateInput{
+	active, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "pull-active",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "active"}}},
@@ -590,7 +590,7 @@ func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 		t.Fatalf("create active note: %v", err)
 	}
 
-	trash, err := noteSvc.Create(ctx, notes.CreateInput{
+	trash, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "pull-trash",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "trash"}}},
@@ -603,7 +603,7 @@ func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 		t.Fatalf("move trash note to trash: %v", err)
 	}
 
-	purged, err := noteSvc.Create(ctx, notes.CreateInput{
+	purged, _, err := noteSvc.Create(ctx, notes.CreateInput{
 		UserID:    userID,
 		ClientID:  "pull-purged",
 		Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "purged"}}},
@@ -648,6 +648,64 @@ func TestPullReturnsNormalAndTombstoneChanges(t *testing.T) {
 	}
 	if got := seen[purged.ID]; got != "permanent" {
 		t.Fatalf("purged note tombstone = %q, want %q", got, "permanent")
+	}
+}
+
+func TestPullResumesFromCursorWithoutSkipsOrDuplicates(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenTestDB(t)
+	resetSchemaAndMigrate(t, ctx, db)
+	userID := insertTestUser(t, ctx, db)
+
+	noteSvc := notes.NewService(db, tags.NewService(db))
+	svc := NewService(db, noteSvc)
+
+	// 三条笔记，直接改 updated_at 保证排序稳定（1<2<3）。
+	ids := make([]uuid.UUID, 0, 3)
+	for i := 1; i <= 3; i++ {
+		note, _, err := noteSvc.Create(ctx, notes.CreateInput{
+			UserID:    userID,
+			ClientID:  "cursor-" + string(rune('0'+i)),
+			Content:   notes.Content{Blocks: []notes.Block{{Type: "paragraph", Text: "note"}}},
+			PlainText: "note",
+		})
+		if err != nil {
+			t.Fatalf("create note %d: %v", i, err)
+		}
+		if _, err := db.Exec(ctx, `UPDATE notes SET updated_at = make_timestamptz(2026, 6, 1, 0, 0, $1) WHERE id = $2`, float64(i), note.ID); err != nil {
+			t.Fatalf("backdate note %d: %v", i, err)
+		}
+		ids = append(ids, note.ID)
+	}
+
+	// 第一页取 1 条，游标续传应取到剩下 2 条，不重复不遗漏。
+	first, err := svc.Pull(ctx, userID, Cursor{}, 1)
+	if err != nil {
+		t.Fatalf("first Pull() error = %v", err)
+	}
+	if len(first.Items) != 1 || first.NextCursor == nil {
+		t.Fatalf("first page = %d items, nextCursor = %v; want 1 item + cursor", len(first.Items), first.NextCursor)
+	}
+
+	rest, err := svc.Pull(ctx, userID, *first.NextCursor, 10)
+	if err != nil {
+		t.Fatalf("second Pull() error = %v", err)
+	}
+	if len(rest.Items) != 2 {
+		t.Fatalf("second page = %d items, want 2", len(rest.Items))
+	}
+
+	got := map[uuid.UUID]bool{}
+	for _, item := range append(append([]PullItem{}, first.Items...), rest.Items...) {
+		if got[item.NoteID] {
+			t.Fatalf("note %s returned twice", item.NoteID)
+		}
+		got[item.NoteID] = true
+	}
+	for _, id := range ids {
+		if !got[id] {
+			t.Fatalf("note %s missing across pages", id)
+		}
 	}
 }
 

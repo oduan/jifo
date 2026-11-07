@@ -18,18 +18,24 @@ import (
 
 const DefaultMaxSizeBytes int64 = 10 * 1024 * 1024
 
+// DefaultUserQuotaBytes 是 per-user 媒体存储配额的默认值（5 GiB），
+// 可用环境变量 MEDIA_USER_QUOTA_BYTES 覆盖（0 表示不限制）。
+const DefaultUserQuotaBytes int64 = 5 * 1024 * 1024 * 1024
+
 var (
 	ErrInvalidMIMEType  = errors.New("invalid media mime type")
 	ErrInvalidSize      = errors.New("invalid media size")
 	ErrFileTooLarge     = errors.New("media file too large")
 	ErrChecksumMismatch = errors.New("media checksum mismatch")
 	ErrAssetNotFound    = errors.New("media asset not found")
+	ErrQuotaExceeded    = errors.New("media user quota exceeded")
 )
 
 type Service struct {
-	db           *pgxpool.Pool
-	mediaRoot    string
-	maxSizeBytes int64
+	db             *pgxpool.Pool
+	mediaRoot      string
+	maxSizeBytes   int64
+	userQuotaBytes int64
 }
 
 type Asset struct {
@@ -56,7 +62,12 @@ type UploadInput struct {
 }
 
 func NewService(db *pgxpool.Pool, mediaRoot string) *Service {
-	return &Service{db: db, mediaRoot: mediaRoot, maxSizeBytes: DefaultMaxSizeBytes}
+	return &Service{db: db, mediaRoot: mediaRoot, maxSizeBytes: DefaultMaxSizeBytes, userQuotaBytes: DefaultUserQuotaBytes}
+}
+
+// SetUserQuotaBytes 配置 per-user 媒体存储配额；0 或负数表示不限制。
+func (s *Service) SetUserQuotaBytes(quota int64) {
+	s.userQuotaBytes = quota
 }
 
 func (s *Service) ValidateUpload(mimeType string, size int64) error {
@@ -126,6 +137,19 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (Asset, error) 
 		return Asset{}, err
 	}
 
+	// per-user 配额：在写任何文件之前先统计当前占用，超限直接拒绝，
+	// 避免先落盘再回滚产生的临时文件噪音。db 为 nil 的构造只出现在
+	// 不触库的单测里，此时跳过配额检查。
+	if s.userQuotaBytes > 0 && s.db != nil {
+		used, err := s.userUsedBytes(ctx, input.UserID)
+		if err != nil {
+			return Asset{}, err
+		}
+		if used+input.SizeBytes > s.userQuotaBytes {
+			return Asset{}, ErrQuotaExceeded
+		}
+	}
+
 	id := uuid.New()
 	storageKey := filepath.ToSlash(filepath.Join(input.UserID.String(), id.String()))
 	finalPath := filepath.Join(s.mediaRoot, input.UserID.String(), id.String())
@@ -179,6 +203,21 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (Asset, error) 
 		return Asset{}, err
 	}
 	return asset, nil
+}
+
+// userUsedBytes 统计用户已占用的媒体字节数。刻意不过滤 deleted_at /
+// purged_at（"含未删除资产"）：进入宽限期的资产文件仍在磁盘上，
+// 已物理清理（purged_at 非空）的行按保守口径也计入，直到清理流程收尾。
+func (s *Service) userUsedBytes(ctx context.Context, userID uuid.UUID) (int64, error) {
+	var used int64
+	if err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(size_bytes), 0)
+		FROM media_assets
+		WHERE user_id = $1
+	`, userID).Scan(&used); err != nil {
+		return 0, err
+	}
+	return used, nil
 }
 
 func (s *Service) MarkUnreferencedAssetsForDeletion(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {

@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -16,7 +17,8 @@ import (
 )
 
 type fakeUploadService struct {
-	input UploadInput
+	input     UploadInput
+	uploadErr error
 }
 
 func (f *fakeUploadService) List(ctx context.Context, userID uuid.UUID) ([]Asset, error) {
@@ -33,6 +35,9 @@ func (f *fakeUploadService) Open(asset Asset) (File, error) {
 
 func (f *fakeUploadService) Upload(ctx context.Context, input UploadInput) (Asset, error) {
 	f.input = input
+	if f.uploadErr != nil {
+		return Asset{}, f.uploadErr
+	}
 	// Drain the reader so the handler's MultiReader path is exercised.
 	if _, err := io.Copy(io.Discard, input.Reader); err != nil {
 		return Asset{}, err
@@ -116,5 +121,29 @@ func TestUploadSniffsMIMETypeWhenDeclarationMissing(t *testing.T) {
 	}
 	if svc.input.MIMEType != "image/png" {
 		t.Fatalf("stored MIMEType = %q, want image/png", svc.input.MIMEType)
+	}
+}
+
+func TestUploadMapsQuotaExceededTo413(t *testing.T) {
+	svc := &fakeUploadService{uploadErr: ErrQuotaExceeded}
+	h := NewHandler(svc)
+	rr := httptest.NewRecorder()
+	req := multipartUploadRequest(t, "image/png", pngBytes)
+
+	serveAuthenticatedUpload(h, rr, req, uuid.New())
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d body=%s, want 413", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Error.Code != "quota_exceeded" {
+		t.Fatalf("error code = %q, want quota_exceeded", payload.Error.Code)
 	}
 }

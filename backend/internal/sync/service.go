@@ -329,7 +329,10 @@ func (s *Service) Pull(ctx context.Context, userID uuid.UUID, cursor Cursor, lim
 	args := []any{userID}
 
 	if !cursor.UpdatedAt.IsZero() {
-		baseSQL += ` AND (updated_at, id) > ($2, $3)`
+		// 游标比较用全行形式并把 user_id 等值常量放进行值里：命中
+		// idx_notes_user_updated_id 的 (user_id, updated_at, id) 复合前缀；
+		// 语义与只比较 (updated_at, id) 等价，因为 user_id 已被 $1 的等值条件固定。
+		baseSQL += ` AND (user_id, updated_at, id) > ($1, $2, $3)`
 		args = append(args, cursor.UpdatedAt, cursor.ID)
 		baseSQL += ` ORDER BY updated_at ASC, id ASC LIMIT $4`
 		args = append(args, limit)

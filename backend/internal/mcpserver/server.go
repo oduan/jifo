@@ -22,7 +22,7 @@ const (
 )
 
 type NotesService interface {
-	Create(context.Context, notes.CreateInput) (notes.Note, error)
+	Create(context.Context, notes.CreateInput) (notes.Note, bool, error)
 	List(context.Context, notes.ListFilter) (notes.ListResult, error)
 	Update(context.Context, notes.UpdateInput) (notes.Note, error)
 }
@@ -83,7 +83,9 @@ func registerTools(server *mcp.Server, noteService NotesService, tagService Tags
 		if clientID == "" {
 			clientID = "mcp-" + uuid.NewString()
 		}
-		note, err := noteService.Create(ctx, notes.CreateInput{UserID: userID, ClientID: clientID, Content: contentForText(input.PlainText), PlainText: input.PlainText})
+		// 同 client_id 幂等重试命中（duplicate=true）时 Service.Create 返回既有笔记，
+		// 这里照常返回成功结果，与 REST 路径的幂等语义一致。
+		note, _, err := noteService.Create(ctx, notes.CreateInput{UserID: userID, ClientID: clientID, Content: contentForText(input.PlainText), PlainText: input.PlainText})
 		if err != nil {
 			return nil, noteMutationOutput{}, fmt.Errorf("create note: %w", err)
 		}
@@ -101,10 +103,13 @@ func registerTools(server *mcp.Server, noteService NotesService, tagService Tags
 		if err != nil {
 			return nil, noteMutationOutput{}, err
 		}
-		note, err := noteService.Update(ctx, notes.UpdateInput{UserID: userID, NoteID: noteID, Content: contentForText(input.PlainText), PlainText: input.PlainText})
+		note, err := noteService.Update(ctx, notes.UpdateInput{UserID: userID, NoteID: noteID, Content: contentForText(input.PlainText), PlainText: input.PlainText, BaseVersion: input.Version})
 		if err != nil {
 			if errors.Is(err, notes.ErrNoteNotFound) {
 				return nil, noteMutationOutput{}, errors.New("note not found")
+			}
+			if errors.Is(err, notes.ErrVersionConflict) {
+				return nil, noteMutationOutput{}, errors.New("version conflict: the note was modified concurrently; re-read the note and retry with its current version")
 			}
 			return nil, noteMutationOutput{}, fmt.Errorf("update note: %w", err)
 		}
@@ -272,6 +277,7 @@ type createNoteInput struct {
 type updateNoteInput struct {
 	NoteID    string `json:"note_id" jsonschema:"UUID of the note to update"`
 	PlainText string `json:"plain_text" jsonschema:"complete replacement plain text, including any #tags"`
+	Version   *int64 `json:"version,omitempty" jsonschema:"optional expected current version for optimistic concurrency; when provided and stale the update fails with a version conflict instead of overwriting"`
 }
 
 type searchTagsInput struct {
