@@ -120,13 +120,14 @@ func TestUploadAllowsUnlimitedQuotaWhenDisabled(t *testing.T) {
 	svc := NewService(db, t.TempDir())
 
 	body := []byte("quota disabled")
-	// 对照：配额 50 时第二次上传应被拒。
-	svc.SetUserQuotaBytes(50)
+	// 对照：配额 20 时第二次上传(累计 14+14=28 字节)应被拒;首次 14 字节放行。
+	// (原写作 50,14+14=28 并不超过 50,该分支在真实库上永远走不到拒绝路径。)
+	svc.SetUserQuotaBytes(20)
 	if _, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)}); err != nil {
 		t.Fatalf("seed upload: %v", err)
 	}
 	if _, err := svc.Upload(ctx, UploadInput{UserID: userID, Kind: "image", MIMEType: "image/png", SizeBytes: int64(len(body)), Reader: bytes.NewReader(body)}); err != ErrQuotaExceeded {
-		t.Fatalf("second upload under quota 50 error = %v, want %v", err, ErrQuotaExceeded)
+		t.Fatalf("second upload under quota 20 error = %v, want %v", err, ErrQuotaExceeded)
 	}
 	// 0 = 不限制：同样的上传立刻放行，多次累计也放行。
 	svc.SetUserQuotaBytes(0)
